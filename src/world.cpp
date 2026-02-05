@@ -110,7 +110,7 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
   outIndices.clear();
 
   const int dims[3] = {worldWidth, kChunkHeight, worldDepth};
-  std::vector<int> mask(static_cast<size_t>(dims[0] * dims[1]));
+  std::vector<int> maskValues(static_cast<size_t>(dims[0] * dims[1]));
 
   auto tileFor = [](uint8_t type, int axis, bool positive) {
     // Tile indices in atlas: 0=grass top, 1=grass side, 2=dirt, 3=stone.
@@ -164,11 +164,11 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           uint8_t b = (x[d] < dims[d] - 1) ? getBlock(bx, by, bz) : kAir;
 
           if (a != kAir && b == kAir) {
-            mask[n] = a;
+            maskValues[n] = a;
           } else if (a == kAir && b != kAir) {
-            mask[n] = -static_cast<int>(b);
+            maskValues[n] = -static_cast<int>(b);
           } else {
-            mask[n] = 0;
+            maskValues[n] = 0;
           }
           ++n;
         }
@@ -179,7 +179,7 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
       n = 0;
       for (int j = 0; j < dimVCount; ++j) {
         for (int i = 0; i < dimUCount;) {
-          int c = mask[n];
+          int c = maskValues[n];
           if (c == 0) {
             ++i;
             ++n;
@@ -187,7 +187,7 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           }
 
           int w = 1;
-          while (i + w < dimUCount && mask[n + w] == c) {
+          while (i + w < dimUCount && maskValues[n + w] == c) {
             ++w;
           }
 
@@ -195,7 +195,7 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           bool done = false;
           while (j + h < dimVCount && !done) {
             for (int k = 0; k < w; ++k) {
-              if (mask[n + k + h * dimUCount] != c) {
+              if (maskValues[n + k + h * dimUCount] != c) {
                 done = true;
                 break;
               }
@@ -270,7 +270,7 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
           for (int y = 0; y < h; ++y) {
             for (int x2 = 0; x2 < w; ++x2) {
-              mask[n + x2 + y * dimUCount] = 0;
+              maskValues[n + x2 + y * dimUCount] = 0;
             }
           }
 
