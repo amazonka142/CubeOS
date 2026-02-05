@@ -2,14 +2,24 @@
 
 #include <GLFW/glfw3.h>
 
+#include <array>
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <set>
 #include <string>
 #include <stdexcept>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -71,6 +81,40 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
   return VK_FALSE;
 }
 
+std::string getExecutableDir() {
+#ifdef _WIN32
+  char buffer[MAX_PATH];
+  DWORD length = GetModuleFileNameA(nullptr, buffer, MAX_PATH);
+  if (length == 0) {
+    return ".";
+  }
+  std::string path(buffer, length);
+  size_t pos = path.find_last_of("\\/");
+  if (pos == std::string::npos) {
+    return ".";
+  }
+  return path.substr(0, pos);
+#else
+  char buffer[4096];
+  ssize_t length = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+  if (length <= 0) {
+    return ".";
+  }
+  buffer[length] = '\0';
+  std::string path(buffer);
+  size_t pos = path.find_last_of('/');
+  if (pos == std::string::npos) {
+    return ".";
+  }
+  return path.substr(0, pos);
+#endif
+}
+
+std::string buildShaderPath(const char* filename) {
+  std::string base = getExecutableDir();
+  return base + "/shaders/" + filename;
+}
+
 } // namespace
 
 void VulkanContext::init(GLFWwindow* windowIn, bool* framebufferResizedFlagIn) {
@@ -85,6 +129,7 @@ void VulkanContext::init(GLFWwindow* windowIn, bool* framebufferResizedFlagIn) {
   createSwapchain();
   createImageViews();
   createRenderPass();
+  createGraphicsPipeline();
   createFramebuffers();
   createCommandPool();
   createCommandBuffers();
@@ -440,6 +485,142 @@ void VulkanContext::createRenderPass() {
           "Failed to create render pass.");
 }
 
+std::vector<char> VulkanContext::readFile(const std::string& path) {
+  std::ifstream file(path, std::ios::ate | std::ios::binary);
+  if (!file.is_open()) {
+    throw std::runtime_error("Failed to open shader file: " + path);
+  }
+
+  size_t fileSize = static_cast<size_t>(file.tellg());
+  std::vector<char> buffer(fileSize);
+  file.seekg(0);
+  file.read(buffer.data(), static_cast<std::streamsize>(fileSize));
+  file.close();
+
+  return buffer;
+}
+
+VkShaderModule VulkanContext::createShaderModule(const std::vector<char>& code) const {
+  VkShaderModuleCreateInfo createInfo{};
+  createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  createInfo.codeSize = code.size();
+  createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+  VkShaderModule shaderModule = VK_NULL_HANDLE;
+  checkVk(vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule),
+          "Failed to create shader module.");
+  return shaderModule;
+}
+
+void VulkanContext::createGraphicsPipeline() {
+  auto vertShaderCode = readFile(buildShaderPath("triangle.vert.spv"));
+  auto fragShaderCode = readFile(buildShaderPath("triangle.frag.spv"));
+
+  VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+  VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+  VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+  vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+  vertShaderStageInfo.module = vertShaderModule;
+  vertShaderStageInfo.pName = "main";
+
+  VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+  fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  fragShaderStageInfo.module = fragShaderModule;
+  fragShaderStageInfo.pName = "main";
+
+  VkPipelineShaderStageCreateInfo shaderStages[] = {
+    vertShaderStageInfo,
+    fragShaderStageInfo
+  };
+
+  VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+  vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  vertexInputInfo.vertexBindingDescriptionCount = 0;
+  vertexInputInfo.vertexAttributeDescriptionCount = 0;
+
+  VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+  inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+  VkPipelineViewportStateCreateInfo viewportState{};
+  viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  viewportState.viewportCount = 1;
+  viewportState.scissorCount = 1;
+
+  VkPipelineRasterizationStateCreateInfo rasterizer{};
+  rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rasterizer.depthClampEnable = VK_FALSE;
+  rasterizer.rasterizerDiscardEnable = VK_FALSE;
+  rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+  rasterizer.lineWidth = 1.0f;
+  rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+  rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+  rasterizer.depthBiasEnable = VK_FALSE;
+
+  VkPipelineMultisampleStateCreateInfo multisampling{};
+  multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  multisampling.sampleShadingEnable = VK_FALSE;
+  multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+  VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+  colorBlendAttachment.colorWriteMask =
+    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+    VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  colorBlendAttachment.blendEnable = VK_FALSE;
+
+  VkPipelineColorBlendStateCreateInfo colorBlending{};
+  colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  colorBlending.logicOpEnable = VK_FALSE;
+  colorBlending.attachmentCount = 1;
+  colorBlending.pAttachments = &colorBlendAttachment;
+
+  std::array<VkDynamicState, 2> dynamicStates = {
+    VK_DYNAMIC_STATE_VIEWPORT,
+    VK_DYNAMIC_STATE_SCISSOR
+  };
+
+  VkPipelineDynamicStateCreateInfo dynamicState{};
+  dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+  dynamicState.pDynamicStates = dynamicStates.data();
+
+  VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+  pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pipelineLayoutInfo.setLayoutCount = 0;
+  pipelineLayoutInfo.pushConstantRangeCount = 0;
+
+  checkVk(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout),
+          "Failed to create pipeline layout.");
+
+  VkGraphicsPipelineCreateInfo pipelineInfo{};
+  pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  pipelineInfo.stageCount = 2;
+  pipelineInfo.pStages = shaderStages;
+  pipelineInfo.pVertexInputState = &vertexInputInfo;
+  pipelineInfo.pInputAssemblyState = &inputAssembly;
+  pipelineInfo.pViewportState = &viewportState;
+  pipelineInfo.pRasterizationState = &rasterizer;
+  pipelineInfo.pMultisampleState = &multisampling;
+  pipelineInfo.pDepthStencilState = nullptr;
+  pipelineInfo.pColorBlendState = &colorBlending;
+  pipelineInfo.pDynamicState = &dynamicState;
+  pipelineInfo.layout = pipelineLayout;
+  pipelineInfo.renderPass = renderPass;
+  pipelineInfo.subpass = 0;
+  pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
+
+  checkVk(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
+                                    nullptr, &graphicsPipeline),
+          "Failed to create graphics pipeline.");
+
+  vkDestroyShaderModule(device, fragShaderModule, nullptr);
+  vkDestroyShaderModule(device, vertShaderModule, nullptr);
+}
+
 void VulkanContext::createFramebuffers() {
   swapchainFramebuffers.resize(swapchainImageViews.size());
 
@@ -505,6 +686,23 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
   renderPassInfo.pClearValues = &clearColor;
 
   vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+  vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+  VkViewport viewport{};
+  viewport.x = 0.0f;
+  viewport.y = 0.0f;
+  viewport.width = static_cast<float>(swapchainExtent.width);
+  viewport.height = static_cast<float>(swapchainExtent.height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+  VkRect2D scissor{};
+  scissor.offset = {0, 0};
+  scissor.extent = swapchainExtent;
+  vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+  vkCmdDraw(commandBuffer, 3, 1, 0, 0);
   vkCmdEndRenderPass(commandBuffer);
 
   checkVk(vkEndCommandBuffer(commandBuffer),
@@ -547,6 +745,16 @@ void VulkanContext::cleanupSwapchain() {
     commandBuffers.clear();
   }
 
+  if (graphicsPipeline != VK_NULL_HANDLE) {
+    vkDestroyPipeline(device, graphicsPipeline, nullptr);
+    graphicsPipeline = VK_NULL_HANDLE;
+  }
+
+  if (pipelineLayout != VK_NULL_HANDLE) {
+    vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+    pipelineLayout = VK_NULL_HANDLE;
+  }
+
   if (renderPass != VK_NULL_HANDLE) {
     vkDestroyRenderPass(device, renderPass, nullptr);
     renderPass = VK_NULL_HANDLE;
@@ -577,6 +785,7 @@ void VulkanContext::recreateSwapchain() {
   createSwapchain();
   createImageViews();
   createRenderPass();
+  createGraphicsPipeline();
   createFramebuffers();
   createCommandBuffers();
   imagesInFlight.assign(swapchainImages.size(), VK_NULL_HANDLE);
@@ -633,13 +842,14 @@ void VulkanContext::populateDebugMessengerCreateInfo(
   createInfo.pfnUserCallback = debugCallback;
 }
 
-VulkanContext::QueueFamilyIndices VulkanContext::findQueueFamilies(VkPhysicalDevice device) const {
+VulkanContext::QueueFamilyIndices VulkanContext::findQueueFamilies(
+  VkPhysicalDevice physicalDevice) const {
   QueueFamilyIndices indices;
 
   uint32_t queueFamilyCount = 0;
-  vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+  vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
   std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-  vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+  vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilies.data());
 
   int index = 0;
   for (const auto& queueFamily : queueFamilies) {
@@ -648,7 +858,7 @@ VulkanContext::QueueFamilyIndices VulkanContext::findQueueFamilies(VkPhysicalDev
     }
 
     VkBool32 presentSupport = VK_FALSE;
-    vkGetPhysicalDeviceSurfaceSupportKHR(device,
+    vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice,
                                          static_cast<uint32_t>(index),
                                          surface,
                                          &presentSupport);
@@ -667,46 +877,46 @@ VulkanContext::QueueFamilyIndices VulkanContext::findQueueFamilies(VkPhysicalDev
 }
 
 VulkanContext::SwapchainSupportDetails VulkanContext::querySwapchainSupport(
-  VkPhysicalDevice device) const {
+  VkPhysicalDevice physicalDevice) const {
   SwapchainSupportDetails details;
 
-  vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
+  vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &details.capabilities);
 
   uint32_t formatCount = 0;
-  vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, nullptr);
+  vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, nullptr);
   if (formatCount != 0) {
     details.formats.resize(formatCount);
-    vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, details.formats.data());
+    vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, details.formats.data());
   }
 
   uint32_t presentModeCount = 0;
-  vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, nullptr);
+  vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
   if (presentModeCount != 0) {
     details.presentModes.resize(presentModeCount);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount,
+    vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount,
                                               details.presentModes.data());
   }
 
   return details;
 }
 
-bool VulkanContext::isDeviceSuitable(VkPhysicalDevice device) const {
-  QueueFamilyIndices indices = findQueueFamilies(device);
-  bool extensionsSupported = checkDeviceExtensionSupport(device);
+bool VulkanContext::isDeviceSuitable(VkPhysicalDevice physicalDevice) const {
+  QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+  bool extensionsSupported = checkDeviceExtensionSupport(physicalDevice);
   bool swapchainAdequate = false;
   if (extensionsSupported) {
-    SwapchainSupportDetails support = querySwapchainSupport(device);
+    SwapchainSupportDetails support = querySwapchainSupport(physicalDevice);
     swapchainAdequate = !support.formats.empty() && !support.presentModes.empty();
   }
 
   return indices.isComplete() && extensionsSupported && swapchainAdequate;
 }
 
-bool VulkanContext::checkDeviceExtensionSupport(VkPhysicalDevice device) const {
+bool VulkanContext::checkDeviceExtensionSupport(VkPhysicalDevice physicalDevice) const {
   uint32_t extensionCount = 0;
-  vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, nullptr);
   std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-  vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount,
+  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount,
                                        availableExtensions.data());
 
   std::set<std::string> requiredExtensions(kDeviceExtensions.begin(),

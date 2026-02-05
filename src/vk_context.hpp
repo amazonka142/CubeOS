@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <string>
 #include <vector>
 
 struct GLFWwindow;
@@ -39,6 +40,7 @@ private:
   void createSwapchain();
   void createImageViews();
   void createRenderPass();
+  void createGraphicsPipeline();
   void createFramebuffers();
   void createCommandPool();
   void createCommandBuffers();
@@ -52,13 +54,16 @@ private:
   std::vector<const char*> getRequiredExtensions() const;
   void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo);
 
-  QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
-  SwapchainSupportDetails querySwapchainSupport(VkPhysicalDevice device) const;
-  bool isDeviceSuitable(VkPhysicalDevice device) const;
-  bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
+  QueueFamilyIndices findQueueFamilies(VkPhysicalDevice physicalDevice) const;
+  SwapchainSupportDetails querySwapchainSupport(VkPhysicalDevice physicalDevice) const;
+  bool isDeviceSuitable(VkPhysicalDevice physicalDevice) const;
+  bool checkDeviceExtensionSupport(VkPhysicalDevice physicalDevice) const;
   VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) const;
   VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& modes) const;
   VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
+
+  VkShaderModule createShaderModule(const std::vector<char>& code) const;
+  static std::vector<char> readFile(const std::string& path);
 
   VkInstance instance = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
@@ -75,6 +80,8 @@ private:
   std::vector<VkImageView> swapchainImageViews;
 
   VkRenderPass renderPass = VK_NULL_HANDLE;
+  VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+  VkPipeline graphicsPipeline = VK_NULL_HANDLE;
   std::vector<VkFramebuffer> swapchainFramebuffers;
 
   VkCommandPool commandPool = VK_NULL_HANDLE;

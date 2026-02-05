@@ -23,6 +23,49 @@ FetchContent_MakeAvailable(glfw)
 
 find_package(Vulkan REQUIRED)
 
+set(SHADER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
+set(SHADER_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+
+if (DEFINED Vulkan_GLSLC_EXECUTABLE)
+  set(GLSLC "${Vulkan_GLSLC_EXECUTABLE}")
+elseif(DEFINED ENV{VULKAN_SDK})
+  if (WIN32)
+    set(GLSLC "$ENV{VULKAN_SDK}/Bin/glslc.exe")
+  else()
+    set(GLSLC "$ENV{VULKAN_SDK}/bin/glslc")
+  endif()
+endif()
+
+if (NOT GLSLC)
+  message(FATAL_ERROR "glslc not found. Install Vulkan SDK and ensure VULKAN_SDK is set.")
+endif()
+
+file(MAKE_DIRECTORY ${SHADER_BINARY_DIR})
+
+set(SHADER_SOURCES
+  ${SHADER_SOURCE_DIR}/triangle.vert
+  ${SHADER_SOURCE_DIR}/triangle.frag
+)
+
+set(SHADER_BINARIES
+  ${SHADER_BINARY_DIR}/triangle.vert.spv
+  ${SHADER_BINARY_DIR}/triangle.frag.spv
+)
+
+add_custom_command(
+  OUTPUT ${SHADER_BINARY_DIR}/triangle.vert.spv
+  COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/triangle.vert.spv ${SHADER_SOURCE_DIR}/triangle.vert
+  DEPENDS ${SHADER_SOURCE_DIR}/triangle.vert
+)
+
+add_custom_command(
+  OUTPUT ${SHADER_BINARY_DIR}/triangle.frag.spv
+  COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/triangle.frag.spv ${SHADER_SOURCE_DIR}/triangle.frag
+  DEPENDS ${SHADER_SOURCE_DIR}/triangle.frag
+)
+
+add_custom_target(shaders ALL DEPENDS ${SHADER_BINARIES})
+
 add_executable(cubeos_voxel
   src/main.cpp
   src/app.cpp
@@ -32,6 +75,13 @@ add_executable(cubeos_voxel
 target_include_directories(cubeos_voxel PRIVATE src)
 target_link_libraries(cubeos_voxel PRIVATE glfw Vulkan::Vulkan)
 target_compile_definitions(cubeos_voxel PRIVATE GLFW_INCLUDE_NONE)
+add_dependencies(cubeos_voxel shaders)
+
+add_custom_command(
+  TARGET cubeos_voxel POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:cubeos_voxel>/shaders
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SHADER_BINARIES} $<TARGET_FILE_DIR:cubeos_voxel>/shaders
+)
 
 if (CUBEOS_ENABLE_VALIDATION)
   target_compile_definitions(cubeos_voxel PRIVATE CUBEOS_ENABLE_VALIDATION=1)
