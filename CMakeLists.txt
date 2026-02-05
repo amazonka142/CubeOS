@@ -79,6 +79,7 @@ add_executable(cubeos_voxel
   src/main.cpp
   src/app.cpp
   src/vk_context.cpp
+  src/world.cpp
 )
 
 target_include_directories(cubeos_voxel PRIVATE src)

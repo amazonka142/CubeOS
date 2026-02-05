@@ -4,7 +4,6 @@
 
 #include <array>
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -15,7 +14,6 @@
 #include <string>
 #include <stdexcept>
 
-#include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #ifdef _WIN32
@@ -44,50 +42,6 @@ const std::vector<const char*> kDeviceExtensions = {
   VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
-constexpr int kChunkSize = 16;
-constexpr int kChunkHeight = 64;
-constexpr int kChunkVolume = kChunkSize * kChunkSize * kChunkHeight;
-
-enum BlockType : uint8_t {
-  kAir = 0,
-  kGrass = 1,
-  kDirt = 2,
-  kStone = 3
-};
-
-struct Vertex {
-  glm::vec3 pos;
-  glm::vec3 color;
-
-  static VkVertexInputBindingDescription getBindingDescription() {
-    VkVertexInputBindingDescription bindingDescription{};
-    bindingDescription.binding = 0;
-    bindingDescription.stride = sizeof(Vertex);
-    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    return bindingDescription;
-  }
-
-  static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
-    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
-
-    attributeDescriptions[0].binding = 0;
-    attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(Vertex, pos);
-
-    attributeDescriptions[1].binding = 0;
-    attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex, color);
-
-    return attributeDescriptions;
-  }
-};
-
-std::vector<uint8_t> gBlocks;
-std::vector<Vertex> gVertices;
-std::vector<uint32_t> gIndices;
-
 struct UniformBufferObject {
   glm::mat4 model;
   glm::mat4 view;
@@ -102,118 +56,6 @@ void checkVk(VkResult result, const char* message) {
   }
 }
 
-int blockIndex(int x, int y, int z) {
-  return x + z * kChunkSize + y * kChunkSize * kChunkSize;
-}
-
-uint8_t blockAt(int x, int y, int z) {
-  if (x < 0 || x >= kChunkSize ||
-      y < 0 || y >= kChunkHeight ||
-      z < 0 || z >= kChunkSize) {
-    return kAir;
-  }
-  return gBlocks[blockIndex(x, y, z)];
-}
-
-glm::vec3 blockColor(uint8_t type) {
-  switch (type) {
-    case kGrass:
-      return {0.2f, 0.8f, 0.2f};
-    case kDirt:
-      return {0.55f, 0.35f, 0.2f};
-    case kStone:
-      return {0.6f, 0.6f, 0.6f};
-    default:
-      return {1.0f, 1.0f, 1.0f};
-  }
-}
-
-void generateChunk() {
-  gBlocks.assign(kChunkVolume, kAir);
-
-  for (int z = 0; z < kChunkSize; ++z) {
-    for (int x = 0; x < kChunkSize; ++x) {
-      float fx = static_cast<float>(x);
-      float fz = static_cast<float>(z);
-      float heightNoise = std::sin(fx * 0.35f) * 6.0f + std::cos(fz * 0.28f) * 5.0f;
-      int height = static_cast<int>(24.0f + heightNoise);
-      if (height < 1) {
-        height = 1;
-      } else if (height > kChunkHeight - 1) {
-        height = kChunkHeight - 1;
-      }
-
-      for (int y = 0; y < height; ++y) {
-        uint8_t type = kStone;
-        if (y == height - 1) {
-          type = kGrass;
-        } else if (y >= height - 4) {
-          type = kDirt;
-        }
-        gBlocks[blockIndex(x, y, z)] = type;
-      }
-    }
-  }
-}
-
-void buildChunkMesh() {
-  gVertices.clear();
-  gIndices.clear();
-
-  struct FaceDef {
-    glm::ivec3 dir;
-    glm::vec3 corners[4];
-  };
-
-  const FaceDef faces[6] = {
-    {{ 1, 0, 0}, {{1,0,0}, {1,0,1}, {1,1,1}, {1,1,0}}}, // +X
-    {{-1, 0, 0}, {{0,0,1}, {0,0,0}, {0,1,0}, {0,1,1}}}, // -X
-    {{ 0, 1, 0}, {{0,1,1}, {1,1,1}, {1,1,0}, {0,1,0}}}, // +Y
-    {{ 0,-1, 0}, {{0,0,0}, {1,0,0}, {1,0,1}, {0,0,1}}}, // -Y
-    {{ 0, 0, 1}, {{1,0,1}, {0,0,1}, {0,1,1}, {1,1,1}}}, // +Z
-    {{ 0, 0,-1}, {{0,0,0}, {1,0,0}, {1,1,0}, {0,1,0}}}  // -Z
-  };
-
-  gVertices.reserve(kChunkSize * kChunkSize * 6);
-  gIndices.reserve(kChunkSize * kChunkSize * 6 * 6);
-
-  for (int y = 0; y < kChunkHeight; ++y) {
-    for (int z = 0; z < kChunkSize; ++z) {
-      for (int x = 0; x < kChunkSize; ++x) {
-        uint8_t type = blockAt(x, y, z);
-        if (type == kAir) {
-          continue;
-        }
-
-        glm::vec3 color = blockColor(type);
-
-        for (const auto& face : faces) {
-          int nx = x + face.dir.x;
-          int ny = y + face.dir.y;
-          int nz = z + face.dir.z;
-          if (blockAt(nx, ny, nz) != kAir) {
-            continue;
-          }
-
-          uint32_t startIndex = static_cast<uint32_t>(gVertices.size());
-          for (const auto& corner : face.corners) {
-            glm::vec3 pos = glm::vec3(static_cast<float>(x),
-                                      static_cast<float>(y),
-                                      static_cast<float>(z)) + corner;
-            gVertices.push_back({pos, color});
-          }
-
-          gIndices.push_back(startIndex + 0);
-          gIndices.push_back(startIndex + 1);
-          gIndices.push_back(startIndex + 2);
-          gIndices.push_back(startIndex + 0);
-          gIndices.push_back(startIndex + 2);
-          gIndices.push_back(startIndex + 3);
-        }
-      }
-    }
-  }
-}
 
 VkResult CreateDebugUtilsMessengerEXT(
   VkInstance instance,
@@ -297,8 +139,6 @@ void VulkanContext::init(GLFWwindow* windowIn, bool* framebufferResizedFlagIn) {
   pickPhysicalDevice();
   createLogicalDevice();
   createDescriptorSetLayout();
-  generateChunk();
-  buildChunkMesh();
   createSwapchain();
   createImageViews();
   createRenderPass();
@@ -456,6 +296,48 @@ void VulkanContext::waitIdle() {
   if (device != VK_NULL_HANDLE) {
     vkDeviceWaitIdle(device);
   }
+}
+
+void VulkanContext::setMeshData(const std::vector<Vertex>& vertices,
+                                const std::vector<uint32_t>& indices) {
+  meshVertices = vertices;
+  meshIndices = indices;
+}
+
+void VulkanContext::updateMesh(const std::vector<Vertex>& vertices,
+                               const std::vector<uint32_t>& indices) {
+  meshVertices = vertices;
+  meshIndices = indices;
+  if (device == VK_NULL_HANDLE) {
+    return;
+  }
+
+  vkDeviceWaitIdle(device);
+
+  if (vertexBuffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(device, vertexBuffer, nullptr);
+    vertexBuffer = VK_NULL_HANDLE;
+  }
+  if (vertexBufferMemory != VK_NULL_HANDLE) {
+    vkFreeMemory(device, vertexBufferMemory, nullptr);
+    vertexBufferMemory = VK_NULL_HANDLE;
+  }
+  if (indexBuffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(device, indexBuffer, nullptr);
+    indexBuffer = VK_NULL_HANDLE;
+  }
+  if (indexBufferMemory != VK_NULL_HANDLE) {
+    vkFreeMemory(device, indexBufferMemory, nullptr);
+    indexBufferMemory = VK_NULL_HANDLE;
+  }
+
+  createVertexBuffer();
+  createIndexBuffer();
+}
+
+void VulkanContext::setCameraMatrices(const glm::mat4& view, const glm::mat4& proj) {
+  cameraView = view;
+  cameraProj = proj;
 }
 
 void VulkanContext::createInstance() {
@@ -929,7 +811,10 @@ void VulkanContext::createCommandPool() {
 }
 
 void VulkanContext::createVertexBuffer() {
-  VkDeviceSize bufferSize = sizeof(gVertices[0]) * gVertices.size();
+  if (meshVertices.empty()) {
+    return;
+  }
+  VkDeviceSize bufferSize = sizeof(meshVertices[0]) * meshVertices.size();
   if (bufferSize == 0) {
     return;
   }
@@ -941,12 +826,15 @@ void VulkanContext::createVertexBuffer() {
 
   void* data = nullptr;
   vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &data);
-  std::memcpy(data, gVertices.data(), static_cast<size_t>(bufferSize));
+  std::memcpy(data, meshVertices.data(), static_cast<size_t>(bufferSize));
   vkUnmapMemory(device, vertexBufferMemory);
 }
 
 void VulkanContext::createIndexBuffer() {
-  VkDeviceSize bufferSize = sizeof(gIndices[0]) * gIndices.size();
+  if (meshIndices.empty()) {
+    return;
+  }
+  VkDeviceSize bufferSize = sizeof(meshIndices[0]) * meshIndices.size();
   if (bufferSize == 0) {
     return;
   }
@@ -958,7 +846,7 @@ void VulkanContext::createIndexBuffer() {
 
   void* data = nullptr;
   vkMapMemory(device, indexBufferMemory, 0, bufferSize, 0, &data);
-  std::memcpy(data, gIndices.data(), static_cast<size_t>(bufferSize));
+  std::memcpy(data, meshIndices.data(), static_cast<size_t>(bufferSize));
   vkUnmapMemory(device, indexBufferMemory);
 }
 
@@ -1076,7 +964,7 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
   scissor.extent = swapchainExtent;
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-  if (!gIndices.empty()) {
+  if (!meshIndices.empty()) {
     VkBuffer vertexBuffers[] = {vertexBuffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
@@ -1089,7 +977,7 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
                             &descriptorSets[imageIndex],
                             0,
                             nullptr);
-    vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(gIndices.size()), 1, 0, 0, 0);
+    vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(meshIndices.size()), 1, 0, 0, 0);
   }
   vkCmdEndRenderPass(commandBuffer);
 
@@ -1103,16 +991,9 @@ void VulkanContext::updateUniformBuffer(uint32_t imageIndex) {
 
   UniformBufferObject ubo{};
   ubo.model = glm::mat4(1.0f);
-  ubo.model = glm::rotate(ubo.model, time * glm::radians(10.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-  glm::vec3 target = glm::vec3(kChunkSize * 0.5f, kChunkHeight * 0.35f, kChunkSize * 0.5f);
-  ubo.view = glm::lookAt(glm::vec3(22.0f, 24.0f, 20.0f),
-                         target,
-                         glm::vec3(0.0f, 1.0f, 0.0f));
-  ubo.proj = glm::perspective(glm::radians(45.0f),
-                              swapchainExtent.width / static_cast<float>(swapchainExtent.height),
-                              0.1f,
-                              10.0f);
-  ubo.proj[1][1] *= -1.0f;
+  (void)time;
+  ubo.view = cameraView;
+  ubo.proj = cameraProj;
 
   std::memcpy(uniformBuffersMapped[imageIndex], &ubo, sizeof(ubo));
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "mesh.hpp"
+
 #include <vulkan/vulkan.h>
 
 #include <cstddef>
@@ -15,6 +17,11 @@ public:
   void cleanup();
   void drawFrame();
   void waitIdle();
+  void setMeshData(const std::vector<Vertex>& vertices,
+                   const std::vector<uint32_t>& indices);
+  void updateMesh(const std::vector<Vertex>& vertices,
+                  const std::vector<uint32_t>& indices);
+  void setCameraMatrices(const glm::mat4& view, const glm::mat4& proj);
 
 private:
   struct QueueFamilyIndices {
@@ -130,6 +137,11 @@ private:
 
   VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
   std::vector<VkDescriptorSet> descriptorSets;
+
+  std::vector<Vertex> meshVertices;
+  std::vector<uint32_t> meshIndices;
+  glm::mat4 cameraView{1.0f};
+  glm::mat4 cameraProj{1.0f};
 
   std::vector<VkSemaphore> imageAvailableSemaphores;
   std::vector<VkSemaphore> renderFinishedSemaphores;
