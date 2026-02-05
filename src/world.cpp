@@ -111,6 +111,33 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
   const int dims[3] = {worldWidth, kChunkHeight, worldDepth};
   std::vector<int> mask(static_cast<size_t>(dims[0] * dims[1]));
 
+  auto tileFor = [](uint8_t type, int axis, bool positive) {
+    // Tile indices in atlas: 0=grass top, 1=grass side, 2=dirt, 3=stone.
+    if (type == kGrass) {
+      if (axis == 1 && positive) {
+        return 0;
+      }
+      if (axis == 1 && !positive) {
+        return 2;
+      }
+      return 1;
+    }
+    if (type == kDirt) {
+      return 2;
+    }
+    return 3;
+  };
+
+  auto uvForTile = [](int tile, float u, float v) {
+    float tileSizeU = 1.0f / static_cast<float>(kAtlasCols);
+    float tileSizeV = 1.0f / static_cast<float>(kAtlasRows);
+    int tx = tile % kAtlasCols;
+    int ty = tile / kAtlasCols;
+    float u0 = tx * tileSizeU;
+    float v0 = ty * tileSizeV;
+    return glm::vec2(u0 + u * tileSizeU, v0 + v * tileSizeV);
+  };
+
   for (int d = 0; d < 3; ++d) {
     int u = (d + 1) % 3;
     int v = (d + 2) % 3;
@@ -189,7 +216,9 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
             shade = (c > 0) ? 1.0f : 0.5f;
           }
           float heightFactor = 0.6f + 0.4f * (static_cast<float>(x0[1]) / (kChunkHeight - 1));
-          glm::vec3 color = blockColor(static_cast<uint8_t>(std::abs(c))) * shade * heightFactor;
+          uint8_t blockType = static_cast<uint8_t>(std::abs(c));
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, d, c > 0);
 
           glm::vec3 v0;
           glm::vec3 v1;
@@ -209,10 +238,15 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           }
 
           uint32_t startIndex = static_cast<uint32_t>(outVertices.size());
-          outVertices.push_back({v0, color});
-          outVertices.push_back({v1, color});
-          outVertices.push_back({v2, color});
-          outVertices.push_back({v3, color});
+          glm::vec2 uv0 = uvForTile(tile, 0.0f, 0.0f);
+          glm::vec2 uv1 = uvForTile(tile, 1.0f, 0.0f);
+          glm::vec2 uv2 = uvForTile(tile, 1.0f, 1.0f);
+          glm::vec2 uv3 = uvForTile(tile, 0.0f, 1.0f);
+
+          outVertices.push_back({v0, color, uv0});
+          outVertices.push_back({v1, color, uv1});
+          outVertices.push_back({v2, color, uv2});
+          outVertices.push_back({v3, color, uv3});
 
           outIndices.push_back(startIndex + 0);
           outIndices.push_back(startIndex + 1);

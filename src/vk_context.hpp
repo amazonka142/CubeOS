@@ -50,6 +50,9 @@ private:
   void createRenderPass();
   void createGraphicsPipeline();
   void createDepthResources();
+  void createTextureImage();
+  void createTextureImageView();
+  void createTextureSampler();
   void createFramebuffers();
   void createCommandPool();
   void createVertexBuffer();
@@ -95,6 +98,13 @@ private:
                    VkImage& image,
                    VkDeviceMemory& imageMemory) const;
   VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) const;
+  void transitionImageLayout(VkImage image,
+                             VkFormat format,
+                             VkImageLayout oldLayout,
+                             VkImageLayout newLayout);
+  void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+  VkCommandBuffer beginSingleTimeCommands();
+  void endSingleTimeCommands(VkCommandBuffer commandBuffer);
   VkFormat findDepthFormat() const;
   VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates,
                                VkImageTiling tiling,
@@ -123,6 +133,11 @@ private:
   VkImage depthImage = VK_NULL_HANDLE;
   VkDeviceMemory depthImageMemory = VK_NULL_HANDLE;
   VkImageView depthImageView = VK_NULL_HANDLE;
+
+  VkImage textureImage = VK_NULL_HANDLE;
+  VkDeviceMemory textureImageMemory = VK_NULL_HANDLE;
+  VkImageView textureImageView = VK_NULL_HANDLE;
+  VkSampler textureSampler = VK_NULL_HANDLE;
 
   VkCommandPool commandPool = VK_NULL_HANDLE;
   std::vector<VkCommandBuffer> commandBuffers;
