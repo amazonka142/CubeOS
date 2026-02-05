@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
+# CMake 4.x dropped compatibility with <3.5. Keep deps like older GLM working.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 project(cubeos_voxel LANGUAGES CXX)
 
