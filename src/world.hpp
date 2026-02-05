@@ -3,6 +3,7 @@
 #include "mesh.hpp"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 constexpr int kChunkSize = 16;
@@ -21,6 +22,8 @@ public:
 
   void generate();
   void buildMesh(std::vector<Vertex>& outVertices, std::vector<uint32_t>& outIndices) const;
+  bool save(const std::string& path) const;
+  bool load(const std::string& path);
 
   bool inBounds(int x, int y, int z) const;
   uint8_t getBlock(int x, int y, int z) const;

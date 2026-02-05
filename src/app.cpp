@@ -33,7 +33,9 @@ void App::initWindow() {
 }
 
 void App::initVulkan() {
-  world.generate();
+  if (!world.load("world.bin")) {
+    world.generate();
+  }
   rebuildWorldMesh();
   vk.init(window, &framebufferResized);
 }
@@ -317,6 +319,7 @@ App::RaycastHit App::raycast(const glm::vec3& origin,
 }
 
 void App::cleanup() {
+  world.save("world.bin");
   vk.cleanup();
 
   if (window) {

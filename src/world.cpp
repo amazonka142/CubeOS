@@ -1,6 +1,8 @@
 #include "world.hpp"
 
 #include <cmath>
+#include <cstring>
+#include <fstream>
 
 World::World(int chunksXIn, int chunksZIn)
     : chunksX(chunksXIn),
@@ -182,7 +184,12 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           x0[u] = i;
           x0[v] = j;
 
-          glm::vec3 color = blockColor(static_cast<uint8_t>(std::abs(c)));
+          float shade = 0.8f;
+          if (d == 1) {
+            shade = (c > 0) ? 1.0f : 0.5f;
+          }
+          float heightFactor = 0.6f + 0.4f * (static_cast<float>(x0[1]) / (kChunkHeight - 1));
+          glm::vec3 color = blockColor(static_cast<uint8_t>(std::abs(c))) * shade * heightFactor;
 
           glm::vec3 v0;
           glm::vec3 v1;
@@ -226,4 +233,69 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
       }
     }
   }
+}
+
+bool World::save(const std::string& path) const {
+  std::ofstream out(path, std::ios::binary);
+  if (!out.is_open()) {
+    return false;
+  }
+
+  const char magic[4] = {'C', 'U', 'B', 'E'};
+  uint32_t version = 1;
+  uint32_t cx = static_cast<uint32_t>(chunksX);
+  uint32_t cz = static_cast<uint32_t>(chunksZ);
+  uint32_t cs = static_cast<uint32_t>(kChunkSize);
+  uint32_t ch = static_cast<uint32_t>(kChunkHeight);
+
+  out.write(magic, 4);
+  out.write(reinterpret_cast<const char*>(&version), sizeof(version));
+  out.write(reinterpret_cast<const char*>(&cx), sizeof(cx));
+  out.write(reinterpret_cast<const char*>(&cz), sizeof(cz));
+  out.write(reinterpret_cast<const char*>(&cs), sizeof(cs));
+  out.write(reinterpret_cast<const char*>(&ch), sizeof(ch));
+
+  for (const auto& chunk : chunks) {
+    out.write(reinterpret_cast<const char*>(chunk.blocks.data()),
+              static_cast<std::streamsize>(chunk.blocks.size()));
+  }
+
+  return true;
+}
+
+bool World::load(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in.is_open()) {
+    return false;
+  }
+
+  char magic[4] = {};
+  uint32_t version = 0;
+  uint32_t cx = 0;
+  uint32_t cz = 0;
+  uint32_t cs = 0;
+  uint32_t ch = 0;
+
+  in.read(magic, 4);
+  in.read(reinterpret_cast<char*>(&version), sizeof(version));
+  in.read(reinterpret_cast<char*>(&cx), sizeof(cx));
+  in.read(reinterpret_cast<char*>(&cz), sizeof(cz));
+  in.read(reinterpret_cast<char*>(&cs), sizeof(cs));
+  in.read(reinterpret_cast<char*>(&ch), sizeof(ch));
+
+  if (std::strncmp(magic, "CUBE", 4) != 0 || version != 1 ||
+      cx != static_cast<uint32_t>(chunksX) ||
+      cz != static_cast<uint32_t>(chunksZ) ||
+      cs != static_cast<uint32_t>(kChunkSize) ||
+      ch != static_cast<uint32_t>(kChunkHeight)) {
+    return false;
+  }
+
+  for (auto& chunk : chunks) {
+    in.read(reinterpret_cast<char*>(chunk.blocks.data()),
+            static_cast<std::streamsize>(chunk.blocks.size()));
+    chunk.dirty = true;
+  }
+
+  return true;
 }
