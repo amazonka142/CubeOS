@@ -4,6 +4,7 @@
 
 #include <array>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -43,6 +44,17 @@ const std::vector<const char*> kDeviceExtensions = {
   VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
+constexpr int kChunkSize = 16;
+constexpr int kChunkHeight = 64;
+constexpr int kChunkVolume = kChunkSize * kChunkSize * kChunkHeight;
+
+enum BlockType : uint8_t {
+  kAir = 0,
+  kGrass = 1,
+  kDirt = 2,
+  kStone = 3
+};
+
 struct Vertex {
   glm::vec3 pos;
   glm::vec3 color;
@@ -72,25 +84,9 @@ struct Vertex {
   }
 };
 
-const std::vector<Vertex> kVertices = {
-  {{-0.5f, -0.5f, -0.5f}, {0.9f, 0.2f, 0.2f}},
-  {{ 0.5f, -0.5f, -0.5f}, {0.2f, 0.9f, 0.2f}},
-  {{ 0.5f,  0.5f, -0.5f}, {0.2f, 0.4f, 0.9f}},
-  {{-0.5f,  0.5f, -0.5f}, {0.9f, 0.9f, 0.2f}},
-  {{-0.5f, -0.5f,  0.5f}, {0.9f, 0.2f, 0.8f}},
-  {{ 0.5f, -0.5f,  0.5f}, {0.2f, 0.8f, 0.9f}},
-  {{ 0.5f,  0.5f,  0.5f}, {0.8f, 0.8f, 0.9f}},
-  {{-0.5f,  0.5f,  0.5f}, {0.9f, 0.5f, 0.2f}}
-};
-
-const std::vector<uint16_t> kIndices = {
-  4, 5, 6, 4, 6, 7, // +Z
-  0, 3, 2, 0, 2, 1, // -Z
-  1, 2, 6, 1, 6, 5, // +X
-  0, 4, 7, 0, 7, 3, // -X
-  3, 7, 6, 3, 6, 2, // +Y
-  0, 1, 5, 0, 5, 4  // -Y
-};
+std::vector<uint8_t> gBlocks;
+std::vector<Vertex> gVertices;
+std::vector<uint32_t> gIndices;
 
 struct UniformBufferObject {
   glm::mat4 model;
@@ -103,6 +99,119 @@ const auto kStartTime = std::chrono::high_resolution_clock::now();
 void checkVk(VkResult result, const char* message) {
   if (result != VK_SUCCESS) {
     throw std::runtime_error(message);
+  }
+}
+
+int blockIndex(int x, int y, int z) {
+  return x + z * kChunkSize + y * kChunkSize * kChunkSize;
+}
+
+uint8_t blockAt(int x, int y, int z) {
+  if (x < 0 || x >= kChunkSize ||
+      y < 0 || y >= kChunkHeight ||
+      z < 0 || z >= kChunkSize) {
+    return kAir;
+  }
+  return gBlocks[blockIndex(x, y, z)];
+}
+
+glm::vec3 blockColor(uint8_t type) {
+  switch (type) {
+    case kGrass:
+      return {0.2f, 0.8f, 0.2f};
+    case kDirt:
+      return {0.55f, 0.35f, 0.2f};
+    case kStone:
+      return {0.6f, 0.6f, 0.6f};
+    default:
+      return {1.0f, 1.0f, 1.0f};
+  }
+}
+
+void generateChunk() {
+  gBlocks.assign(kChunkVolume, kAir);
+
+  for (int z = 0; z < kChunkSize; ++z) {
+    for (int x = 0; x < kChunkSize; ++x) {
+      float fx = static_cast<float>(x);
+      float fz = static_cast<float>(z);
+      float heightNoise = std::sin(fx * 0.35f) * 6.0f + std::cos(fz * 0.28f) * 5.0f;
+      int height = static_cast<int>(24.0f + heightNoise);
+      if (height < 1) {
+        height = 1;
+      } else if (height > kChunkHeight - 1) {
+        height = kChunkHeight - 1;
+      }
+
+      for (int y = 0; y < height; ++y) {
+        uint8_t type = kStone;
+        if (y == height - 1) {
+          type = kGrass;
+        } else if (y >= height - 4) {
+          type = kDirt;
+        }
+        gBlocks[blockIndex(x, y, z)] = type;
+      }
+    }
+  }
+}
+
+void buildChunkMesh() {
+  gVertices.clear();
+  gIndices.clear();
+
+  struct FaceDef {
+    glm::ivec3 dir;
+    glm::vec3 corners[4];
+  };
+
+  const FaceDef faces[6] = {
+    {{ 1, 0, 0}, {{1,0,0}, {1,0,1}, {1,1,1}, {1,1,0}}}, // +X
+    {{-1, 0, 0}, {{0,0,1}, {0,0,0}, {0,1,0}, {0,1,1}}}, // -X
+    {{ 0, 1, 0}, {{0,1,1}, {1,1,1}, {1,1,0}, {0,1,0}}}, // +Y
+    {{ 0,-1, 0}, {{0,0,0}, {1,0,0}, {1,0,1}, {0,0,1}}}, // -Y
+    {{ 0, 0, 1}, {{1,0,1}, {0,0,1}, {0,1,1}, {1,1,1}}}, // +Z
+    {{ 0, 0,-1}, {{0,0,0}, {1,0,0}, {1,1,0}, {0,1,0}}}  // -Z
+  };
+
+  gVertices.reserve(kChunkSize * kChunkSize * 6);
+  gIndices.reserve(kChunkSize * kChunkSize * 6 * 6);
+
+  for (int y = 0; y < kChunkHeight; ++y) {
+    for (int z = 0; z < kChunkSize; ++z) {
+      for (int x = 0; x < kChunkSize; ++x) {
+        uint8_t type = blockAt(x, y, z);
+        if (type == kAir) {
+          continue;
+        }
+
+        glm::vec3 color = blockColor(type);
+
+        for (const auto& face : faces) {
+          int nx = x + face.dir.x;
+          int ny = y + face.dir.y;
+          int nz = z + face.dir.z;
+          if (blockAt(nx, ny, nz) != kAir) {
+            continue;
+          }
+
+          uint32_t startIndex = static_cast<uint32_t>(gVertices.size());
+          for (const auto& corner : face.corners) {
+            glm::vec3 pos = glm::vec3(static_cast<float>(x),
+                                      static_cast<float>(y),
+                                      static_cast<float>(z)) + corner;
+            gVertices.push_back({pos, color});
+          }
+
+          gIndices.push_back(startIndex + 0);
+          gIndices.push_back(startIndex + 1);
+          gIndices.push_back(startIndex + 2);
+          gIndices.push_back(startIndex + 0);
+          gIndices.push_back(startIndex + 2);
+          gIndices.push_back(startIndex + 3);
+        }
+      }
+    }
   }
 }
 
@@ -188,6 +297,8 @@ void VulkanContext::init(GLFWwindow* windowIn, bool* framebufferResizedFlagIn) {
   pickPhysicalDevice();
   createLogicalDevice();
   createDescriptorSetLayout();
+  generateChunk();
+  buildChunkMesh();
   createSwapchain();
   createImageViews();
   createRenderPass();
@@ -597,10 +708,13 @@ void VulkanContext::createRenderPass() {
   VkSubpassDependency dependency{};
   dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
   dependency.dstSubpass = 0;
-  dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-  dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+  dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
   dependency.srcAccessMask = 0;
-  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
   VkRenderPassCreateInfo renderPassInfo{};
   renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -815,7 +929,10 @@ void VulkanContext::createCommandPool() {
 }
 
 void VulkanContext::createVertexBuffer() {
-  VkDeviceSize bufferSize = sizeof(kVertices[0]) * kVertices.size();
+  VkDeviceSize bufferSize = sizeof(gVertices[0]) * gVertices.size();
+  if (bufferSize == 0) {
+    return;
+  }
   createBuffer(bufferSize,
                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -824,12 +941,15 @@ void VulkanContext::createVertexBuffer() {
 
   void* data = nullptr;
   vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &data);
-  std::memcpy(data, kVertices.data(), static_cast<size_t>(bufferSize));
+  std::memcpy(data, gVertices.data(), static_cast<size_t>(bufferSize));
   vkUnmapMemory(device, vertexBufferMemory);
 }
 
 void VulkanContext::createIndexBuffer() {
-  VkDeviceSize bufferSize = sizeof(kIndices[0]) * kIndices.size();
+  VkDeviceSize bufferSize = sizeof(gIndices[0]) * gIndices.size();
+  if (bufferSize == 0) {
+    return;
+  }
   createBuffer(bufferSize,
                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -838,7 +958,7 @@ void VulkanContext::createIndexBuffer() {
 
   void* data = nullptr;
   vkMapMemory(device, indexBufferMemory, 0, bufferSize, 0, &data);
-  std::memcpy(data, kIndices.data(), static_cast<size_t>(bufferSize));
+  std::memcpy(data, gIndices.data(), static_cast<size_t>(bufferSize));
   vkUnmapMemory(device, indexBufferMemory);
 }
 
@@ -956,19 +1076,21 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
   scissor.extent = swapchainExtent;
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-  VkBuffer vertexBuffers[] = {vertexBuffer};
-  VkDeviceSize offsets[] = {0};
-  vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-  vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-  vkCmdBindDescriptorSets(commandBuffer,
-                          VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          pipelineLayout,
-                          0,
-                          1,
-                          &descriptorSets[imageIndex],
-                          0,
-                          nullptr);
-  vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(kIndices.size()), 1, 0, 0, 0);
+  if (!gIndices.empty()) {
+    VkBuffer vertexBuffers[] = {vertexBuffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+    vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindDescriptorSets(commandBuffer,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineLayout,
+                            0,
+                            1,
+                            &descriptorSets[imageIndex],
+                            0,
+                            nullptr);
+    vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(gIndices.size()), 1, 0, 0, 0);
+  }
   vkCmdEndRenderPass(commandBuffer);
 
   checkVk(vkEndCommandBuffer(commandBuffer),
@@ -981,11 +1103,11 @@ void VulkanContext::updateUniformBuffer(uint32_t imageIndex) {
 
   UniformBufferObject ubo{};
   ubo.model = glm::mat4(1.0f);
-  ubo.model = glm::rotate(ubo.model, time * glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-  ubo.model = glm::rotate(ubo.model, time * glm::radians(25.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-  ubo.view = glm::lookAt(glm::vec3(2.5f, 2.5f, 2.0f),
-                         glm::vec3(0.0f, 0.0f, 0.0f),
-                         glm::vec3(0.0f, 0.0f, 1.0f));
+  ubo.model = glm::rotate(ubo.model, time * glm::radians(10.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+  glm::vec3 target = glm::vec3(kChunkSize * 0.5f, kChunkHeight * 0.35f, kChunkSize * 0.5f);
+  ubo.view = glm::lookAt(glm::vec3(22.0f, 24.0f, 20.0f),
+                         target,
+                         glm::vec3(0.0f, 1.0f, 0.0f));
   ubo.proj = glm::perspective(glm::radians(45.0f),
                               swapchainExtent.width / static_cast<float>(swapchainExtent.height),
                               0.1f,
