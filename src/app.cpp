@@ -3,6 +3,7 @@
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 void App::run() {
@@ -33,8 +34,7 @@ void App::initWindow() {
 
 void App::initVulkan() {
   world.generate();
-  world.buildMesh(worldVertices, worldIndices);
-  vk.setMeshData(worldVertices, worldIndices);
+  rebuildWorldMesh();
   vk.init(window, &framebufferResized);
 }
 
@@ -101,6 +101,45 @@ void App::processInput(float deltaTime) {
     onGround = false;
   }
 
+  if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) {
+    selectedBlock = kGrass;
+  } else if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) {
+    selectedBlock = kDirt;
+  } else if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) {
+    selectedBlock = kStone;
+  }
+
+  bool leftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+  bool rightPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+
+  if (leftPressed && !mouseLeftDown) {
+    glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.6f, 0.0f);
+    RaycastHit hit = raycast(origin, cameraFront(), 6.0f);
+    if (hit.hit) {
+      world.setBlock(hit.block.x, hit.block.y, hit.block.z, kAir);
+      rebuildWorldMesh();
+      vk.updateMesh(worldVertices, worldIndices);
+    }
+  }
+
+  if (rightPressed && !mouseRightDown) {
+    glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.6f, 0.0f);
+    RaycastHit hit = raycast(origin, cameraFront(), 6.0f);
+    if (hit.hit) {
+      glm::ivec3 target = hit.block + hit.normal;
+      if (world.inBounds(target.x, target.y, target.z) &&
+          world.getBlock(target.x, target.y, target.z) == kAir &&
+          !blockIntersectsPlayer(target.x, target.y, target.z)) {
+        world.setBlock(target.x, target.y, target.z, selectedBlock);
+        rebuildWorldMesh();
+        vk.updateMesh(worldVertices, worldIndices);
+      }
+    }
+  }
+
+  mouseLeftDown = leftPressed;
+  mouseRightDown = rightPressed;
+
   (void)deltaTime;
 }
 
@@ -139,6 +178,11 @@ void App::updatePlayer(float deltaTime) {
   playerPos = pos;
 }
 
+void App::rebuildWorldMesh() {
+  world.buildMesh(worldVertices, worldIndices);
+  vk.setMeshData(worldVertices, worldIndices);
+}
+
 bool App::collidesAt(const glm::vec3& pos) const {
   const float halfWidth = 0.3f;
   const float height = 1.8f;
@@ -169,12 +213,107 @@ bool App::collidesAt(const glm::vec3& pos) const {
   return false;
 }
 
+bool App::blockIntersectsPlayer(int x, int y, int z) const {
+  const float halfWidth = 0.3f;
+  const float height = 1.8f;
+  glm::vec3 min = {playerPos.x - halfWidth, playerPos.y, playerPos.z - halfWidth};
+  glm::vec3 max = {playerPos.x + halfWidth, playerPos.y + height, playerPos.z + halfWidth};
+
+  return x + 1.0f > min.x && x < max.x &&
+         y + 1.0f > min.y && y < max.y &&
+         z + 1.0f > min.z && z < max.z;
+}
+
 glm::vec3 App::cameraFront() const {
   glm::vec3 front;
   front.x = std::cos(glm::radians(yaw)) * std::cos(glm::radians(pitch));
   front.y = std::sin(glm::radians(pitch));
   front.z = std::sin(glm::radians(yaw)) * std::cos(glm::radians(pitch));
   return glm::normalize(front);
+}
+
+App::RaycastHit App::raycast(const glm::vec3& origin,
+                              const glm::vec3& dir,
+                              float maxDist) const {
+  RaycastHit result;
+  glm::vec3 rayDir = glm::normalize(dir);
+
+  glm::ivec3 step(0);
+  glm::vec3 tMax(0.0f);
+  glm::vec3 tDelta(0.0f);
+
+  auto intBound = [](float s, float ds) {
+    if (ds > 0) {
+      return (std::floor(s + 1.0f) - s) / ds;
+    }
+    if (ds < 0) {
+      return (s - std::floor(s)) / -ds;
+    }
+    return std::numeric_limits<float>::infinity();
+  };
+
+  glm::ivec3 voxel(static_cast<int>(std::floor(origin.x)),
+                   static_cast<int>(std::floor(origin.y)),
+                   static_cast<int>(std::floor(origin.z)));
+
+  step.x = (rayDir.x > 0) ? 1 : (rayDir.x < 0 ? -1 : 0);
+  step.y = (rayDir.y > 0) ? 1 : (rayDir.y < 0 ? -1 : 0);
+  step.z = (rayDir.z > 0) ? 1 : (rayDir.z < 0 ? -1 : 0);
+
+  tMax.x = intBound(origin.x, rayDir.x);
+  tMax.y = intBound(origin.y, rayDir.y);
+  tMax.z = intBound(origin.z, rayDir.z);
+
+  tDelta.x = (rayDir.x == 0.0f) ? std::numeric_limits<float>::infinity()
+                                : std::abs(1.0f / rayDir.x);
+  tDelta.y = (rayDir.y == 0.0f) ? std::numeric_limits<float>::infinity()
+                                : std::abs(1.0f / rayDir.y);
+  tDelta.z = (rayDir.z == 0.0f) ? std::numeric_limits<float>::infinity()
+                                : std::abs(1.0f / rayDir.z);
+
+  glm::ivec3 lastStep(0);
+  float dist = 0.0f;
+
+  while (dist <= maxDist) {
+    if (!world.inBounds(voxel.x, voxel.y, voxel.z)) {
+      return result;
+    }
+
+    if (world.getBlock(voxel.x, voxel.y, voxel.z) != kAir) {
+      result.hit = true;
+      result.block = voxel;
+      result.normal = -lastStep;
+      return result;
+    }
+
+    if (tMax.x < tMax.y) {
+      if (tMax.x < tMax.z) {
+        voxel.x += step.x;
+        dist = tMax.x;
+        tMax.x += tDelta.x;
+        lastStep = {step.x, 0, 0};
+      } else {
+        voxel.z += step.z;
+        dist = tMax.z;
+        tMax.z += tDelta.z;
+        lastStep = {0, 0, step.z};
+      }
+    } else {
+      if (tMax.y < tMax.z) {
+        voxel.y += step.y;
+        dist = tMax.y;
+        tMax.y += tDelta.y;
+        lastStep = {0, step.y, 0};
+      } else {
+        voxel.z += step.z;
+        dist = tMax.z;
+        tMax.z += tDelta.z;
+        lastStep = {0, 0, step.z};
+      }
+    }
+  }
+
+  return result;
 }
 
 void App::cleanup() {

@@ -18,8 +18,16 @@ private:
   void mainLoop();
   void processInput(float deltaTime);
   void updatePlayer(float deltaTime);
+  void rebuildWorldMesh();
   bool collidesAt(const glm::vec3& pos) const;
+  bool blockIntersectsPlayer(int x, int y, int z) const;
   glm::vec3 cameraFront() const;
+  struct RaycastHit {
+    bool hit = false;
+    glm::ivec3 block{};
+    glm::ivec3 normal{};
+  };
+  RaycastHit raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const;
   void cleanup();
   static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
   static void mouseCallback(GLFWwindow* window, double xpos, double ypos);
@@ -38,6 +46,9 @@ private:
   glm::vec3 playerPos{8.0f, 30.0f, 8.0f};
   glm::vec3 playerVel{0.0f};
   bool onGround = false;
+  uint8_t selectedBlock = kGrass;
+  bool mouseLeftDown = false;
+  bool mouseRightDown = false;
 
   float yaw = -90.0f;
   float pitch = 0.0f;
