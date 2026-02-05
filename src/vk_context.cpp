@@ -144,9 +144,12 @@ void VulkanContext::cleanup() {
   cleanupSwapchain();
 
   for (size_t i = 0; i < imageAvailableSemaphores.size(); ++i) {
-    vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
     vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
     vkDestroyFence(device, inFlightFences[i], nullptr);
+  }
+
+  for (size_t i = 0; i < renderFinishedSemaphores.size(); ++i) {
+    vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
   }
 
   if (commandPool != VK_NULL_HANDLE) {
@@ -206,16 +209,18 @@ void VulkanContext::drawFrame() {
   vkResetCommandBuffer(commandBuffers[imageIndex], 0);
   recordCommandBuffer(commandBuffers[imageIndex], imageIndex);
 
+  VkSemaphore imageAvailable = imageAvailableSemaphores[currentFrame];
+  VkSemaphore renderFinished = renderFinishedSemaphores[imageIndex];
   VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.waitSemaphoreCount = 1;
-  submitInfo.pWaitSemaphores = &imageAvailableSemaphores[currentFrame];
+  submitInfo.pWaitSemaphores = &imageAvailable;
   submitInfo.pWaitDstStageMask = waitStages;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffers[imageIndex];
   submitInfo.signalSemaphoreCount = 1;
-  submitInfo.pSignalSemaphores = &renderFinishedSemaphores[currentFrame];
+  submitInfo.pSignalSemaphores = &renderFinished;
 
   checkVk(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]),
           "Failed to submit draw command buffer.");
@@ -223,7 +228,7 @@ void VulkanContext::drawFrame() {
   VkPresentInfoKHR presentInfo{};
   presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
   presentInfo.waitSemaphoreCount = 1;
-  presentInfo.pWaitSemaphores = &renderFinishedSemaphores[currentFrame];
+  presentInfo.pWaitSemaphores = &renderFinished;
   presentInfo.swapchainCount = 1;
   presentInfo.pSwapchains = &swapchain;
   presentInfo.pImageIndices = &imageIndex;
@@ -711,8 +716,8 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
 
 void VulkanContext::createSyncObjects() {
   imageAvailableSemaphores.resize(kMaxFramesInFlight);
-  renderFinishedSemaphores.resize(kMaxFramesInFlight);
   inFlightFences.resize(kMaxFramesInFlight);
+  renderFinishedSemaphores.resize(swapchainImages.size());
   imagesInFlight.assign(swapchainImages.size(), VK_NULL_HANDLE);
 
   VkSemaphoreCreateInfo semaphoreInfo{};
@@ -725,10 +730,13 @@ void VulkanContext::createSyncObjects() {
   for (int i = 0; i < kMaxFramesInFlight; ++i) {
     checkVk(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]),
             "Failed to create semaphore.");
-    checkVk(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]),
-            "Failed to create semaphore.");
     checkVk(vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]),
             "Failed to create fence.");
+  }
+
+  for (size_t i = 0; i < renderFinishedSemaphores.size(); ++i) {
+    checkVk(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]),
+            "Failed to create semaphore.");
   }
 }
 
@@ -782,12 +790,26 @@ void VulkanContext::recreateSwapchain() {
 
   vkDeviceWaitIdle(device);
   cleanupSwapchain();
+  for (auto semaphore : renderFinishedSemaphores) {
+    vkDestroySemaphore(device, semaphore, nullptr);
+  }
+  renderFinishedSemaphores.clear();
+
   createSwapchain();
   createImageViews();
   createRenderPass();
   createGraphicsPipeline();
   createFramebuffers();
   createCommandBuffers();
+
+  renderFinishedSemaphores.resize(swapchainImages.size());
+  VkSemaphoreCreateInfo semaphoreInfo{};
+  semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  for (size_t i = 0; i < renderFinishedSemaphores.size(); ++i) {
+    checkVk(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]),
+            "Failed to create semaphore.");
+  }
+
   imagesInFlight.assign(swapchainImages.size(), VK_NULL_HANDLE);
 }
 
