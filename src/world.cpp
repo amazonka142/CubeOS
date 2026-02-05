@@ -140,10 +140,10 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
   };
 
   for (int d = 0; d < 3; ++d) {
-    int axisU = (d + 1) % 3;
-    int axisV = (d + 2) % 3;
-    int dimUCount = (axisU == 0) ? dims[0] : (axisU == 1 ? dims[1] : dims[2]);
-    int dimVCount = (axisV == 0) ? dims[0] : (axisV == 1 ? dims[1] : dims[2]);
+    int axisUIndex = (d + 1) % 3;
+    int axisVIndex = (d + 2) % 3;
+    int meshDimU = (axisUIndex == 0) ? dims[0] : (axisUIndex == 1 ? dims[1] : dims[2]);
+    int meshDimV = (axisVIndex == 0) ? dims[0] : (axisVIndex == 1 ? dims[1] : dims[2]);
 
     int x[3] = {0, 0, 0};
     int q[3] = {0, 0, 0};
@@ -151,8 +151,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
     for (x[d] = -1; x[d] < dims[d];) {
       int n = 0;
-      for (x[axisV] = 0; x[axisV] < dimVCount; ++x[axisV]) {
-        for (x[axisU] = 0; x[axisU] < dimUCount; ++x[axisU]) {
+      for (x[axisVIndex] = 0; x[axisVIndex] < meshDimV; ++x[axisVIndex]) {
+        for (x[axisUIndex] = 0; x[axisUIndex] < meshDimU; ++x[axisUIndex]) {
           int ax = x[0];
           int ay = x[1];
           int az = x[2];
@@ -177,8 +177,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
       ++x[d];
 
       n = 0;
-      for (int j = 0; j < dimVCount; ++j) {
-        for (int i = 0; i < dimUCount;) {
+      for (int j = 0; j < meshDimV; ++j) {
+        for (int i = 0; i < meshDimU;) {
           int c = maskValues[n];
           if (c == 0) {
             ++i;
@@ -187,15 +187,15 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           }
 
           int w = 1;
-          while (i + w < dimUCount && maskValues[n + w] == c) {
+          while (i + w < meshDimU && maskValues[n + w] == c) {
             ++w;
           }
 
           int h = 1;
           bool done = false;
-          while (j + h < dimVCount && !done) {
+          while (j + h < meshDimV && !done) {
             for (int k = 0; k < w; ++k) {
-              if (maskValues[n + k + h * dimUCount] != c) {
+              if (maskValues[n + k + h * meshDimU] != c) {
                 done = true;
                 break;
               }
@@ -207,12 +207,12 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
           int du[3] = {0, 0, 0};
           int dv[3] = {0, 0, 0};
-          du[axisU] = w;
-          dv[axisV] = h;
+          du[axisUIndex] = w;
+          dv[axisVIndex] = h;
 
           int x0[3] = {x[0], x[1], x[2]};
-          x0[axisU] = i;
-          x0[axisV] = j;
+          x0[axisUIndex] = i;
+          x0[axisVIndex] = j;
 
           float shade = 0.8f;
           if (d == 1) {
@@ -270,7 +270,7 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
           for (int y = 0; y < h; ++y) {
             for (int x2 = 0; x2 < w; ++x2) {
-              maskValues[n + x2 + y * dimUCount] = 0;
+              maskValues[n + x2 + y * meshDimU] = 0;
             }
           }
 
