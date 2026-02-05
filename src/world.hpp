@@ -29,12 +29,23 @@ public:
   int width() const { return worldWidth; }
   int height() const { return kChunkHeight; }
   int depth() const { return worldDepth; }
+  int chunkCountX() const { return chunksX; }
+  int chunkCountZ() const { return chunksZ; }
 
 private:
   int index(int x, int y, int z) const;
+  int chunkIndex(int cx, int cz) const;
+  int localIndex(int lx, int ly, int lz) const;
   glm::vec3 blockColor(uint8_t type) const;
 
+  struct Chunk {
+    std::vector<uint8_t> blocks;
+    bool dirty = true;
+  };
+
+  int chunksX;
+  int chunksZ;
   int worldWidth;
   int worldDepth;
-  std::vector<uint8_t> blocks;
+  std::vector<Chunk> chunks;
 };
