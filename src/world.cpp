@@ -140,8 +140,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
   };
 
   for (int d = 0; d < 3; ++d) {
-    int u = (d + 1) % 3;
-    int v = (d + 2) % 3;
+    int axisU = (d + 1) % 3;
+    int axisV = (d + 2) % 3;
 
     int x[3] = {0, 0, 0};
     int q[3] = {0, 0, 0};
@@ -149,8 +149,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
     for (x[d] = -1; x[d] < dims[d];) {
       int n = 0;
-      for (x[v] = 0; x[v] < dims[v]; ++x[v]) {
-        for (x[u] = 0; x[u] < dims[u]; ++x[u]) {
+      for (x[axisV] = 0; x[axisV] < dims[axisV]; ++x[axisV]) {
+        for (x[axisU] = 0; x[axisU] < dims[axisU]; ++x[axisU]) {
           int ax = x[0];
           int ay = x[1];
           int az = x[2];
@@ -175,8 +175,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
       ++x[d];
 
       n = 0;
-      for (int j = 0; j < dims[v]; ++j) {
-        for (int i = 0; i < dims[u];) {
+      for (int j = 0; j < dims[axisV]; ++j) {
+        for (int i = 0; i < dims[axisU];) {
           int c = mask[n];
           if (c == 0) {
             ++i;
@@ -185,15 +185,15 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           }
 
           int w = 1;
-          while (i + w < dims[u] && mask[n + w] == c) {
+          while (i + w < dims[axisU] && mask[n + w] == c) {
             ++w;
           }
 
           int h = 1;
           bool done = false;
-          while (j + h < dims[v] && !done) {
+          while (j + h < dims[axisV] && !done) {
             for (int k = 0; k < w; ++k) {
-              if (mask[n + k + h * dims[u]] != c) {
+              if (mask[n + k + h * dims[axisU]] != c) {
                 done = true;
                 break;
               }
@@ -205,12 +205,12 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
           int du[3] = {0, 0, 0};
           int dv[3] = {0, 0, 0};
-          du[u] = w;
-          dv[v] = h;
+          du[axisU] = w;
+          dv[axisV] = h;
 
           int x0[3] = {x[0], x[1], x[2]};
-          x0[u] = i;
-          x0[v] = j;
+          x0[axisU] = i;
+          x0[axisV] = j;
 
           float shade = 0.8f;
           if (d == 1) {
@@ -268,7 +268,7 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
           for (int y = 0; y < h; ++y) {
             for (int x2 = 0; x2 < w; ++x2) {
-              mask[n + x2 + y * dims[u]] = 0;
+              mask[n + x2 + y * dims[axisU]] = 0;
             }
           }
 
