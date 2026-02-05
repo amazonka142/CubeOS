@@ -37,18 +37,26 @@ private:
   void createSurface();
   void pickPhysicalDevice();
   void createLogicalDevice();
+  void createDescriptorSetLayout();
   void createSwapchain();
   void createImageViews();
   void createRenderPass();
   void createGraphicsPipeline();
+  void createDepthResources();
   void createFramebuffers();
   void createCommandPool();
+  void createVertexBuffer();
+  void createIndexBuffer();
+  void createUniformBuffers();
+  void createDescriptorPool();
+  void createDescriptorSets();
   void createCommandBuffers();
   void createSyncObjects();
 
   void cleanupSwapchain();
   void recreateSwapchain();
   void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+  void updateUniformBuffer(uint32_t imageIndex);
 
   bool checkValidationLayerSupport() const;
   std::vector<const char*> getRequiredExtensions() const;
@@ -65,6 +73,26 @@ private:
   VkShaderModule createShaderModule(const std::vector<char>& code) const;
   static std::vector<char> readFile(const std::string& path);
 
+  uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
+  void createBuffer(VkDeviceSize size,
+                    VkBufferUsageFlags usage,
+                    VkMemoryPropertyFlags properties,
+                    VkBuffer& buffer,
+                    VkDeviceMemory& bufferMemory) const;
+  void createImage(uint32_t width,
+                   uint32_t height,
+                   VkFormat format,
+                   VkImageTiling tiling,
+                   VkImageUsageFlags usage,
+                   VkMemoryPropertyFlags properties,
+                   VkImage& image,
+                   VkDeviceMemory& imageMemory) const;
+  VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) const;
+  VkFormat findDepthFormat() const;
+  VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates,
+                               VkImageTiling tiling,
+                               VkFormatFeatureFlags features) const;
+
   VkInstance instance = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
   VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
@@ -80,12 +108,28 @@ private:
   std::vector<VkImageView> swapchainImageViews;
 
   VkRenderPass renderPass = VK_NULL_HANDLE;
+  VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
   VkPipeline graphicsPipeline = VK_NULL_HANDLE;
   std::vector<VkFramebuffer> swapchainFramebuffers;
 
+  VkImage depthImage = VK_NULL_HANDLE;
+  VkDeviceMemory depthImageMemory = VK_NULL_HANDLE;
+  VkImageView depthImageView = VK_NULL_HANDLE;
+
   VkCommandPool commandPool = VK_NULL_HANDLE;
   std::vector<VkCommandBuffer> commandBuffers;
+
+  VkBuffer vertexBuffer = VK_NULL_HANDLE;
+  VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
+  VkBuffer indexBuffer = VK_NULL_HANDLE;
+  VkDeviceMemory indexBufferMemory = VK_NULL_HANDLE;
+  std::vector<VkBuffer> uniformBuffers;
+  std::vector<VkDeviceMemory> uniformBuffersMemory;
+  std::vector<void*> uniformBuffersMapped;
+
+  VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+  std::vector<VkDescriptorSet> descriptorSets;
 
   std::vector<VkSemaphore> imageAvailableSemaphores;
   std::vector<VkSemaphore> renderFinishedSemaphores;

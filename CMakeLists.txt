@@ -21,6 +21,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glfw)
 
+FetchContent_Declare(
+  glm
+  GIT_REPOSITORY https://github.com/g-truc/glm.git
+  GIT_TAG 0.9.9.8
+)
+FetchContent_MakeAvailable(glm)
+
 find_package(Vulkan REQUIRED)
 
 set(SHADER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
@@ -43,25 +50,25 @@ endif()
 file(MAKE_DIRECTORY ${SHADER_BINARY_DIR})
 
 set(SHADER_SOURCES
-  ${SHADER_SOURCE_DIR}/triangle.vert
-  ${SHADER_SOURCE_DIR}/triangle.frag
+  ${SHADER_SOURCE_DIR}/cube.vert
+  ${SHADER_SOURCE_DIR}/cube.frag
 )
 
 set(SHADER_BINARIES
-  ${SHADER_BINARY_DIR}/triangle.vert.spv
-  ${SHADER_BINARY_DIR}/triangle.frag.spv
+  ${SHADER_BINARY_DIR}/cube.vert.spv
+  ${SHADER_BINARY_DIR}/cube.frag.spv
 )
 
 add_custom_command(
-  OUTPUT ${SHADER_BINARY_DIR}/triangle.vert.spv
-  COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/triangle.vert.spv ${SHADER_SOURCE_DIR}/triangle.vert
-  DEPENDS ${SHADER_SOURCE_DIR}/triangle.vert
+  OUTPUT ${SHADER_BINARY_DIR}/cube.vert.spv
+  COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/cube.vert.spv ${SHADER_SOURCE_DIR}/cube.vert
+  DEPENDS ${SHADER_SOURCE_DIR}/cube.vert
 )
 
 add_custom_command(
-  OUTPUT ${SHADER_BINARY_DIR}/triangle.frag.spv
-  COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/triangle.frag.spv ${SHADER_SOURCE_DIR}/triangle.frag
-  DEPENDS ${SHADER_SOURCE_DIR}/triangle.frag
+  OUTPUT ${SHADER_BINARY_DIR}/cube.frag.spv
+  COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/cube.frag.spv ${SHADER_SOURCE_DIR}/cube.frag
+  DEPENDS ${SHADER_SOURCE_DIR}/cube.frag
 )
 
 add_custom_target(shaders ALL DEPENDS ${SHADER_BINARIES})
@@ -73,8 +80,9 @@ add_executable(cubeos_voxel
 )
 
 target_include_directories(cubeos_voxel PRIVATE src)
-target_link_libraries(cubeos_voxel PRIVATE glfw Vulkan::Vulkan)
+target_link_libraries(cubeos_voxel PRIVATE glfw Vulkan::Vulkan glm::glm)
 target_compile_definitions(cubeos_voxel PRIVATE GLFW_INCLUDE_NONE)
+target_compile_definitions(cubeos_voxel PRIVATE GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
 add_dependencies(cubeos_voxel shaders)
 
 add_custom_command(
