@@ -51,7 +51,7 @@ void App::mainLoop() {
     processInput(deltaTime);
     updatePlayer(deltaTime);
 
-    glm::vec3 eye = playerPos + glm::vec3(0.0f, 1.6f, 0.0f);
+    glm::vec3 eye = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
     glm::vec3 front = cameraFront();
     glm::mat4 view = glm::lookAt(eye, eye + front, glm::vec3(0.0f, 1.0f, 0.0f));
     glm::mat4 proj = glm::perspective(glm::radians(70.0f),
@@ -115,7 +115,7 @@ void App::processInput(float deltaTime) {
   bool rightPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
 
   if (leftPressed && !mouseLeftDown) {
-    glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.6f, 0.0f);
+    glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
     RaycastHit hit = raycast(origin, cameraFront(), 6.0f);
     if (hit.hit) {
       world.setBlock(hit.block.x, hit.block.y, hit.block.z, kAir);
@@ -125,7 +125,7 @@ void App::processInput(float deltaTime) {
   }
 
   if (rightPressed && !mouseRightDown) {
-    glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.6f, 0.0f);
+    glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
     RaycastHit hit = raycast(origin, cameraFront(), 6.0f);
     if (hit.hit) {
       glm::ivec3 target = hit.block + hit.normal;
