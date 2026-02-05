@@ -142,6 +142,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
   for (int d = 0; d < 3; ++d) {
     int axisU = (d + 1) % 3;
     int axisV = (d + 2) % 3;
+    int dimU = (axisU == 0) ? dims[0] : (axisU == 1 ? dims[1] : dims[2]);
+    int dimV = (axisV == 0) ? dims[0] : (axisV == 1 ? dims[1] : dims[2]);
 
     int x[3] = {0, 0, 0};
     int q[3] = {0, 0, 0};
@@ -149,8 +151,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
     for (x[d] = -1; x[d] < dims[d];) {
       int n = 0;
-      for (x[axisV] = 0; x[axisV] < dims[axisV]; ++x[axisV]) {
-        for (x[axisU] = 0; x[axisU] < dims[axisU]; ++x[axisU]) {
+      for (x[axisV] = 0; x[axisV] < dimV; ++x[axisV]) {
+        for (x[axisU] = 0; x[axisU] < dimU; ++x[axisU]) {
           int ax = x[0];
           int ay = x[1];
           int az = x[2];
@@ -175,8 +177,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
       ++x[d];
 
       n = 0;
-      for (int j = 0; j < dims[axisV]; ++j) {
-        for (int i = 0; i < dims[axisU];) {
+      for (int j = 0; j < dimV; ++j) {
+        for (int i = 0; i < dimU;) {
           int c = mask[n];
           if (c == 0) {
             ++i;
@@ -185,15 +187,15 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           }
 
           int w = 1;
-          while (i + w < dims[axisU] && mask[n + w] == c) {
+          while (i + w < dimU && mask[n + w] == c) {
             ++w;
           }
 
           int h = 1;
           bool done = false;
-          while (j + h < dims[axisV] && !done) {
+          while (j + h < dimV && !done) {
             for (int k = 0; k < w; ++k) {
-              if (mask[n + k + h * dims[axisU]] != c) {
+              if (mask[n + k + h * dimU] != c) {
                 done = true;
                 break;
               }
@@ -268,7 +270,7 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
           for (int y = 0; y < h; ++y) {
             for (int x2 = 0; x2 < w; ++x2) {
-              mask[n + x2 + y * dims[axisU]] = 0;
+              mask[n + x2 + y * dimU] = 0;
             }
           }
 
