@@ -1,5 +1,6 @@
 #include "world.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -237,12 +238,22 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
             v3 = v0 + glm::vec3(du[0], du[1], du[2]);
           }
 
-          uint32_t startIndex = static_cast<uint32_t>(outVertices.size());
           glm::vec2 uv0 = uvForTile(tile, 0.0f, 0.0f);
           glm::vec2 uv1 = uvForTile(tile, 1.0f, 0.0f);
           glm::vec2 uv2 = uvForTile(tile, 1.0f, 1.0f);
           glm::vec2 uv3 = uvForTile(tile, 0.0f, 1.0f);
 
+          glm::vec3 e1 = v1 - v0;
+          glm::vec3 e2 = v2 - v0;
+          glm::vec3 n = glm::cross(e1, e2);
+          glm::vec3 expectedNormal(0.0f);
+          expectedNormal[d] = (c > 0) ? 1.0f : -1.0f;
+          if (glm::dot(n, expectedNormal) < 0.0f) {
+            std::swap(v1, v3);
+            std::swap(uv1, uv3);
+          }
+
+          uint32_t startIndex = static_cast<uint32_t>(outVertices.size());
           outVertices.push_back({v0, color, uv0});
           outVertices.push_back({v1, color, uv1});
           outVertices.push_back({v2, color, uv2});
