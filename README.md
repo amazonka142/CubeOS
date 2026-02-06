@@ -23,9 +23,10 @@ build/Debug/cubeos_voxel.exe
 
 ## Controls
 - WASD move, Space jump, Mouse look.
-- LMB remove block, RMB place block.
+- LMB remove block (adds to inventory), RMB place block (consumes from hotbar).
 - 1-9 select hotbar slot.
-- Tab toggle inventory (click a slot to assign it to the selected hotbar slot).
+- Tab toggle inventory (cursor enabled).
+- Inventory: LMB drag/drop stacks, RMB split/place single items, same-type stacks merge up to 64.
 - Esc closes inventory; exits when inventory is closed.
 
 ## Notes

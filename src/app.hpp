@@ -3,17 +3,25 @@
 #include "vk_context.hpp"
 #include "world.hpp"
 
+#include <cstdint>
 #include <glm/glm.hpp>
 #include <array>
 #include <vector>
 
 struct GLFWwindow;
 
+struct ItemStack {
+  uint8_t type = kAir;
+  uint16_t count = 0;
+};
+
 class App {
 public:
   void run();
 
 private:
+  void refreshSelectedBlock();
+  bool addToInventory(uint8_t type, uint16_t count);
   void initWindow();
   void initVulkan();
   void mainLoop();
@@ -23,7 +31,7 @@ private:
   void rebuildUiMesh();
   void composeMeshData();
   void setInventoryOpen(bool open);
-  bool handleInventoryClick(double xpos, double ypos);
+  bool handleInventoryClick(double xpos, double ypos, bool rightClick);
   glm::vec2 cursorToFramebuffer(double xpos, double ypos) const;
   bool hitTestHotbar(float x, float y, int& outSlot) const;
   bool hitTestInventory(float x, float y, int& outIndex) const;
@@ -61,14 +69,25 @@ private:
   glm::vec3 playerVel{0.0f};
   bool onGround = false;
   uint8_t selectedBlock = kGrass;
-  std::array<uint8_t, 9> hotbar = {
-    kGrass, kDirt, kStone, kGrass, kDirt, kStone, kGrass, kDirt, kStone
-  };
-  std::array<uint8_t, 27> inventory = {
-    kGrass, kDirt, kStone, kGrass, kDirt, kStone, kGrass, kDirt, kStone,
-    kGrass, kDirt, kStone, kGrass, kDirt, kStone, kGrass, kDirt, kStone,
-    kGrass, kDirt, kStone, kGrass, kDirt, kStone, kGrass, kDirt, kStone
-  };
+  std::array<ItemStack, 9> hotbar = {{
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64}
+  }};
+  std::array<ItemStack, 27> inventory = {{
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
+    {kGrass, 64}, {kDirt, 64}, {kStone, 64}
+  }};
+  ItemStack cursorStack{};
+  float cursorFbX = 0.0f;
+  float cursorFbY = 0.0f;
   int selectedSlot = 0;
   bool inventoryOpen = false;
   bool tabDown = false;

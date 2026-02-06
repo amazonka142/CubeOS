@@ -270,9 +270,9 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           outIndices.push_back(startIndex + 2);
           outIndices.push_back(startIndex + 3);
 
-          for (int y = 0; y < h; ++y) {
-            for (int x2 = 0; x2 < w; ++x2) {
-              maskValues[n + x2 + y * meshDimU] = 0;
+          for (int row = 0; row < h; ++row) {
+            for (int col = 0; col < w; ++col) {
+              maskValues[n + col + row * meshDimU] = 0;
             }
           }
 

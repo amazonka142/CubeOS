@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <string>
 #include <stdexcept>
 
 namespace {
@@ -17,6 +18,22 @@ constexpr float kIconPadding = 6.0f;
 constexpr float kPanelPadding = 12.0f;
 constexpr int kInventoryCols = 9;
 constexpr int kInventoryRows = 3;
+constexpr uint16_t kMaxStack = 64;
+constexpr int kDigitWidth = 3;
+constexpr int kDigitHeight = 5;
+
+constexpr uint8_t kDigitMap[10][kDigitHeight] = {
+  {0b111, 0b101, 0b101, 0b101, 0b111}, // 0
+  {0b010, 0b110, 0b010, 0b010, 0b111}, // 1
+  {0b111, 0b001, 0b111, 0b100, 0b111}, // 2
+  {0b111, 0b001, 0b111, 0b001, 0b111}, // 3
+  {0b101, 0b101, 0b111, 0b001, 0b001}, // 4
+  {0b111, 0b100, 0b111, 0b001, 0b111}, // 5
+  {0b111, 0b100, 0b111, 0b101, 0b111}, // 6
+  {0b111, 0b001, 0b001, 0b001, 0b001}, // 7
+  {0b111, 0b101, 0b111, 0b101, 0b111}, // 8
+  {0b111, 0b101, 0b111, 0b001, 0b111}  // 9
+};
 
 int tileForBlock(uint8_t type) {
   switch (type) {
@@ -75,6 +92,7 @@ void App::initVulkan() {
   }
   rebuildWorldMesh();
   uiDirty = false;
+  refreshSelectedBlock();
   vk.init(window, &framebufferResized);
 }
 
@@ -142,7 +160,7 @@ void App::processInput(float deltaTime) {
     }
   }
   if (selectedSlot != prevSlot) {
-    selectedBlock = hotbar[static_cast<size_t>(selectedSlot)];
+    refreshSelectedBlock();
     uiDirty = true;
   }
 
@@ -154,7 +172,17 @@ void App::processInput(float deltaTime) {
       double xpos = 0.0;
       double ypos = 0.0;
       glfwGetCursorPos(window, &xpos, &ypos);
-      if (handleInventoryClick(xpos, ypos)) {
+      if (handleInventoryClick(xpos, ypos, false)) {
+        refreshSelectedBlock();
+        uiDirty = true;
+      }
+    }
+    if (rightPressed && !mouseRightDown) {
+      double xpos = 0.0;
+      double ypos = 0.0;
+      glfwGetCursorPos(window, &xpos, &ypos);
+      if (handleInventoryClick(xpos, ypos, true)) {
+        refreshSelectedBlock();
         uiDirty = true;
       }
     }
@@ -201,7 +229,13 @@ void App::processInput(float deltaTime) {
     glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
     RaycastHit hit = raycast(origin, cameraFront(), 6.0f);
     if (hit.hit) {
+      uint8_t removed = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
       world.setBlock(hit.block.x, hit.block.y, hit.block.z, kAir);
+      if (removed != kAir) {
+        addToInventory(removed, 1);
+        refreshSelectedBlock();
+        uiDirty = true;
+      }
       rebuildWorldMesh();
       vk.updateMesh(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
     }
@@ -215,9 +249,18 @@ void App::processInput(float deltaTime) {
       if (world.inBounds(target.x, target.y, target.z) &&
           world.getBlock(target.x, target.y, target.z) == kAir &&
           !blockIntersectsPlayer(target.x, target.y, target.z)) {
-        world.setBlock(target.x, target.y, target.z, selectedBlock);
-        rebuildWorldMesh();
-        vk.updateMesh(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
+        ItemStack& stack = hotbar[static_cast<size_t>(selectedSlot)];
+        if (stack.count > 0 && stack.type != kAir) {
+          world.setBlock(target.x, target.y, target.z, stack.type);
+          stack.count -= 1;
+          if (stack.count == 0) {
+            stack.type = kAir;
+          }
+          refreshSelectedBlock();
+          uiDirty = true;
+          rebuildWorldMesh();
+          vk.updateMesh(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
+        }
       }
     }
   }
@@ -319,6 +362,71 @@ void App::rebuildUiMesh() {
 
   const int backgroundTile = tileForBlock(kStone);
 
+  auto drawDigit = [&](int digit, float x, float y, float pixel,
+                       const glm::vec3& color, int tile) {
+    if (digit < 0 || digit > 9) {
+      return;
+    }
+    for (int row = 0; row < kDigitHeight; ++row) {
+      uint8_t mask = kDigitMap[digit][row];
+      for (int col = 0; col < kDigitWidth; ++col) {
+        int bit = kDigitWidth - 1 - col;
+        if (mask & (1u << bit)) {
+          addQuad(x + static_cast<float>(col) * pixel,
+                  y + static_cast<float>(row) * pixel,
+                  pixel,
+                  pixel,
+                  color,
+                  tile);
+        }
+      }
+    }
+  };
+
+  auto drawNumber = [&](int value, float right, float bottom, float pixel,
+                        const glm::vec3& color, int tile) {
+    if (value <= 1) {
+      return;
+    }
+    std::string text = std::to_string(value);
+    float digitW = static_cast<float>(kDigitWidth) * pixel;
+    float digitH = static_cast<float>(kDigitHeight) * pixel;
+    float spacing = pixel;
+    float totalW = digitW * static_cast<float>(text.size()) +
+                   spacing * static_cast<float>(text.size() - 1);
+    float startX = right - totalW;
+    float startY = bottom - digitH;
+
+    for (size_t i = 0; i < text.size(); ++i) {
+      int digit = text[i] - '0';
+      drawDigit(digit,
+                startX + static_cast<float>(i) * (digitW + spacing),
+                startY,
+                pixel,
+                color,
+                tile);
+    }
+  };
+
+  auto drawStack = [&](const ItemStack& stack, float x, float y) {
+    if (stack.count == 0 || stack.type == kAir) {
+      return;
+    }
+    int tile = tileForBlock(stack.type);
+    addQuad(x + kIconPadding,
+            y + kIconPadding,
+            kSlotSize - kIconPadding * 2.0f,
+            kSlotSize - kIconPadding * 2.0f,
+            glm::vec3(1.0f),
+            tile);
+    drawNumber(static_cast<int>(stack.count),
+               x + kSlotSize - 4.0f,
+               y + kSlotSize - 4.0f,
+               3.0f,
+               glm::vec3(0.95f, 0.95f, 0.98f),
+               backgroundTile);
+  };
+
   if (inventoryOpen) {
     const float gridWidth =
       kSlotSize * static_cast<float>(kInventoryCols) +
@@ -347,16 +455,7 @@ void App::rebuildUiMesh() {
         addQuad(x, y, kSlotSize, kSlotSize, glm::vec3(0.25f, 0.25f, 0.28f), backgroundTile);
 
         if (idx < inventory.size()) {
-          uint8_t blockType = inventory[idx];
-          if (blockType != kAir) {
-            int tile = tileForBlock(blockType);
-            addQuad(x + kIconPadding,
-                    y + kIconPadding,
-                    kSlotSize - kIconPadding * 2.0f,
-                    kSlotSize - kIconPadding * 2.0f,
-                    glm::vec3(1.0f),
-                    tile);
-          }
+          drawStack(inventory[idx], x, y);
         }
 
         ++idx;
@@ -379,16 +478,13 @@ void App::rebuildUiMesh() {
 
     addQuad(x, y, kSlotSize, kSlotSize, glm::vec3(0.30f, 0.30f, 0.32f), backgroundTile);
 
-    uint8_t blockType = hotbar[i];
-    if (blockType != kAir) {
-      int tile = tileForBlock(blockType);
-      addQuad(x + kIconPadding,
-              y + kIconPadding,
-              kSlotSize - kIconPadding * 2.0f,
-              kSlotSize - kIconPadding * 2.0f,
-              glm::vec3(1.0f),
-              tile);
-    }
+    drawStack(hotbar[i], x, y);
+  }
+
+  if (inventoryOpen && cursorStack.count > 0 && cursorStack.type != kAir) {
+    float cx = cursorFbX - kSlotSize * 0.5f;
+    float cy = cursorFbY - kSlotSize * 0.5f;
+    drawStack(cursorStack, cx, cy);
   }
 }
 
@@ -406,6 +502,68 @@ void App::composeMeshData() {
   uiIndexCount = static_cast<uint32_t>(uiIndices.size());
 }
 
+void App::refreshSelectedBlock() {
+  if (selectedSlot < 0 || selectedSlot >= static_cast<int>(hotbar.size())) {
+    selectedSlot = 0;
+  }
+  const ItemStack& stack = hotbar[static_cast<size_t>(selectedSlot)];
+  if (stack.count == 0 || stack.type == kAir) {
+    selectedBlock = kAir;
+  } else {
+    selectedBlock = stack.type;
+  }
+}
+
+bool App::addToInventory(uint8_t type, uint16_t count) {
+  if (type == kAir || count == 0) {
+    return true;
+  }
+
+  bool changed = false;
+
+  auto mergeInto = [&](auto& slots) {
+    for (auto& slot : slots) {
+      if (count == 0) {
+        return;
+      }
+      if (slot.count > 0 && slot.type == type && slot.count < kMaxStack) {
+        uint16_t space = static_cast<uint16_t>(kMaxStack - slot.count);
+        uint16_t toMove = std::min(space, count);
+        slot.count = static_cast<uint16_t>(slot.count + toMove);
+        count = static_cast<uint16_t>(count - toMove);
+        changed = true;
+      }
+    }
+  };
+
+  auto fillEmpty = [&](auto& slots) {
+    for (auto& slot : slots) {
+      if (count == 0) {
+        return;
+      }
+      if (slot.count == 0 || slot.type == kAir) {
+        uint16_t toMove = std::min<uint16_t>(kMaxStack, count);
+        slot.type = type;
+        slot.count = toMove;
+        count = static_cast<uint16_t>(count - toMove);
+        changed = true;
+      }
+    }
+  };
+
+  mergeInto(hotbar);
+  mergeInto(inventory);
+  fillEmpty(hotbar);
+  fillEmpty(inventory);
+
+  if (changed) {
+    refreshSelectedBlock();
+    uiDirty = true;
+  }
+
+  return count == 0;
+}
+
 void App::setInventoryOpen(bool open) {
   if (inventoryOpen == open) {
     return;
@@ -417,7 +575,20 @@ void App::setInventoryOpen(bool open) {
                      GLFW_CURSOR,
                      inventoryOpen ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
   }
+  if (inventoryOpen && window) {
+    double xpos = 0.0;
+    double ypos = 0.0;
+    glfwGetCursorPos(window, &xpos, &ypos);
+    glm::vec2 fb = cursorToFramebuffer(xpos, ypos);
+    cursorFbX = fb.x;
+    cursorFbY = fb.y;
+  }
   if (!inventoryOpen) {
+    if (cursorStack.count > 0 && cursorStack.type != kAir) {
+      addToInventory(cursorStack.type, cursorStack.count);
+      cursorStack.type = kAir;
+      cursorStack.count = 0;
+    }
     firstMouse = true;
   }
   uiDirty = true;
@@ -505,26 +676,109 @@ bool App::hitTestInventory(float x, float y, int& outIndex) const {
   return true;
 }
 
-bool App::handleInventoryClick(double xpos, double ypos) {
+bool App::handleInventoryClick(double xpos, double ypos, bool rightClick) {
   glm::vec2 pos = cursorToFramebuffer(xpos, ypos);
-  int slot = -1;
-  if (hitTestHotbar(pos.x, pos.y, slot)) {
-    if (slot >= 0 && slot < static_cast<int>(hotbar.size())) {
-      selectedSlot = slot;
-      selectedBlock = hotbar[static_cast<size_t>(selectedSlot)];
-      return true;
+  cursorFbX = pos.x;
+  cursorFbY = pos.y;
+  int index = -1;
+  bool onHotbar = hitTestHotbar(pos.x, pos.y, index);
+  bool onInventory = false;
+  if (!onHotbar) {
+    onInventory = hitTestInventory(pos.x, pos.y, index);
+  }
+
+  if (!onHotbar && !onInventory) {
+    return false;
+  }
+
+  bool selectionChanged = false;
+  if (onHotbar) {
+    if (selectedSlot != index) {
+      selectedSlot = index;
+      selectionChanged = true;
     }
   }
 
-  int index = -1;
-  if (hitTestInventory(pos.x, pos.y, index)) {
-    uint8_t blockType = inventory[static_cast<size_t>(index)];
-    hotbar[static_cast<size_t>(selectedSlot)] = blockType;
-    selectedBlock = blockType;
+  auto clearStack = [](ItemStack& stack) {
+    stack.type = kAir;
+    stack.count = 0;
+  };
+
+  ItemStack& slot = onHotbar
+    ? hotbar[static_cast<size_t>(index)]
+    : inventory[static_cast<size_t>(index)];
+
+  bool slotEmpty = (slot.count == 0 || slot.type == kAir);
+  bool cursorEmpty = (cursorStack.count == 0 || cursorStack.type == kAir);
+
+  if (!rightClick) {
+    if (cursorEmpty) {
+      if (slotEmpty) {
+        return false;
+      }
+      cursorStack = slot;
+      clearStack(slot);
+      return true;
+    }
+
+    if (slotEmpty) {
+      slot = cursorStack;
+      clearStack(cursorStack);
+      return true;
+    }
+
+    if (slot.type == cursorStack.type) {
+      uint16_t space = static_cast<uint16_t>(kMaxStack - slot.count);
+      if (space == 0) {
+        return false;
+      }
+      uint16_t toMove = std::min(space, cursorStack.count);
+      slot.count = static_cast<uint16_t>(slot.count + toMove);
+      cursorStack.count = static_cast<uint16_t>(cursorStack.count - toMove);
+      if (cursorStack.count == 0) {
+        cursorStack.type = kAir;
+      }
+      return true;
+    }
+
+    std::swap(slot, cursorStack);
     return true;
   }
 
-  return false;
+  if (cursorEmpty) {
+    if (slotEmpty) {
+      return false;
+    }
+    uint16_t take = static_cast<uint16_t>((slot.count + 1) / 2);
+    cursorStack.type = slot.type;
+    cursorStack.count = take;
+    slot.count = static_cast<uint16_t>(slot.count - take);
+    if (slot.count == 0) {
+      slot.type = kAir;
+    }
+    return true;
+  }
+
+  if (slotEmpty) {
+    slot.type = cursorStack.type;
+    slot.count = 1;
+    cursorStack.count = static_cast<uint16_t>(cursorStack.count - 1);
+    if (cursorStack.count == 0) {
+      cursorStack.type = kAir;
+    }
+    return true;
+  }
+
+  if (slot.type == cursorStack.type && slot.count < kMaxStack) {
+    slot.count = static_cast<uint16_t>(slot.count + 1);
+    cursorStack.count = static_cast<uint16_t>(cursorStack.count - 1);
+    if (cursorStack.count == 0) {
+      cursorStack.type = kAir;
+    }
+    return true;
+  }
+
+  return selectionChanged;
 }
 
 bool App::collidesAt(const glm::vec3& pos) const {
@@ -695,6 +949,12 @@ void App::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
   }
 
   if (app->inventoryOpen) {
+    glm::vec2 fb = app->cursorToFramebuffer(xpos, ypos);
+    app->cursorFbX = fb.x;
+    app->cursorFbY = fb.y;
+    if (app->cursorStack.count > 0 && app->cursorStack.type != kAir) {
+      app->uiDirty = true;
+    }
     app->lastMouseX = static_cast<float>(xpos);
     app->lastMouseY = static_cast<float>(ypos);
     return;
