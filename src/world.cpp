@@ -110,7 +110,7 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
   outIndices.clear();
 
   const int dims[3] = {worldWidth, kChunkHeight, worldDepth};
-  std::vector<int> maskValues(static_cast<size_t>(dims[0] * dims[1]));
+  std::vector<int> maskValues;
 
   auto tileFor = [](uint8_t type, int axis, bool positive) {
     // Tile indices in atlas: 0=grass top, 1=grass side, 2=dirt, 3=stone.
@@ -144,6 +144,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
     int axisVIndex = (d + 2) % 3;
     int meshDimU = (axisUIndex == 0) ? dims[0] : (axisUIndex == 1 ? dims[1] : dims[2]);
     int meshDimV = (axisVIndex == 0) ? dims[0] : (axisVIndex == 1 ? dims[1] : dims[2]);
+
+    maskValues.assign(static_cast<size_t>(meshDimU * meshDimV), 0);
 
     int x[3] = {0, 0, 0};
     int q[3] = {0, 0, 0};
@@ -339,8 +341,10 @@ bool World::load(const std::string& path) {
   }
 
   for (auto& chunk : chunks) {
-    in.read(reinterpret_cast<char*>(chunk.blocks.data()),
-            static_cast<std::streamsize>(chunk.blocks.size()));
+    if (!in.read(reinterpret_cast<char*>(chunk.blocks.data()),
+                 static_cast<std::streamsize>(chunk.blocks.size()))) {
+      return false;
+    }
     chunk.dirty = true;
   }
 

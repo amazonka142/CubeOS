@@ -1210,6 +1210,10 @@ void VulkanContext::cleanupSwapchain() {
   }
 
   for (size_t i = 0; i < uniformBuffers.size(); ++i) {
+    if (uniformBuffersMapped[i]) {
+      vkUnmapMemory(device, uniformBuffersMemory[i]);
+      uniformBuffersMapped[i] = nullptr;
+    }
     vkDestroyBuffer(device, uniformBuffers[i], nullptr);
     vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
   }
