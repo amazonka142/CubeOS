@@ -249,10 +249,10 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
           glm::vec3 e1 = v1 - v0;
           glm::vec3 e2 = v2 - v0;
-          glm::vec3 n = glm::cross(e1, e2);
+          glm::vec3 normal = glm::cross(e1, e2);
           glm::vec3 expectedNormal(0.0f);
           expectedNormal[d] = (c > 0) ? 1.0f : -1.0f;
-          if (glm::dot(n, expectedNormal) < 0.0f) {
+          if (glm::dot(normal, expectedNormal) < 0.0f) {
             std::swap(v1, v3);
             std::swap(uv1, uv3);
           }
