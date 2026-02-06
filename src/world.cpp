@@ -142,10 +142,10 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
   for (int d = 0; d < 3; ++d) {
     int axisUIndex = (d + 1) % 3;
     int axisVIndex = (d + 2) % 3;
-    int meshDimU = (axisUIndex == 0) ? dims[0] : (axisUIndex == 1 ? dims[1] : dims[2]);
-    int meshDimV = (axisVIndex == 0) ? dims[0] : (axisVIndex == 1 ? dims[1] : dims[2]);
+    int meshSpanU = (axisUIndex == 0) ? dims[0] : (axisUIndex == 1 ? dims[1] : dims[2]);
+    int meshSpanV = (axisVIndex == 0) ? dims[0] : (axisVIndex == 1 ? dims[1] : dims[2]);
 
-    maskValues.assign(static_cast<size_t>(meshDimU * meshDimV), 0);
+    maskValues.assign(static_cast<size_t>(meshSpanU * meshSpanV), 0);
 
     int x[3] = {0, 0, 0};
     int q[3] = {0, 0, 0};
@@ -153,8 +153,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
     for (x[d] = -1; x[d] < dims[d];) {
       int n = 0;
-      for (x[axisVIndex] = 0; x[axisVIndex] < meshDimV; ++x[axisVIndex]) {
-        for (x[axisUIndex] = 0; x[axisUIndex] < meshDimU; ++x[axisUIndex]) {
+      for (x[axisVIndex] = 0; x[axisVIndex] < meshSpanV; ++x[axisVIndex]) {
+        for (x[axisUIndex] = 0; x[axisUIndex] < meshSpanU; ++x[axisUIndex]) {
           int ax = x[0];
           int ay = x[1];
           int az = x[2];
@@ -179,8 +179,8 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
       ++x[d];
 
       n = 0;
-      for (int j = 0; j < meshDimV; ++j) {
-        for (int i = 0; i < meshDimU;) {
+      for (int j = 0; j < meshSpanV; ++j) {
+        for (int i = 0; i < meshSpanU;) {
           int c = maskValues[n];
           if (c == 0) {
             ++i;
@@ -189,15 +189,15 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           }
 
           int w = 1;
-          while (i + w < meshDimU && maskValues[n + w] == c) {
+          while (i + w < meshSpanU && maskValues[n + w] == c) {
             ++w;
           }
 
           int h = 1;
           bool done = false;
-          while (j + h < meshDimV && !done) {
+          while (j + h < meshSpanV && !done) {
             for (int k = 0; k < w; ++k) {
-              if (maskValues[n + k + h * meshDimU] != c) {
+              if (maskValues[n + k + h * meshSpanU] != c) {
                 done = true;
                 break;
               }
@@ -270,9 +270,10 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
           outIndices.push_back(startIndex + 2);
           outIndices.push_back(startIndex + 3);
 
-          for (int row = 0; row < h; ++row) {
-            for (int col = 0; col < w; ++col) {
-              maskValues[n + col + row * meshDimU] = 0;
+          for (int rowIdx = 0; rowIdx < h; ++rowIdx) {
+            int maskRowStart = n + rowIdx * meshSpanU;
+            for (int colIdx = 0; colIdx < w; ++colIdx) {
+              maskValues[maskRowStart + colIdx] = 0;
             }
           }
 
