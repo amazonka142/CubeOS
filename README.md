@@ -21,6 +21,13 @@ The executable will be under:
 build/Debug/cubeos_voxel.exe
 ```
 
+## Controls
+- WASD move, Space jump, Mouse look.
+- LMB remove block, RMB place block.
+- 1-9 select hotbar slot.
+- Tab toggle inventory (click a slot to assign it to the selected hotbar slot).
+- Esc closes inventory; exits when inventory is closed.
+
 ## Notes
 - Validation layers are enabled by default (toggle with `-DCUBEOS_ENABLE_VALIDATION=OFF`).
 - Next steps will add chunked voxel world, greedy meshing, and a simple player controller.

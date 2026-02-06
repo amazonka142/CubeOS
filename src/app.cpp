@@ -2,11 +2,21 @@
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 
 namespace {
+
+constexpr float kSlotSize = 40.0f;
+constexpr float kSlotPadding = 6.0f;
+constexpr float kSlotBorder = 3.0f;
+constexpr float kMarginBottom = 20.0f;
+constexpr float kIconPadding = 6.0f;
+constexpr float kPanelPadding = 12.0f;
+constexpr int kInventoryCols = 9;
+constexpr int kInventoryRows = 3;
 
 int tileForBlock(uint8_t type) {
   switch (type) {
@@ -77,7 +87,9 @@ void App::mainLoop() {
 
     glfwPollEvents();
     processInput(deltaTime);
-    updatePlayer(deltaTime);
+    if (!inventoryOpen) {
+      updatePlayer(deltaTime);
+    }
 
     if (uiDirty) {
       rebuildUiMesh();
@@ -103,8 +115,55 @@ void App::mainLoop() {
 }
 
 void App::processInput(float deltaTime) {
-  if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-    glfwSetWindowShouldClose(window, GLFW_TRUE);
+  bool escPressed = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+  if (escPressed && !escDown) {
+    if (inventoryOpen) {
+      setInventoryOpen(false);
+    } else {
+      glfwSetWindowShouldClose(window, GLFW_TRUE);
+    }
+    escDown = true;
+  } else if (!escPressed) {
+    escDown = false;
+  }
+
+  bool tabPressed = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
+  if (tabPressed && !tabDown) {
+    setInventoryOpen(!inventoryOpen);
+    tabDown = true;
+  } else if (!tabPressed) {
+    tabDown = false;
+  }
+
+  int prevSlot = selectedSlot;
+  for (int i = 0; i < static_cast<int>(hotbar.size()); ++i) {
+    if (glfwGetKey(window, GLFW_KEY_1 + i) == GLFW_PRESS) {
+      selectedSlot = i;
+    }
+  }
+  if (selectedSlot != prevSlot) {
+    selectedBlock = hotbar[static_cast<size_t>(selectedSlot)];
+    uiDirty = true;
+  }
+
+  bool leftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+  bool rightPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+
+  if (inventoryOpen) {
+    if (leftPressed && !mouseLeftDown) {
+      double xpos = 0.0;
+      double ypos = 0.0;
+      glfwGetCursorPos(window, &xpos, &ypos);
+      if (handleInventoryClick(xpos, ypos)) {
+        uiDirty = true;
+      }
+    }
+
+    mouseLeftDown = leftPressed;
+    mouseRightDown = rightPressed;
+
+    (void)deltaTime;
+    return;
   }
 
   glm::vec3 front = cameraFront();
@@ -137,20 +196,6 @@ void App::processInput(float deltaTime) {
     playerVel.y = 6.5f;
     onGround = false;
   }
-
-  int prevSlot = selectedSlot;
-  for (int i = 0; i < static_cast<int>(hotbar.size()); ++i) {
-    if (glfwGetKey(window, GLFW_KEY_1 + i) == GLFW_PRESS) {
-      selectedSlot = i;
-    }
-  }
-  if (selectedSlot != prevSlot) {
-    selectedBlock = hotbar[static_cast<size_t>(selectedSlot)];
-    uiDirty = true;
-  }
-
-  bool leftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-  bool rightPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
 
   if (leftPressed && !mouseLeftDown) {
     glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
@@ -233,17 +278,11 @@ void App::rebuildUiMesh() {
     return;
   }
 
-  const float slotSize = 40.0f;
-  const float slotPadding = 6.0f;
-  const float slotBorder = 3.0f;
-  const float marginBottom = 20.0f;
-  const float iconPadding = 6.0f;
-
   const float totalWidth =
-    slotSize * static_cast<float>(hotbar.size()) +
-    slotPadding * static_cast<float>(hotbar.size() - 1);
+    kSlotSize * static_cast<float>(hotbar.size()) +
+    kSlotPadding * static_cast<float>(hotbar.size() - 1);
   const float startX = (static_cast<float>(width) - totalWidth) * 0.5f;
-  const float startY = static_cast<float>(height) - marginBottom - slotSize;
+  const float startY = static_cast<float>(height) - kMarginBottom - kSlotSize;
 
   auto toNdc = [&](float px, float py) -> glm::vec2 {
     float x = (px / static_cast<float>(width)) * 2.0f - 1.0f;
@@ -280,28 +319,73 @@ void App::rebuildUiMesh() {
 
   const int backgroundTile = tileForBlock(kStone);
 
+  if (inventoryOpen) {
+    const float gridWidth =
+      kSlotSize * static_cast<float>(kInventoryCols) +
+      kSlotPadding * static_cast<float>(kInventoryCols - 1);
+    const float gridHeight =
+      kSlotSize * static_cast<float>(kInventoryRows) +
+      kSlotPadding * static_cast<float>(kInventoryRows - 1);
+
+    float gridX = (static_cast<float>(width) - gridWidth) * 0.5f;
+    float gridY = (static_cast<float>(height) - gridHeight) * 0.5f - 30.0f;
+    gridY = std::clamp(gridY, 20.0f, static_cast<float>(height) - gridHeight - 20.0f);
+
+    addQuad(gridX - kPanelPadding,
+            gridY - kPanelPadding,
+            gridWidth + kPanelPadding * 2.0f,
+            gridHeight + kPanelPadding * 2.0f,
+            glm::vec3(0.15f, 0.15f, 0.18f),
+            backgroundTile);
+
+    size_t idx = 0;
+    for (int row = 0; row < kInventoryRows; ++row) {
+      for (int col = 0; col < kInventoryCols; ++col) {
+        float x = gridX + static_cast<float>(col) * (kSlotSize + kSlotPadding);
+        float y = gridY + static_cast<float>(row) * (kSlotSize + kSlotPadding);
+
+        addQuad(x, y, kSlotSize, kSlotSize, glm::vec3(0.25f, 0.25f, 0.28f), backgroundTile);
+
+        if (idx < inventory.size()) {
+          uint8_t blockType = inventory[idx];
+          if (blockType != kAir) {
+            int tile = tileForBlock(blockType);
+            addQuad(x + kIconPadding,
+                    y + kIconPadding,
+                    kSlotSize - kIconPadding * 2.0f,
+                    kSlotSize - kIconPadding * 2.0f,
+                    glm::vec3(1.0f),
+                    tile);
+          }
+        }
+
+        ++idx;
+      }
+    }
+  }
+
   for (size_t i = 0; i < hotbar.size(); ++i) {
-    float x = startX + static_cast<float>(i) * (slotSize + slotPadding);
+    float x = startX + static_cast<float>(i) * (kSlotSize + kSlotPadding);
     float y = startY;
 
     if (static_cast<int>(i) == selectedSlot) {
-      addQuad(x - slotBorder,
-              y - slotBorder,
-              slotSize + slotBorder * 2.0f,
-              slotSize + slotBorder * 2.0f,
+      addQuad(x - kSlotBorder,
+              y - kSlotBorder,
+              kSlotSize + kSlotBorder * 2.0f,
+              kSlotSize + kSlotBorder * 2.0f,
               glm::vec3(0.90f, 0.90f, 0.95f),
               backgroundTile);
     }
 
-    addQuad(x, y, slotSize, slotSize, glm::vec3(0.30f, 0.30f, 0.32f), backgroundTile);
+    addQuad(x, y, kSlotSize, kSlotSize, glm::vec3(0.30f, 0.30f, 0.32f), backgroundTile);
 
     uint8_t blockType = hotbar[i];
     if (blockType != kAir) {
       int tile = tileForBlock(blockType);
-      addQuad(x + iconPadding,
-              y + iconPadding,
-              slotSize - iconPadding * 2.0f,
-              slotSize - iconPadding * 2.0f,
+      addQuad(x + kIconPadding,
+              y + kIconPadding,
+              kSlotSize - kIconPadding * 2.0f,
+              kSlotSize - kIconPadding * 2.0f,
               glm::vec3(1.0f),
               tile);
     }
@@ -320,6 +404,127 @@ void App::composeMeshData() {
     meshIndices.push_back(idx + vertexOffset);
   }
   uiIndexCount = static_cast<uint32_t>(uiIndices.size());
+}
+
+void App::setInventoryOpen(bool open) {
+  if (inventoryOpen == open) {
+    return;
+  }
+
+  inventoryOpen = open;
+  if (window) {
+    glfwSetInputMode(window,
+                     GLFW_CURSOR,
+                     inventoryOpen ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+  }
+  if (!inventoryOpen) {
+    firstMouse = true;
+  }
+  uiDirty = true;
+}
+
+glm::vec2 App::cursorToFramebuffer(double xpos, double ypos) const {
+  int winW = 0;
+  int winH = 0;
+  glfwGetWindowSize(window, &winW, &winH);
+  if (winW <= 0 || winH <= 0) {
+    return {0.0f, 0.0f};
+  }
+  float scaleX = static_cast<float>(width) / static_cast<float>(winW);
+  float scaleY = static_cast<float>(height) / static_cast<float>(winH);
+  return {static_cast<float>(xpos) * scaleX, static_cast<float>(ypos) * scaleY};
+}
+
+bool App::hitTestHotbar(float x, float y, int& outSlot) const {
+  if (width <= 0 || height <= 0) {
+    return false;
+  }
+
+  const float totalWidth =
+    kSlotSize * static_cast<float>(hotbar.size()) +
+    kSlotPadding * static_cast<float>(hotbar.size() - 1);
+  const float startX = (static_cast<float>(width) - totalWidth) * 0.5f;
+  const float startY = static_cast<float>(height) - kMarginBottom - kSlotSize;
+
+  if (y < startY || y > startY + kSlotSize) {
+    return false;
+  }
+
+  for (int i = 0; i < static_cast<int>(hotbar.size()); ++i) {
+    float slotX = startX + static_cast<float>(i) * (kSlotSize + kSlotPadding);
+    if (x >= slotX && x <= slotX + kSlotSize) {
+      outSlot = i;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool App::hitTestInventory(float x, float y, int& outIndex) const {
+  if (!inventoryOpen || width <= 0 || height <= 0) {
+    return false;
+  }
+
+  const float gridWidth =
+    kSlotSize * static_cast<float>(kInventoryCols) +
+    kSlotPadding * static_cast<float>(kInventoryCols - 1);
+  const float gridHeight =
+    kSlotSize * static_cast<float>(kInventoryRows) +
+    kSlotPadding * static_cast<float>(kInventoryRows - 1);
+
+  float gridX = (static_cast<float>(width) - gridWidth) * 0.5f;
+  float gridY = (static_cast<float>(height) - gridHeight) * 0.5f - 30.0f;
+  gridY = std::clamp(gridY, 20.0f, static_cast<float>(height) - gridHeight - 20.0f);
+
+  if (x < gridX || x > gridX + gridWidth || y < gridY || y > gridY + gridHeight) {
+    return false;
+  }
+
+  float localX = x - gridX;
+  float localY = y - gridY;
+  int col = static_cast<int>(localX / (kSlotSize + kSlotPadding));
+  int row = static_cast<int>(localY / (kSlotSize + kSlotPadding));
+
+  if (col < 0 || col >= kInventoryCols || row < 0 || row >= kInventoryRows) {
+    return false;
+  }
+
+  float colX = static_cast<float>(col) * (kSlotSize + kSlotPadding);
+  float rowY = static_cast<float>(row) * (kSlotSize + kSlotPadding);
+  if (localX > colX + kSlotSize || localY > rowY + kSlotSize) {
+    return false;
+  }
+
+  int index = row * kInventoryCols + col;
+  if (index < 0 || index >= static_cast<int>(inventory.size())) {
+    return false;
+  }
+
+  outIndex = index;
+  return true;
+}
+
+bool App::handleInventoryClick(double xpos, double ypos) {
+  glm::vec2 pos = cursorToFramebuffer(xpos, ypos);
+  int slot = -1;
+  if (hitTestHotbar(pos.x, pos.y, slot)) {
+    if (slot >= 0 && slot < static_cast<int>(hotbar.size())) {
+      selectedSlot = slot;
+      selectedBlock = hotbar[static_cast<size_t>(selectedSlot)];
+      return true;
+    }
+  }
+
+  int index = -1;
+  if (hitTestInventory(pos.x, pos.y, index)) {
+    uint8_t blockType = inventory[static_cast<size_t>(index)];
+    hotbar[static_cast<size_t>(selectedSlot)] = blockType;
+    selectedBlock = blockType;
+    return true;
+  }
+
+  return false;
 }
 
 bool App::collidesAt(const glm::vec3& pos) const {
@@ -486,6 +691,12 @@ void App::framebufferResizeCallback(GLFWwindow* window, int width, int height) {
 void App::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
   auto* app = reinterpret_cast<App*>(glfwGetWindowUserPointer(window));
   if (!app) {
+    return;
+  }
+
+  if (app->inventoryOpen) {
+    app->lastMouseX = static_cast<float>(xpos);
+    app->lastMouseY = static_cast<float>(ypos);
     return;
   }
 

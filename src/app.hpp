@@ -22,6 +22,11 @@ private:
   void rebuildWorldMesh();
   void rebuildUiMesh();
   void composeMeshData();
+  void setInventoryOpen(bool open);
+  bool handleInventoryClick(double xpos, double ypos);
+  glm::vec2 cursorToFramebuffer(double xpos, double ypos) const;
+  bool hitTestHotbar(float x, float y, int& outSlot) const;
+  bool hitTestInventory(float x, float y, int& outIndex) const;
   bool collidesAt(const glm::vec3& pos) const;
   bool blockIntersectsPlayer(int x, int y, int z) const;
   glm::vec3 cameraFront() const;
@@ -59,7 +64,15 @@ private:
   std::array<uint8_t, 9> hotbar = {
     kGrass, kDirt, kStone, kGrass, kDirt, kStone, kGrass, kDirt, kStone
   };
+  std::array<uint8_t, 27> inventory = {
+    kGrass, kDirt, kStone, kGrass, kDirt, kStone, kGrass, kDirt, kStone,
+    kGrass, kDirt, kStone, kGrass, kDirt, kStone, kGrass, kDirt, kStone,
+    kGrass, kDirt, kStone, kGrass, kDirt, kStone, kGrass, kDirt, kStone
+  };
   int selectedSlot = 0;
+  bool inventoryOpen = false;
+  bool tabDown = false;
+  bool escDown = false;
   bool mouseLeftDown = false;
   bool mouseRightDown = false;
   bool uiDirty = true;
