@@ -6,6 +6,33 @@
 #include <limits>
 #include <stdexcept>
 
+namespace {
+
+int tileForBlock(uint8_t type) {
+  switch (type) {
+    case kGrass:
+      return 0;
+    case kDirt:
+      return 2;
+    case kStone:
+      return 3;
+    default:
+      return 3;
+  }
+}
+
+glm::vec2 uvForTile(int tile, float u, float v) {
+  float tileSizeU = 1.0f / static_cast<float>(kAtlasCols);
+  float tileSizeV = 1.0f / static_cast<float>(kAtlasRows);
+  int tx = tile % kAtlasCols;
+  int ty = tile / kAtlasCols;
+  float u0 = static_cast<float>(tx) * tileSizeU;
+  float v0 = static_cast<float>(ty) * tileSizeV;
+  return glm::vec2(u0 + u * tileSizeU, v0 + v * tileSizeV);
+}
+
+} // namespace
+
 void App::run() {
   initWindow();
   initVulkan();
@@ -37,6 +64,7 @@ void App::initVulkan() {
     world.generate();
   }
   rebuildWorldMesh();
+  uiDirty = false;
   vk.init(window, &framebufferResized);
 }
 
@@ -50,6 +78,13 @@ void App::mainLoop() {
     glfwPollEvents();
     processInput(deltaTime);
     updatePlayer(deltaTime);
+
+    if (uiDirty) {
+      rebuildUiMesh();
+      composeMeshData();
+      vk.updateMesh(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
+      uiDirty = false;
+    }
 
     glm::vec3 eye = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
     glm::vec3 front = cameraFront();
@@ -103,12 +138,15 @@ void App::processInput(float deltaTime) {
     onGround = false;
   }
 
-  if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) {
-    selectedBlock = kGrass;
-  } else if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) {
-    selectedBlock = kDirt;
-  } else if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) {
-    selectedBlock = kStone;
+  int prevSlot = selectedSlot;
+  for (int i = 0; i < static_cast<int>(hotbar.size()); ++i) {
+    if (glfwGetKey(window, GLFW_KEY_1 + i) == GLFW_PRESS) {
+      selectedSlot = i;
+    }
+  }
+  if (selectedSlot != prevSlot) {
+    selectedBlock = hotbar[static_cast<size_t>(selectedSlot)];
+    uiDirty = true;
   }
 
   bool leftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
@@ -120,7 +158,7 @@ void App::processInput(float deltaTime) {
     if (hit.hit) {
       world.setBlock(hit.block.x, hit.block.y, hit.block.z, kAir);
       rebuildWorldMesh();
-      vk.updateMesh(worldVertices, worldIndices);
+      vk.updateMesh(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
     }
   }
 
@@ -134,7 +172,7 @@ void App::processInput(float deltaTime) {
           !blockIntersectsPlayer(target.x, target.y, target.z)) {
         world.setBlock(target.x, target.y, target.z, selectedBlock);
         rebuildWorldMesh();
-        vk.updateMesh(worldVertices, worldIndices);
+        vk.updateMesh(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
       }
     }
   }
@@ -182,7 +220,106 @@ void App::updatePlayer(float deltaTime) {
 
 void App::rebuildWorldMesh() {
   world.buildMesh(worldVertices, worldIndices);
-  vk.setMeshData(worldVertices, worldIndices);
+  rebuildUiMesh();
+  composeMeshData();
+  vk.setMeshData(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
+}
+
+void App::rebuildUiMesh() {
+  uiVertices.clear();
+  uiIndices.clear();
+
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+
+  const float slotSize = 40.0f;
+  const float slotPadding = 6.0f;
+  const float slotBorder = 3.0f;
+  const float marginBottom = 20.0f;
+  const float iconPadding = 6.0f;
+
+  const float totalWidth =
+    slotSize * static_cast<float>(hotbar.size()) +
+    slotPadding * static_cast<float>(hotbar.size() - 1);
+  const float startX = (static_cast<float>(width) - totalWidth) * 0.5f;
+  const float startY = static_cast<float>(height) - marginBottom - slotSize;
+
+  auto toNdc = [&](float px, float py) -> glm::vec2 {
+    float x = (px / static_cast<float>(width)) * 2.0f - 1.0f;
+    float y = 1.0f - (py / static_cast<float>(height)) * 2.0f;
+    return {x, y};
+  };
+
+  auto addQuad = [&](float x, float y, float w, float h,
+                     const glm::vec3& color,
+                     int tile) {
+    glm::vec2 p0 = toNdc(x, y);
+    glm::vec2 p1 = toNdc(x + w, y);
+    glm::vec2 p2 = toNdc(x + w, y + h);
+    glm::vec2 p3 = toNdc(x, y + h);
+
+    glm::vec2 uv0 = uvForTile(tile, 0.0f, 0.0f);
+    glm::vec2 uv1 = uvForTile(tile, 1.0f, 0.0f);
+    glm::vec2 uv2 = uvForTile(tile, 1.0f, 1.0f);
+    glm::vec2 uv3 = uvForTile(tile, 0.0f, 1.0f);
+
+    uint32_t start = static_cast<uint32_t>(uiVertices.size());
+    uiVertices.push_back({{p0.x, p0.y, 0.0f}, color, uv0});
+    uiVertices.push_back({{p1.x, p1.y, 0.0f}, color, uv1});
+    uiVertices.push_back({{p2.x, p2.y, 0.0f}, color, uv2});
+    uiVertices.push_back({{p3.x, p3.y, 0.0f}, color, uv3});
+
+    uiIndices.push_back(start + 0);
+    uiIndices.push_back(start + 1);
+    uiIndices.push_back(start + 2);
+    uiIndices.push_back(start + 0);
+    uiIndices.push_back(start + 2);
+    uiIndices.push_back(start + 3);
+  };
+
+  const int backgroundTile = tileForBlock(kStone);
+
+  for (size_t i = 0; i < hotbar.size(); ++i) {
+    float x = startX + static_cast<float>(i) * (slotSize + slotPadding);
+    float y = startY;
+
+    if (static_cast<int>(i) == selectedSlot) {
+      addQuad(x - slotBorder,
+              y - slotBorder,
+              slotSize + slotBorder * 2.0f,
+              slotSize + slotBorder * 2.0f,
+              glm::vec3(0.90f, 0.90f, 0.95f),
+              backgroundTile);
+    }
+
+    addQuad(x, y, slotSize, slotSize, glm::vec3(0.30f, 0.30f, 0.32f), backgroundTile);
+
+    uint8_t blockType = hotbar[i];
+    if (blockType != kAir) {
+      int tile = tileForBlock(blockType);
+      addQuad(x + iconPadding,
+              y + iconPadding,
+              slotSize - iconPadding * 2.0f,
+              slotSize - iconPadding * 2.0f,
+              glm::vec3(1.0f),
+              tile);
+    }
+  }
+}
+
+void App::composeMeshData() {
+  meshVertices = worldVertices;
+  meshIndices = worldIndices;
+  worldIndexCount = static_cast<uint32_t>(worldIndices.size());
+
+  uint32_t vertexOffset = static_cast<uint32_t>(meshVertices.size());
+  meshVertices.insert(meshVertices.end(), uiVertices.begin(), uiVertices.end());
+  meshIndices.reserve(meshIndices.size() + uiIndices.size());
+  for (uint32_t idx : uiIndices) {
+    meshIndices.push_back(idx + vertexOffset);
+  }
+  uiIndexCount = static_cast<uint32_t>(uiIndices.size());
 }
 
 bool App::collidesAt(const glm::vec3& pos) const {
@@ -343,6 +480,7 @@ void App::framebufferResizeCallback(GLFWwindow* window, int width, int height) {
   app->width = width;
   app->height = height;
   app->framebufferResized = true;
+  app->uiDirty = true;
 }
 
 void App::mouseCallback(GLFWwindow* window, double xpos, double ypos) {

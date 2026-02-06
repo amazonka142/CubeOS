@@ -319,15 +319,23 @@ void VulkanContext::waitIdle() {
 }
 
 void VulkanContext::setMeshData(const std::vector<Vertex>& vertices,
-                                const std::vector<uint32_t>& indices) {
+                                const std::vector<uint32_t>& indices,
+                                uint32_t worldIndexCountIn,
+                                uint32_t uiIndexCountIn) {
   meshVertices = vertices;
   meshIndices = indices;
+  worldIndexCount = worldIndexCountIn;
+  uiIndexCount = uiIndexCountIn;
 }
 
 void VulkanContext::updateMesh(const std::vector<Vertex>& vertices,
-                               const std::vector<uint32_t>& indices) {
+                               const std::vector<uint32_t>& indices,
+                               uint32_t worldIndexCountIn,
+                               uint32_t uiIndexCountIn) {
   meshVertices = vertices;
   meshIndices = indices;
+  worldIndexCount = worldIndexCountIn;
+  uiIndexCount = uiIndexCountIn;
   if (device == VK_NULL_HANDLE) {
     return;
   }
@@ -674,15 +682,23 @@ VkShaderModule VulkanContext::createShaderModule(const std::vector<char>& code) 
 void VulkanContext::createGraphicsPipeline() {
   auto vertShaderCode = readFile(buildShaderPath("cube.vert.spv"));
   auto fragShaderCode = readFile(buildShaderPath("cube.frag.spv"));
+  auto uiVertShaderCode = readFile(buildShaderPath("ui.vert.spv"));
 
   VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
   VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+  VkShaderModule uiVertShaderModule = createShaderModule(uiVertShaderCode);
 
   VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
   vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
   vertShaderStageInfo.module = vertShaderModule;
   vertShaderStageInfo.pName = "main";
+
+  VkPipelineShaderStageCreateInfo uiVertShaderStageInfo{};
+  uiVertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  uiVertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+  uiVertShaderStageInfo.module = uiVertShaderModule;
+  uiVertShaderStageInfo.pName = "main";
 
   VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
   fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -692,6 +708,11 @@ void VulkanContext::createGraphicsPipeline() {
 
   VkPipelineShaderStageCreateInfo shaderStages[] = {
     vertShaderStageInfo,
+    fragShaderStageInfo
+  };
+
+  VkPipelineShaderStageCreateInfo uiShaderStages[] = {
+    uiVertShaderStageInfo,
     fragShaderStageInfo
   };
 
@@ -726,6 +747,9 @@ void VulkanContext::createGraphicsPipeline() {
   rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
   rasterizer.depthBiasEnable = VK_FALSE;
 
+  VkPipelineRasterizationStateCreateInfo rasterizerUi = rasterizer;
+  rasterizerUi.cullMode = VK_CULL_MODE_NONE;
+
   VkPipelineMultisampleStateCreateInfo multisampling{};
   multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
   multisampling.sampleShadingEnable = VK_FALSE;
@@ -738,6 +762,10 @@ void VulkanContext::createGraphicsPipeline() {
   depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
   depthStencil.depthBoundsTestEnable = VK_FALSE;
   depthStencil.stencilTestEnable = VK_FALSE;
+
+  VkPipelineDepthStencilStateCreateInfo depthStencilUi = depthStencil;
+  depthStencilUi.depthTestEnable = VK_FALSE;
+  depthStencilUi.depthWriteEnable = VK_FALSE;
 
   VkPipelineColorBlendAttachmentState colorBlendAttachment{};
   colorBlendAttachment.colorWriteMask =
@@ -791,8 +819,18 @@ void VulkanContext::createGraphicsPipeline() {
                                     nullptr, &graphicsPipeline),
           "Failed to create graphics pipeline.");
 
+  VkGraphicsPipelineCreateInfo uiPipelineInfo = pipelineInfo;
+  uiPipelineInfo.pStages = uiShaderStages;
+  uiPipelineInfo.pRasterizationState = &rasterizerUi;
+  uiPipelineInfo.pDepthStencilState = &depthStencilUi;
+
+  checkVk(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &uiPipelineInfo,
+                                    nullptr, &uiPipeline),
+          "Failed to create UI graphics pipeline.");
+
   vkDestroyShaderModule(device, fragShaderModule, nullptr);
   vkDestroyShaderModule(device, vertShaderModule, nullptr);
+  vkDestroyShaderModule(device, uiVertShaderModule, nullptr);
 }
 
 void VulkanContext::createDepthResources() {
@@ -1115,7 +1153,6 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
   renderPassInfo.pClearValues = clearValues.data();
 
   vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-  vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
   VkViewport viewport{};
   viewport.x = 0.0f;
@@ -1136,15 +1173,32 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
     vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdBindDescriptorSets(commandBuffer,
-                            VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout,
-                            0,
-                            1,
-                            &descriptorSets[imageIndex],
-                            0,
-                            nullptr);
-    vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(meshIndices.size()), 1, 0, 0, 0);
+
+    if (worldIndexCount > 0) {
+      vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+      vkCmdBindDescriptorSets(commandBuffer,
+                              VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              pipelineLayout,
+                              0,
+                              1,
+                              &descriptorSets[imageIndex],
+                              0,
+                              nullptr);
+      vkCmdDrawIndexed(commandBuffer, worldIndexCount, 1, 0, 0, 0);
+    }
+
+    if (uiIndexCount > 0 && uiPipeline != VK_NULL_HANDLE) {
+      vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline);
+      vkCmdBindDescriptorSets(commandBuffer,
+                              VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              pipelineLayout,
+                              0,
+                              1,
+                              &descriptorSets[imageIndex],
+                              0,
+                              nullptr);
+      vkCmdDrawIndexed(commandBuffer, uiIndexCount, 1, worldIndexCount, 0, 0);
+    }
   }
   vkCmdEndRenderPass(commandBuffer);
 
@@ -1237,6 +1291,10 @@ void VulkanContext::cleanupSwapchain() {
   if (graphicsPipeline != VK_NULL_HANDLE) {
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     graphicsPipeline = VK_NULL_HANDLE;
+  }
+  if (uiPipeline != VK_NULL_HANDLE) {
+    vkDestroyPipeline(device, uiPipeline, nullptr);
+    uiPipeline = VK_NULL_HANDLE;
   }
 
   if (pipelineLayout != VK_NULL_HANDLE) {

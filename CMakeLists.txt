@@ -53,11 +53,13 @@ file(MAKE_DIRECTORY ${SHADER_BINARY_DIR})
 
 set(SHADER_SOURCES
   ${SHADER_SOURCE_DIR}/cube.vert
+  ${SHADER_SOURCE_DIR}/ui.vert
   ${SHADER_SOURCE_DIR}/cube.frag
 )
 
 set(SHADER_BINARIES
   ${SHADER_BINARY_DIR}/cube.vert.spv
+  ${SHADER_BINARY_DIR}/ui.vert.spv
   ${SHADER_BINARY_DIR}/cube.frag.spv
 )
 
@@ -65,6 +67,12 @@ add_custom_command(
   OUTPUT ${SHADER_BINARY_DIR}/cube.vert.spv
   COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/cube.vert.spv ${SHADER_SOURCE_DIR}/cube.vert
   DEPENDS ${SHADER_SOURCE_DIR}/cube.vert
+)
+
+add_custom_command(
+  OUTPUT ${SHADER_BINARY_DIR}/ui.vert.spv
+  COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/ui.vert.spv ${SHADER_SOURCE_DIR}/ui.vert
+  DEPENDS ${SHADER_SOURCE_DIR}/ui.vert
 )
 
 add_custom_command(

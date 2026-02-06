@@ -18,9 +18,13 @@ public:
   void drawFrame();
   void waitIdle();
   void setMeshData(const std::vector<Vertex>& vertices,
-                   const std::vector<uint32_t>& indices);
+                   const std::vector<uint32_t>& indices,
+                   uint32_t worldIndexCount,
+                   uint32_t uiIndexCount);
   void updateMesh(const std::vector<Vertex>& vertices,
-                  const std::vector<uint32_t>& indices);
+                  const std::vector<uint32_t>& indices,
+                  uint32_t worldIndexCount,
+                  uint32_t uiIndexCount);
   void setCameraMatrices(const glm::mat4& view, const glm::mat4& proj);
 
 private:
@@ -128,6 +132,7 @@ private:
   VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
   VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+  VkPipeline uiPipeline = VK_NULL_HANDLE;
   std::vector<VkFramebuffer> swapchainFramebuffers;
 
   VkImage depthImage = VK_NULL_HANDLE;
@@ -155,6 +160,8 @@ private:
 
   std::vector<Vertex> meshVertices;
   std::vector<uint32_t> meshIndices;
+  uint32_t worldIndexCount = 0;
+  uint32_t uiIndexCount = 0;
   glm::mat4 cameraView{1.0f};
   glm::mat4 cameraProj{1.0f};
 

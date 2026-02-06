@@ -4,6 +4,7 @@
 #include "world.hpp"
 
 #include <glm/glm.hpp>
+#include <array>
 #include <vector>
 
 struct GLFWwindow;
@@ -19,6 +20,8 @@ private:
   void processInput(float deltaTime);
   void updatePlayer(float deltaTime);
   void rebuildWorldMesh();
+  void rebuildUiMesh();
+  void composeMeshData();
   bool collidesAt(const glm::vec3& pos) const;
   bool blockIntersectsPlayer(int x, int y, int z) const;
   glm::vec3 cameraFront() const;
@@ -42,13 +45,24 @@ private:
   World world{3, 3};
   std::vector<Vertex> worldVertices;
   std::vector<uint32_t> worldIndices;
+  std::vector<Vertex> uiVertices;
+  std::vector<uint32_t> uiIndices;
+  std::vector<Vertex> meshVertices;
+  std::vector<uint32_t> meshIndices;
+  uint32_t worldIndexCount = 0;
+  uint32_t uiIndexCount = 0;
 
   glm::vec3 playerPos{8.0f, 30.0f, 8.0f};
   glm::vec3 playerVel{0.0f};
   bool onGround = false;
   uint8_t selectedBlock = kGrass;
+  std::array<uint8_t, 9> hotbar = {
+    kGrass, kDirt, kStone, kGrass, kDirt, kStone, kGrass, kDirt, kStone
+  };
+  int selectedSlot = 0;
   bool mouseLeftDown = false;
   bool mouseRightDown = false;
+  bool uiDirty = true;
 
   float yaw = -90.0f;
   float pitch = 0.0f;
