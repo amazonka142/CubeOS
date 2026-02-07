@@ -116,9 +116,108 @@ void App::initVulkan() {
   if (!world.load("world.bin")) {
     world.generate();
   }
+  int initialCx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
+  int initialCz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
+  world.updateActiveChunks(initialCx, initialCz, kChunkViewRadius);
+
+  auto isSpawnGround = [](uint8_t block) {
+    return block != kAir && block != kWater && block != kLeaves && block != kGravel;
+  };
+
+  auto isPreferredSpawnGround = [](uint8_t block) {
+    return block == kGrass || block == kDirt || block == kSand;
+  };
+
+  auto findSurfaceSpawn = [&]() -> glm::vec3 {
+    int baseX = static_cast<int>(std::floor(playerPos.x));
+    int baseZ = static_cast<int>(std::floor(playerPos.z));
+    constexpr int kSpawnSearchRadius = 160;
+    constexpr int kMinSpawnY = 54;
+
+    int bestScore = std::numeric_limits<int>::min();
+    glm::vec3 bestPos = playerPos;
+
+    for (int radius = 0; radius <= kSpawnSearchRadius; ++radius) {
+      for (int dz = -radius; dz <= radius; ++dz) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+          if (std::max(std::abs(dx), std::abs(dz)) != radius) {
+            continue;
+          }
+
+          int x = baseX + dx;
+          int z = baseZ + dz;
+          for (int y = world.height() - 3; y >= 1; --y) {
+            uint8_t ground = world.getBlock(x, y, z);
+            uint8_t feet = world.getBlock(x, y + 1, z);
+            uint8_t head = world.getBlock(x, y + 2, z);
+            if (isSpawnGround(ground) && feet == kAir && head == kAir) {
+              if (y < kMinSpawnY) {
+                break;
+              }
+
+              bool openSky = true;
+              for (int sy = y + 3; sy < world.height(); ++sy) {
+                uint8_t skyBlock = world.getBlock(x, sy, z);
+                if (skyBlock != kAir && skyBlock != kLeaves) {
+                  openSky = false;
+                  break;
+                }
+              }
+              if (!openSky) {
+                break;
+              }
+
+              int score = y * 100 - radius * 3;
+              if (isPreferredSpawnGround(ground)) {
+                score += 500;
+              }
+
+              int stableNeighbors = 0;
+              for (int nz = -1; nz <= 1; ++nz) {
+                for (int nx = -1; nx <= 1; ++nx) {
+                  if (nx == 0 && nz == 0) {
+                    continue;
+                  }
+                  uint8_t neighborGround = world.getBlock(x + nx, y, z + nz);
+                  uint8_t neighborFeet = world.getBlock(x + nx, y + 1, z + nz);
+                  if (neighborGround != kAir && neighborGround != kWater && neighborFeet == kAir) {
+                    ++stableNeighbors;
+                  }
+                }
+              }
+              score += stableNeighbors * 35;
+
+              if (score > bestScore) {
+                bestScore = score;
+                bestPos = {static_cast<float>(x) + 0.5f,
+                           static_cast<float>(y) + 2.25f,
+                           static_cast<float>(z) + 0.5f};
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (bestScore == std::numeric_limits<int>::min()) {
+      return playerPos;
+    }
+    return bestPos;
+  };
+
+  playerPos = findSurfaceSpawn();
+  while (collidesAt(playerPos) && playerPos.y < static_cast<float>(world.height() - 3)) {
+    playerPos.y += 0.35f;
+  }
+  playerVel = glm::vec3(0.0f);
+  onGround = false;
+
   int cx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int cz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
-  world.updateActiveChunks(cx, cz, kChunkViewRadius);
+  if (cx != initialCx || cz != initialCz) {
+    world.updateActiveChunks(cx, cz, kChunkViewRadius);
+  }
   currentChunkX = cx;
   currentChunkZ = cz;
   chunkCenterValid = true;

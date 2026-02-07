@@ -93,22 +93,22 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
       int worldZ = baseZ + lz;
 
       float rollingHills = glm::perlin(glm::vec2(
-        static_cast<float>(worldX + seed * 11) * 0.0035f,
-        static_cast<float>(worldZ - seed * 13) * 0.0035f));
+        static_cast<float>(worldX + seed * 11) * 0.0032f,
+        static_cast<float>(worldZ - seed * 13) * 0.0032f));
       float detailNoise = fbmNoise(static_cast<float>(worldX), static_cast<float>(worldZ), seed);
-      float baseHeight = 34.0f + rollingHills * 11.0f + detailNoise * 9.0f;
+      float baseHeight = 34.0f + rollingHills * 10.0f + detailNoise * 8.0f;
 
       float ridgeNoise = 1.0f - std::abs(glm::perlin(glm::vec2(
-        static_cast<float>(worldX - seed * 5) * 0.0012f,
-        static_cast<float>(worldZ + seed * 3) * 0.0012f)));
-      float mountainMask = smooth01((ridgeNoise - 0.55f) / 0.45f);
-      float mountainHeight = mountainMask * (18.0f + 44.0f * mountainMask);
+        static_cast<float>(worldX - seed * 5) * 0.0010f,
+        static_cast<float>(worldZ + seed * 3) * 0.0010f)));
+      float mountainMask = smooth01((ridgeNoise - 0.70f) / 0.30f);
+      float mountainHeight = mountainMask * (12.0f + 34.0f * mountainMask);
 
       float canyonSignal = 1.0f - std::abs(glm::perlin(glm::vec2(
-        static_cast<float>(worldX + seed * 17) * 0.0018f,
-        static_cast<float>(worldZ - seed * 11) * 0.0018f)));
-      float canyonMask = smooth01((canyonSignal - 0.78f) / 0.22f);
-      float canyonDepth = canyonMask * (16.0f + 24.0f * canyonMask);
+        static_cast<float>(worldX + seed * 17) * 0.0016f,
+        static_cast<float>(worldZ - seed * 11) * 0.0016f)));
+      float canyonMask = smooth01((canyonSignal - 0.95f) / 0.05f);
+      float canyonDepth = canyonMask * (4.0f + 10.0f * canyonMask);
 
       float heightF = baseHeight + mountainHeight - canyonDepth;
       int height = static_cast<int>(std::round(heightF));
@@ -142,26 +142,33 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
         blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
       }
 
-      for (int y = 5; y < height - 1; ++y) {
+      float caveRegion = glm::perlin(glm::vec2(
+        static_cast<float>(worldX + seed * 41) * 0.0022f,
+        static_cast<float>(worldZ - seed * 37) * 0.0022f));
+      bool allowCavesHere = caveRegion > 0.62f;
+
+      for (int y = 10; y < height - 10; ++y) {
         size_t idx = static_cast<size_t>(chunkLocalIndex(lx, y, lz));
         if (blocks[idx] == kAir) {
           continue;
         }
 
-        float caveA = glm::perlin(glm::vec3(
-          static_cast<float>(worldX + seed * 31) * 0.045f,
-          static_cast<float>(y - seed * 13) * 0.055f,
-          static_cast<float>(worldZ - seed * 29) * 0.045f));
-        float caveB = glm::perlin(glm::vec3(
-          static_cast<float>(worldX - seed * 7) * 0.09f,
-          static_cast<float>(y + seed * 19) * 0.09f,
-          static_cast<float>(worldZ + seed * 23) * 0.09f));
-        float caveShape = std::abs(caveA * 0.72f + caveB * 0.28f);
-        float depth01 = static_cast<float>(y) / static_cast<float>(height);
-        float caveThreshold = 0.11f + 0.06f * depth01;
-        if (caveShape < caveThreshold) {
-          blocks[idx] = kAir;
-          continue;
+        if (allowCavesHere) {
+          float caveA = glm::perlin(glm::vec3(
+            static_cast<float>(worldX + seed * 31) * 0.062f,
+            static_cast<float>(y - seed * 13) * 0.070f,
+            static_cast<float>(worldZ - seed * 29) * 0.062f));
+          float caveB = glm::perlin(glm::vec3(
+            static_cast<float>(worldX - seed * 7) * 0.125f,
+            static_cast<float>(y + seed * 19) * 0.125f,
+            static_cast<float>(worldZ + seed * 23) * 0.125f));
+          float tubeShape = std::abs(caveA) + 0.62f * std::abs(caveB);
+          float depthT = saturate(static_cast<float>(height - y - 10) / 48.0f);
+          float caveThreshold = 0.038f + 0.014f * depthT;
+          if (tubeShape < caveThreshold) {
+            blocks[idx] = kAir;
+            continue;
+          }
         }
 
         if (blocks[idx] != kStone) {
@@ -846,7 +853,7 @@ bool World::save(const std::string& path) const {
   }
 
   const char magic[4] = {'C', 'U', 'B', '2'};
-  uint32_t version = 3;
+  uint32_t version = 6;
   uint32_t cs = static_cast<uint32_t>(kChunkSize);
   uint32_t ch = static_cast<uint32_t>(kChunkHeight);
   uint32_t seedValue = static_cast<uint32_t>(seed);
@@ -911,7 +918,7 @@ bool World::load(const std::string& path) {
   in.read(reinterpret_cast<char*>(&seedValue), sizeof(seedValue));
   in.read(reinterpret_cast<char*>(&storedCount), sizeof(storedCount));
 
-  if (std::strncmp(magic, "CUB2", 4) != 0 || version != 3 ||
+  if (std::strncmp(magic, "CUB2", 4) != 0 || version != 6 ||
       cs != static_cast<uint32_t>(kChunkSize) ||
       ch != static_cast<uint32_t>(kChunkHeight)) {
     return false;
