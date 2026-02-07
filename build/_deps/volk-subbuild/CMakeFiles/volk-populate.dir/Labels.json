@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/CMakeFiles/volk-populate"
+		},
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/CMakeFiles/volk-populate.rule"
+		},
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/CMakeFiles/volk-populate-complete.rule"
+		},
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/volk-populate-prefix/src/volk-populate-stamp/volk-populate-build.rule"
+		},
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/volk-populate-prefix/src/volk-populate-stamp/volk-populate-configure.rule"
+		},
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/volk-populate-prefix/src/volk-populate-stamp/volk-populate-download.rule"
+		},
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/volk-populate-prefix/src/volk-populate-stamp/volk-populate-install.rule"
+		},
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/volk-populate-prefix/src/volk-populate-stamp/volk-populate-mkdir.rule"
+		},
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/volk-populate-prefix/src/volk-populate-stamp/volk-populate-patch.rule"
+		},
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/volk-populate-prefix/src/volk-populate-stamp/volk-populate-test.rule"
+		},
+		{
+			"file" : "/Users/macuser/Documents/CubeOS/build/_deps/volk-subbuild/volk-populate-prefix/src/volk-populate-stamp/volk-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"volk-populate"
+		],
+		"name" : "volk-populate"
+	}
+}

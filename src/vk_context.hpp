@@ -2,8 +2,6 @@
 
 #include "mesh.hpp"
 
-#include <vulkan/vulkan.h>
-
 #include <cstddef>
 #include <optional>
 #include <string>

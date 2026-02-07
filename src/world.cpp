@@ -49,6 +49,34 @@ float fbmNoise(float x, float z, int seed) {
   return total / maxValue;
 }
 
+float saturate(float v) {
+  return std::clamp(v, 0.0f, 1.0f);
+}
+
+float smooth01(float v) {
+  float t = saturate(v);
+  return t * t * (3.0f - 2.0f * t);
+}
+
+uint32_t mixBits(uint32_t x) {
+  x ^= x >> 16;
+  x *= 0x7feb352du;
+  x ^= x >> 15;
+  x *= 0x846ca68bu;
+  x ^= x >> 16;
+  return x;
+}
+
+float hashedNoise01(int x, int y, int z, int seed, uint32_t salt) {
+  uint32_t h = static_cast<uint32_t>(x) * 73856093u;
+  h ^= static_cast<uint32_t>(y) * 19349663u;
+  h ^= static_cast<uint32_t>(z) * 83492791u;
+  h ^= static_cast<uint32_t>(seed) * 2654435761u;
+  h ^= salt;
+  h = mixBits(h);
+  return static_cast<float>(h & 0x00ffffffu) / 16777215.0f;
+}
+
 int chunkLocalIndex(int lx, int ly, int lz) {
   return lx + lz * kChunkSize + ly * kChunkSize * kChunkSize;
 }
@@ -57,27 +85,117 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
   std::vector<uint8_t> blocks(static_cast<size_t>(kChunkSize * kChunkSize * kChunkHeight), kAir);
   int baseX = cx * kChunkSize;
   int baseZ = cz * kChunkSize;
+  constexpr int kSeaLevel = 36;
 
   for (int lz = 0; lz < kChunkSize; ++lz) {
     for (int lx = 0; lx < kChunkSize; ++lx) {
       int worldX = baseX + lx;
       int worldZ = baseZ + lz;
 
-      float n1 = fbmNoise(static_cast<float>(worldX), static_cast<float>(worldZ), seed);
-      float n2 = glm::perlin(glm::vec2(static_cast<float>(worldX + seed) * 0.002f,
-                                       static_cast<float>(worldZ - seed) * 0.002f));
-      float heightF = 32.0f + n1 * 18.0f + n2 * 12.0f;
+      float rollingHills = glm::perlin(glm::vec2(
+        static_cast<float>(worldX + seed * 11) * 0.0035f,
+        static_cast<float>(worldZ - seed * 13) * 0.0035f));
+      float detailNoise = fbmNoise(static_cast<float>(worldX), static_cast<float>(worldZ), seed);
+      float baseHeight = 34.0f + rollingHills * 11.0f + detailNoise * 9.0f;
+
+      float ridgeNoise = 1.0f - std::abs(glm::perlin(glm::vec2(
+        static_cast<float>(worldX - seed * 5) * 0.0012f,
+        static_cast<float>(worldZ + seed * 3) * 0.0012f)));
+      float mountainMask = smooth01((ridgeNoise - 0.55f) / 0.45f);
+      float mountainHeight = mountainMask * (18.0f + 44.0f * mountainMask);
+
+      float canyonSignal = 1.0f - std::abs(glm::perlin(glm::vec2(
+        static_cast<float>(worldX + seed * 17) * 0.0018f,
+        static_cast<float>(worldZ - seed * 11) * 0.0018f)));
+      float canyonMask = smooth01((canyonSignal - 0.78f) / 0.22f);
+      float canyonDepth = canyonMask * (16.0f + 24.0f * canyonMask);
+
+      float heightF = baseHeight + mountainHeight - canyonDepth;
       int height = static_cast<int>(std::round(heightF));
-      height = std::clamp(height, 1, kChunkHeight - 1);
+      height = std::clamp(height, 8, kChunkHeight - 2);
 
       for (int y = 0; y < height; ++y) {
         uint8_t type = kStone;
-        if (y == height - 1) {
-          type = kGrass;
-        } else if (y >= height - 4) {
-          type = kDirt;
+        bool isSurface = (y == height - 1);
+        bool isSubsurface = (y >= height - 4);
+        bool isCanyonFloor = canyonMask > 0.55f;
+        bool isBeach = height <= kSeaLevel;
+
+        if (isSurface) {
+          if (isCanyonFloor) {
+            type = kGravel;
+          } else if (isBeach) {
+            type = kSand;
+          } else {
+            type = kGrass;
+          }
+        } else if (isSubsurface) {
+          if (isCanyonFloor) {
+            type = kGravel;
+          } else if (isBeach) {
+            type = kSand;
+          } else {
+            type = kDirt;
+          }
         }
+
         blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+      }
+
+      for (int y = 5; y < height - 1; ++y) {
+        size_t idx = static_cast<size_t>(chunkLocalIndex(lx, y, lz));
+        if (blocks[idx] == kAir) {
+          continue;
+        }
+
+        float caveA = glm::perlin(glm::vec3(
+          static_cast<float>(worldX + seed * 31) * 0.045f,
+          static_cast<float>(y - seed * 13) * 0.055f,
+          static_cast<float>(worldZ - seed * 29) * 0.045f));
+        float caveB = glm::perlin(glm::vec3(
+          static_cast<float>(worldX - seed * 7) * 0.09f,
+          static_cast<float>(y + seed * 19) * 0.09f,
+          static_cast<float>(worldZ + seed * 23) * 0.09f));
+        float caveShape = std::abs(caveA * 0.72f + caveB * 0.28f);
+        float depth01 = static_cast<float>(y) / static_cast<float>(height);
+        float caveThreshold = 0.11f + 0.06f * depth01;
+        if (caveShape < caveThreshold) {
+          blocks[idx] = kAir;
+          continue;
+        }
+
+        if (blocks[idx] != kStone) {
+          continue;
+        }
+
+        int oreX3 = floorDiv(worldX, 3);
+        int oreY3 = floorDiv(y, 3);
+        int oreZ3 = floorDiv(worldZ, 3);
+        float coalNoise = hashedNoise01(oreX3, oreY3, oreZ3, seed, 0xC011u);
+        float ironNoise = hashedNoise01(floorDiv(worldX, 4),
+                                        floorDiv(y, 4),
+                                        floorDiv(worldZ, 4),
+                                        seed,
+                                        0x1A2Bu);
+        float goldNoise = hashedNoise01(floorDiv(worldX, 4),
+                                        floorDiv(y, 4),
+                                        floorDiv(worldZ, 4),
+                                        seed,
+                                        0x90D1u);
+
+        if (y < 40 && goldNoise > 0.94f) {
+          blocks[idx] = kGoldOre;
+        } else if (y < 72 && ironNoise > 0.90f) {
+          blocks[idx] = kIronOre;
+        } else if (y < 96 && coalNoise > 0.84f) {
+          blocks[idx] = kCoalOre;
+        }
+      }
+
+      if (height < kSeaLevel) {
+        for (int y = height; y < kSeaLevel; ++y) {
+          blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = kWater;
+        }
       }
     }
   }
@@ -370,6 +488,22 @@ glm::vec3 World::blockColor(uint8_t type) const {
       return {0.2f, 0.8f, 0.2f};
     case kDirt:
       return {0.55f, 0.35f, 0.2f};
+    case kSand:
+      return {0.86f, 0.78f, 0.50f};
+    case kGravel:
+      return {0.46f, 0.44f, 0.42f};
+    case kWood:
+      return {0.49f, 0.33f, 0.16f};
+    case kLeaves:
+      return {0.16f, 0.58f, 0.16f};
+    case kWater:
+      return {0.22f, 0.45f, 0.88f};
+    case kCoalOre:
+      return {0.22f, 0.22f, 0.22f};
+    case kIronOre:
+      return {0.73f, 0.54f, 0.40f};
+    case kGoldOre:
+      return {0.92f, 0.75f, 0.22f};
     case kStone:
       return {0.6f, 0.6f, 0.6f};
     default:
@@ -488,8 +622,11 @@ void World::buildChunkMesh(World::Chunk& chunk) {
       }
       return 1;
     }
-    if (type == kDirt) {
+    if (type == kDirt || type == kSand || type == kWood || type == kWater) {
       return 2;
+    }
+    if (type == kLeaves) {
+      return 1;
     }
     return 3;
   };
@@ -709,7 +846,7 @@ bool World::save(const std::string& path) const {
   }
 
   const char magic[4] = {'C', 'U', 'B', '2'};
-  uint32_t version = 2;
+  uint32_t version = 3;
   uint32_t cs = static_cast<uint32_t>(kChunkSize);
   uint32_t ch = static_cast<uint32_t>(kChunkHeight);
   uint32_t seedValue = static_cast<uint32_t>(seed);
@@ -774,7 +911,7 @@ bool World::load(const std::string& path) {
   in.read(reinterpret_cast<char*>(&seedValue), sizeof(seedValue));
   in.read(reinterpret_cast<char*>(&storedCount), sizeof(storedCount));
 
-  if (std::strncmp(magic, "CUB2", 4) != 0 || version != 2 ||
+  if (std::strncmp(magic, "CUB2", 4) != 0 || version != 3 ||
       cs != static_cast<uint32_t>(kChunkSize) ||
       ch != static_cast<uint32_t>(kChunkHeight)) {
     return false;

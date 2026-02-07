@@ -1,25 +1,25 @@
 [
 {
   "directory": "/Users/macuser/Documents/CubeOS/build",
-  "command": "/usr/bin/c++ -DCUBEOS_ENABLE_VALIDATION=1 -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/main.cpp.o -c /Users/macuser/Documents/CubeOS/src/main.cpp",
+  "command": "/usr/bin/c++ -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/volk-src -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/main.cpp.o -c /Users/macuser/Documents/CubeOS/src/main.cpp",
   "file": "/Users/macuser/Documents/CubeOS/src/main.cpp",
   "output": "CMakeFiles/cubeos_voxel.dir/src/main.cpp.o"
 },
 {
   "directory": "/Users/macuser/Documents/CubeOS/build",
-  "command": "/usr/bin/c++ -DCUBEOS_ENABLE_VALIDATION=1 -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/app.cpp.o -c /Users/macuser/Documents/CubeOS/src/app.cpp",
+  "command": "/usr/bin/c++ -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/volk-src -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/app.cpp.o -c /Users/macuser/Documents/CubeOS/src/app.cpp",
   "file": "/Users/macuser/Documents/CubeOS/src/app.cpp",
   "output": "CMakeFiles/cubeos_voxel.dir/src/app.cpp.o"
 },
 {
   "directory": "/Users/macuser/Documents/CubeOS/build",
-  "command": "/usr/bin/c++ -DCUBEOS_ENABLE_VALIDATION=1 -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/vk_context.cpp.o -c /Users/macuser/Documents/CubeOS/src/vk_context.cpp",
+  "command": "/usr/bin/c++ -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/volk-src -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/vk_context.cpp.o -c /Users/macuser/Documents/CubeOS/src/vk_context.cpp",
   "file": "/Users/macuser/Documents/CubeOS/src/vk_context.cpp",
   "output": "CMakeFiles/cubeos_voxel.dir/src/vk_context.cpp.o"
 },
 {
   "directory": "/Users/macuser/Documents/CubeOS/build",
-  "command": "/usr/bin/c++ -DCUBEOS_ENABLE_VALIDATION=1 -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/world.cpp.o -c /Users/macuser/Documents/CubeOS/src/world.cpp",
+  "command": "/usr/bin/c++ -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/volk-src -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/world.cpp.o -c /Users/macuser/Documents/CubeOS/src/world.cpp",
   "file": "/Users/macuser/Documents/CubeOS/src/world.cpp",
   "output": "CMakeFiles/cubeos_voxel.dir/src/world.cpp.o"
 },
@@ -112,5 +112,11 @@
   "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/osmesa_context.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/osmesa_context.c",
   "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/osmesa_context.c",
   "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/osmesa_context.c.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/volk-build",
+  "command": "/usr/bin/cc  -I/Users/macuser/Documents/CubeOS/build/_deps/volk-src  -arch arm64 -o CMakeFiles/volk.dir/volk.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/volk-src/volk.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/volk-src/volk.c",
+  "output": "_deps/volk-build/CMakeFiles/volk.dir/volk.c.o"
 }
 ]

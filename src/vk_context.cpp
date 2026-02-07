@@ -19,7 +19,9 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <dlfcn.h>
@@ -193,11 +195,70 @@ std::string buildShaderPath(const char* filename) {
   return path;
 }
 
+#ifdef __APPLE__
+void* gBundledVulkanLibHandle = nullptr;
+
+void configureBundledVulkanEnvironment() {
+  std::string base = getExecutableDir();
+  std::string bundledIcd = base + "/../Resources/vulkan/icd.d/MoltenVK_icd.json";
+
+  std::ifstream icdFile(bundledIcd, std::ios::binary);
+  if (!icdFile.is_open()) {
+    return;
+  }
+
+  if (!std::getenv("VK_ICD_FILENAMES")) {
+    setenv("VK_ICD_FILENAMES", bundledIcd.c_str(), 0);
+  }
+}
+
+PFN_vkGetInstanceProcAddr loadBundledGetInstanceProcAddr() {
+  std::string base = getExecutableDir();
+  std::array<std::string, 3> candidates = {
+    base + "/../Frameworks/libvulkan.1.dylib",
+    std::string("libvulkan.1.dylib"),
+    std::string("/usr/local/lib/libvulkan.1.dylib")
+  };
+
+  for (const std::string& path : candidates) {
+    void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (!handle) {
+      continue;
+    }
+    auto proc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+      dlsym(handle, "vkGetInstanceProcAddr"));
+    if (proc) {
+      gBundledVulkanLibHandle = handle;
+      return proc;
+    }
+    dlclose(handle);
+  }
+
+  return nullptr;
+}
+#endif
+
 } // namespace
 
 void VulkanContext::init(GLFWwindow* windowIn, bool* framebufferResizedFlagIn) {
   window = windowIn;
   framebufferResizedFlag = framebufferResizedFlagIn;
+
+#ifdef __APPLE__
+  configureBundledVulkanEnvironment();
+  PFN_vkGetInstanceProcAddr getInstanceProc = loadBundledGetInstanceProcAddr();
+  if (!getInstanceProc) {
+    throw std::runtime_error("Failed to locate vkGetInstanceProcAddr on macOS.");
+  }
+  volkInitializeCustom(getInstanceProc);
+  if (volkGetInstanceVersion() == 0) {
+    throw std::runtime_error("Failed to initialize Vulkan loader (volk) on macOS.");
+  }
+#else
+  if (volkInitialize() != VK_SUCCESS) {
+    throw std::runtime_error("Failed to initialize Vulkan loader (volk).");
+  }
+#endif
 
   createInstance();
   setupDebugMessenger();
@@ -304,6 +365,13 @@ void VulkanContext::cleanup() {
     vkDestroyInstance(instance, nullptr);
     instance = VK_NULL_HANDLE;
   }
+
+#ifdef __APPLE__
+  if (gBundledVulkanLibHandle) {
+    dlclose(gBundledVulkanLibHandle);
+    gBundledVulkanLibHandle = nullptr;
+  }
+#endif
 }
 
 void VulkanContext::drawFrame() {
@@ -474,6 +542,7 @@ void VulkanContext::createInstance() {
 
   checkVk(vkCreateInstance(&createInfo, nullptr, &instance),
           "Failed to create Vulkan instance.");
+  volkLoadInstance(instance);
 }
 
 void VulkanContext::setupDebugMessenger() {
@@ -553,6 +622,7 @@ void VulkanContext::createLogicalDevice() {
 
   checkVk(vkCreateDevice(physicalDevice, &createInfo, nullptr, &device),
           "Failed to create logical device.");
+  volkLoadDevice(device);
 
   vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
   vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);

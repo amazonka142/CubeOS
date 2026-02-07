@@ -44,6 +44,19 @@ int tileForBlock(uint8_t type) {
       return 0;
     case kDirt:
       return 2;
+    case kSand:
+      return 2;
+    case kGravel:
+      return 3;
+    case kWood:
+      return 2;
+    case kLeaves:
+      return 1;
+    case kWater:
+      return 2;
+    case kCoalOre:
+    case kIronOre:
+    case kGoldOre:
     case kStone:
       return 3;
     default:

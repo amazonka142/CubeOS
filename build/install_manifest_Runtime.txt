@@ -1,0 +1,9 @@
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/./CubeOS v0.1 Beta.app/Contents/_CodeSignature/CodeResources
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/./CubeOS v0.1 Beta.app/Contents/MacOS/CubeOS v0.1 Beta
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/./CubeOS v0.1 Beta.app/Contents/MacOS/shaders/cube.frag.spv
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/./CubeOS v0.1 Beta.app/Contents/MacOS/shaders/cube.vert.spv
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/./CubeOS v0.1 Beta.app/Contents/MacOS/shaders/ui.vert.spv
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/./CubeOS v0.1 Beta.app/Contents/Resources/vulkan/icd.d/MoltenVK_icd.json
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/./CubeOS v0.1 Beta.app/Contents/Frameworks/libMoltenVK.dylib
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/./CubeOS v0.1 Beta.app/Contents/Frameworks/libvulkan.1.dylib
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/./CubeOS v0.1 Beta.app/Contents/Info.plist

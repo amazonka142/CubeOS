@@ -19,6 +19,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "_deps/glfw-src/src/glfw_config.h.in"
   "_deps/glm-src/CMakeLists.txt"
   "_deps/glm-src/glm/CMakeLists.txt"
+  "_deps/volk-src/CMakeLists.txt"
   "/opt/homebrew/share/cmake/Modules/BasicConfigVersion-SameMajorVersion.cmake.in"
   "/opt/homebrew/share/cmake/Modules/CMakeCInformation.cmake"
   "/opt/homebrew/share/cmake/Modules/CMakeCXXInformation.cmake"
@@ -30,10 +31,10 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/opt/homebrew/share/cmake/Modules/CMakePackageConfigHelpers.cmake"
   "/opt/homebrew/share/cmake/Modules/CMakeSystemSpecificInformation.cmake"
   "/opt/homebrew/share/cmake/Modules/CMakeSystemSpecificInitialize.cmake"
+  "/opt/homebrew/share/cmake/Modules/CPack.cmake"
+  "/opt/homebrew/share/cmake/Modules/CPackComponent.cmake"
   "/opt/homebrew/share/cmake/Modules/CheckCSourceCompiles.cmake"
-  "/opt/homebrew/share/cmake/Modules/CheckCXXSourceCompiles.cmake"
   "/opt/homebrew/share/cmake/Modules/CheckIncludeFile.cmake"
-  "/opt/homebrew/share/cmake/Modules/CheckIncludeFileCXX.cmake"
   "/opt/homebrew/share/cmake/Modules/CheckLibraryExists.cmake"
   "/opt/homebrew/share/cmake/Modules/Compiler/AppleClang-C.cmake"
   "/opt/homebrew/share/cmake/Modules/Compiler/AppleClang-CXX.cmake"
@@ -56,6 +57,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/opt/homebrew/share/cmake/Modules/Linker/AppleClang-C.cmake"
   "/opt/homebrew/share/cmake/Modules/Linker/AppleClang-CXX.cmake"
   "/opt/homebrew/share/cmake/Modules/Linker/AppleClang.cmake"
+  "/opt/homebrew/share/cmake/Modules/MacOSXBundleInfo.plist.in"
   "/opt/homebrew/share/cmake/Modules/Platform/Apple-AppleClang-C.cmake"
   "/opt/homebrew/share/cmake/Modules/Platform/Apple-AppleClang-CXX.cmake"
   "/opt/homebrew/share/cmake/Modules/Platform/Apple-Clang-C.cmake"
@@ -68,6 +70,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/opt/homebrew/share/cmake/Modules/Platform/Linker/Apple-AppleClang.cmake"
   "/opt/homebrew/share/cmake/Modules/Platform/UnixPaths.cmake"
   "/opt/homebrew/share/cmake/Modules/WriteBasicConfigVersionFile.cmake"
+  "/opt/homebrew/share/cmake/Templates/CPackConfig.cmake.in"
   )
 
 # The corresponding makefile is:
@@ -80,6 +83,12 @@ set(CMAKE_MAKEFILE_OUTPUTS
 set(CMAKE_MAKEFILE_PRODUCTS
   "_deps/glfw-subbuild/CMakeLists.txt"
   "_deps/glm-subbuild/CMakeLists.txt"
+  "_deps/volk-subbuild/CMakeLists.txt"
+  "CPackConfig.cmake"
+  "CPackSourceConfig.cmake"
+  "CubeOS v0.1 Beta.app/Contents/MacOS"
+  "CubeOS v0.1 Beta.app/Contents/Info.plist"
+  "CubeOS v0.1 Beta.app/Contents/Info.plist"
   "CMakeFiles/CMakeDirectoryInformation.cmake"
   "_deps/glfw-build/src/glfw3Config.cmake"
   "_deps/glfw-build/src/glfw3ConfigVersion.cmake"
@@ -90,6 +99,7 @@ set(CMAKE_MAKEFILE_PRODUCTS
   "_deps/glfw-build/src/CMakeFiles/CMakeDirectoryInformation.cmake"
   "_deps/glm-build/CMakeFiles/CMakeDirectoryInformation.cmake"
   "_deps/glm-build/glm/CMakeFiles/CMakeDirectoryInformation.cmake"
+  "_deps/volk-build/CMakeFiles/CMakeDirectoryInformation.cmake"
   )
 
 # Dependency information for all targets:
@@ -99,4 +109,5 @@ set(CMAKE_DEPEND_INFO_FILES
   "_deps/glfw-build/CMakeFiles/uninstall.dir/DependInfo.cmake"
   "_deps/glfw-build/src/CMakeFiles/update_mappings.dir/DependInfo.cmake"
   "_deps/glfw-build/src/CMakeFiles/glfw.dir/DependInfo.cmake"
+  "_deps/volk-build/CMakeFiles/volk.dir/DependInfo.cmake"
   )

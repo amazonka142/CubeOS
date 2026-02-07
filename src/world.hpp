@@ -18,7 +18,15 @@ enum BlockType : uint8_t {
   kAir = 0,
   kGrass = 1,
   kDirt = 2,
-  kStone = 3
+  kStone = 3,
+  kSand = 4,
+  kGravel = 5,
+  kWood = 6,
+  kLeaves = 7,
+  kWater = 8,
+  kCoalOre = 9,
+  kIronOre = 10,
+  kGoldOre = 11
 };
 
 class World {

@@ -76,23 +76,9 @@ private:
   glm::ivec3 breakingBlock{};
   float breakingProgress = 0.0f;
   int breakingStage = 0;
-  uint8_t selectedBlock = kGrass;
-  std::array<ItemStack, 9> hotbar = {{
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64}
-  }};
-  std::array<ItemStack, 27> inventory = {{
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64},
-    {kGrass, 64}, {kDirt, 64}, {kStone, 64}
-  }};
+  uint8_t selectedBlock = kAir;
+  std::array<ItemStack, 9> hotbar{};
+  std::array<ItemStack, 27> inventory{};
   ItemStack cursorStack{};
   float cursorFbX = 0.0f;
   float cursorFbY = 0.0f;

@@ -67,6 +67,7 @@ all: CMakeFiles/shaders.dir/all
 all: CMakeFiles/cubeos_voxel.dir/all
 all: _deps/glfw-build/all
 all: _deps/glm-build/all
+all: _deps/volk-build/all
 .PHONY : all
 
 # The main recursive "codegen" target.
@@ -74,11 +75,13 @@ codegen: CMakeFiles/shaders.dir/codegen
 codegen: CMakeFiles/cubeos_voxel.dir/codegen
 codegen: _deps/glfw-build/codegen
 codegen: _deps/glm-build/codegen
+codegen: _deps/volk-build/codegen
 .PHONY : codegen
 
 # The main recursive "preinstall" target.
 preinstall: _deps/glfw-build/preinstall
 preinstall: _deps/glm-build/preinstall
+preinstall: _deps/volk-build/preinstall
 .PHONY : preinstall
 
 # The main recursive "clean" target.
@@ -86,6 +89,7 @@ clean: CMakeFiles/shaders.dir/clean
 clean: CMakeFiles/cubeos_voxel.dir/clean
 clean: _deps/glfw-build/clean
 clean: _deps/glm-build/clean
+clean: _deps/volk-build/clean
 .PHONY : clean
 
 #=============================================================================
@@ -167,6 +171,25 @@ _deps/glm-build/glm/clean:
 .PHONY : _deps/glm-build/glm/clean
 
 #=============================================================================
+# Directory level rules for directory _deps/volk-build
+
+# Recursive "all" directory target.
+_deps/volk-build/all: _deps/volk-build/CMakeFiles/volk.dir/all
+.PHONY : _deps/volk-build/all
+
+# Recursive "codegen" directory target.
+_deps/volk-build/codegen: _deps/volk-build/CMakeFiles/volk.dir/codegen
+.PHONY : _deps/volk-build/codegen
+
+# Recursive "preinstall" directory target.
+_deps/volk-build/preinstall:
+.PHONY : _deps/volk-build/preinstall
+
+# Recursive "clean" directory target.
+_deps/volk-build/clean: _deps/volk-build/CMakeFiles/volk.dir/clean
+.PHONY : _deps/volk-build/clean
+
+#=============================================================================
 # Target rules for target CMakeFiles/shaders.dir
 
 # All Build rule for target.
@@ -202,8 +225,9 @@ CMakeFiles/shaders.dir/clean:
 # Target rules for target CMakeFiles/cubeos_voxel.dir
 
 # All Build rule for target.
-CMakeFiles/cubeos_voxel.dir/all: CMakeFiles/shaders.dir/all
 CMakeFiles/cubeos_voxel.dir/all: _deps/glfw-build/src/CMakeFiles/glfw.dir/all
+CMakeFiles/cubeos_voxel.dir/all: _deps/volk-build/CMakeFiles/volk.dir/all
+CMakeFiles/cubeos_voxel.dir/all: CMakeFiles/shaders.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/cubeos_voxel.dir/build.make CMakeFiles/cubeos_voxel.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/cubeos_voxel.dir/build.make CMakeFiles/cubeos_voxel.dir/build
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/macuser/Documents/CubeOS/build/CMakeFiles --progress-num=1,2,3,4,5 "Built target cubeos_voxel"
@@ -211,7 +235,7 @@ CMakeFiles/cubeos_voxel.dir/all: _deps/glfw-build/src/CMakeFiles/glfw.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/cubeos_voxel.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/macuser/Documents/CubeOS/build/CMakeFiles 24
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/macuser/Documents/CubeOS/build/CMakeFiles 26
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/cubeos_voxel.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /Users/macuser/Documents/CubeOS/build/CMakeFiles 0
 .PHONY : CMakeFiles/cubeos_voxel.dir/rule
@@ -326,6 +350,38 @@ _deps/glfw-build/src/CMakeFiles/glfw.dir/codegen:
 _deps/glfw-build/src/CMakeFiles/glfw.dir/clean:
 	$(MAKE) $(MAKESILENT) -f _deps/glfw-build/src/CMakeFiles/glfw.dir/build.make _deps/glfw-build/src/CMakeFiles/glfw.dir/clean
 .PHONY : _deps/glfw-build/src/CMakeFiles/glfw.dir/clean
+
+#=============================================================================
+# Target rules for target _deps/volk-build/CMakeFiles/volk.dir
+
+# All Build rule for target.
+_deps/volk-build/CMakeFiles/volk.dir/all:
+	$(MAKE) $(MAKESILENT) -f _deps/volk-build/CMakeFiles/volk.dir/build.make _deps/volk-build/CMakeFiles/volk.dir/depend
+	$(MAKE) $(MAKESILENT) -f _deps/volk-build/CMakeFiles/volk.dir/build.make _deps/volk-build/CMakeFiles/volk.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/macuser/Documents/CubeOS/build/CMakeFiles --progress-num=26,27 "Built target volk"
+.PHONY : _deps/volk-build/CMakeFiles/volk.dir/all
+
+# Build rule for subdir invocation for target.
+_deps/volk-build/CMakeFiles/volk.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/macuser/Documents/CubeOS/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 _deps/volk-build/CMakeFiles/volk.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/macuser/Documents/CubeOS/build/CMakeFiles 0
+.PHONY : _deps/volk-build/CMakeFiles/volk.dir/rule
+
+# Convenience name for target.
+volk: _deps/volk-build/CMakeFiles/volk.dir/rule
+.PHONY : volk
+
+# codegen rule for target.
+_deps/volk-build/CMakeFiles/volk.dir/codegen:
+	$(MAKE) $(MAKESILENT) -f _deps/volk-build/CMakeFiles/volk.dir/build.make _deps/volk-build/CMakeFiles/volk.dir/codegen
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/macuser/Documents/CubeOS/build/CMakeFiles --progress-num=26,27 "Finished codegen for target volk"
+.PHONY : _deps/volk-build/CMakeFiles/volk.dir/codegen
+
+# clean rule for target.
+_deps/volk-build/CMakeFiles/volk.dir/clean:
+	$(MAKE) $(MAKESILENT) -f _deps/volk-build/CMakeFiles/volk.dir/build.make _deps/volk-build/CMakeFiles/volk.dir/clean
+.PHONY : _deps/volk-build/CMakeFiles/volk.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

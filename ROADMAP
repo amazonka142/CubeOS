@@ -1,0 +1,51 @@
+# CubeOS Roadmap
+
+## v0.2 - World Generation Update
+- Terrain generation:
+  - Add mountains (multi-noise heightmap with sharper peaks).
+  - Add caves (3D noise carve pass).
+  - Add canyons (erosion/ridge mask + depth carve).
+- Nature:
+  - Add tree generation (trunk + leaves templates, biome-aware spawn rules).
+- Blocks and resources:
+  - Add water block (source + flowing behavior, basic propagation limits).
+  - Add ores (coal, iron, gold) with height-based spawn distribution.
+  - Add additional terrain blocks (sand, gravel, wood, leaves).
+- Inventory at game start:
+  - Remove pre-filled hotbar/inventory.
+  - Start with empty inventory by default.
+
+Definition of done:
+- New world visibly includes mountains, caves, canyons, trees, water and ores.
+- New game starts with empty inventory and empty hotbar.
+
+## v0.3 - Tools & Mining Loop
+- Add tools:
+  - Wooden, stone and iron pickaxe.
+  - Axe and shovel (same material tiers).
+- Tool behavior:
+  - Mining speed modifiers by tool type/material.
+  - Correct block effectiveness (pickaxe for stone/ore, axe for wood, shovel for dirt/sand).
+  - Durability and break mechanics.
+- Resource drops:
+  - Ores drop proper items only with correct tool tier.
+- UI:
+  - Tool icons and durability display in hotbar/inventory.
+
+Definition of done:
+- Player can craft/use tools (or obtain them in test mode) and mine faster with proper tool.
+- Durability decreases and tools break correctly.
+
+## v0.4 - Balance & Polish
+- Balance world parameters:
+  - Ore rates and depth ranges.
+  - Tree density.
+  - Water spread limits and performance impact.
+- Improve generation stability:
+  - Reduce chunk seams/artifacts in caves and canyons.
+- Gameplay polish:
+  - Tune break time, drop rates, and early-game progression.
+
+Definition of done:
+- Stable world generation without obvious seams.
+- Early survival loop feels consistent and playable.

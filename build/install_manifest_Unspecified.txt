@@ -1,0 +1,8 @@
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/lib/libglfw3.a
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/include/GLFW/glfw3.h
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/include/GLFW/glfw3native.h
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/lib/cmake/glfw3/glfw3Config.cmake
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/lib/cmake/glfw3/glfw3ConfigVersion.cmake
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/lib/cmake/glfw3/glfw3Targets.cmake
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/lib/cmake/glfw3/glfw3Targets-noconfig.cmake
+/Users/macuser/Documents/CubeOS/build/dist/_CPack_Packages/Darwin/DragNDrop/CubeOS-v0.1-Beta-macOS/ALL_IN_ONE/lib/pkgconfig/glfw3.pc
