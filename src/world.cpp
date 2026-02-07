@@ -109,9 +109,6 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
   outVertices.clear();
   outIndices.clear();
 
-  const int dims[3] = {worldWidth, kChunkHeight, worldDepth};
-  std::vector<int> maskValues;
-
   auto tileFor = [](uint8_t type, int axis, bool positive) {
     // Tile indices in atlas: 0=grass top, 1=grass side, 2=dirt, 3=stone.
     if (type == kGrass) {
@@ -149,144 +146,94 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
     return glm::vec2(uClamped, vClamped);
   };
 
-  for (int d = 0; d < 3; ++d) {
-    int axisUIndex = (d + 1) % 3;
-    int axisVIndex = (d + 2) % 3;
-    int meshSpanU = (axisUIndex == 0) ? dims[0] : (axisUIndex == 1 ? dims[1] : dims[2]);
-    int meshSpanV = (axisVIndex == 0) ? dims[0] : (axisVIndex == 1 ? dims[1] : dims[2]);
+  auto addQuad = [&](const glm::vec3& v0,
+                     const glm::vec3& v1,
+                     const glm::vec3& v2,
+                     const glm::vec3& v3,
+                     const glm::vec3& color,
+                     int tile) {
+    glm::vec2 uv0 = uvForTile(tile, 0.0f, 0.0f);
+    glm::vec2 uv1 = uvForTile(tile, 1.0f, 0.0f);
+    glm::vec2 uv2 = uvForTile(tile, 1.0f, 1.0f);
+    glm::vec2 uv3 = uvForTile(tile, 0.0f, 1.0f);
 
-    maskValues.assign(static_cast<size_t>(meshSpanU * meshSpanV), 0);
+    uint32_t startIndex = static_cast<uint32_t>(outVertices.size());
+    outVertices.push_back({v0, color, uv0});
+    outVertices.push_back({v1, color, uv1});
+    outVertices.push_back({v2, color, uv2});
+    outVertices.push_back({v3, color, uv3});
 
-    int x[3] = {0, 0, 0};
-    int q[3] = {0, 0, 0};
-    q[d] = 1;
+    outIndices.push_back(startIndex + 0);
+    outIndices.push_back(startIndex + 1);
+    outIndices.push_back(startIndex + 2);
+    outIndices.push_back(startIndex + 0);
+    outIndices.push_back(startIndex + 2);
+    outIndices.push_back(startIndex + 3);
+  };
 
-    for (x[d] = -1; x[d] < dims[d];) {
-      int n = 0;
-      for (x[axisVIndex] = 0; x[axisVIndex] < meshSpanV; ++x[axisVIndex]) {
-        for (x[axisUIndex] = 0; x[axisUIndex] < meshSpanU; ++x[axisUIndex]) {
-          int ax = x[0];
-          int ay = x[1];
-          int az = x[2];
-          int bx = x[0] + q[0];
-          int by = x[1] + q[1];
-          int bz = x[2] + q[2];
-
-          uint8_t a = (x[d] >= 0) ? getBlock(ax, ay, az) : kAir;
-          uint8_t b = (x[d] < dims[d] - 1) ? getBlock(bx, by, bz) : kAir;
-
-          if (a != kAir && b == kAir) {
-            maskValues[n] = a;
-          } else if (a == kAir && b != kAir) {
-            maskValues[n] = -static_cast<int>(b);
-          } else {
-            maskValues[n] = 0;
-          }
-          ++n;
+  for (int z = 0; z < worldDepth; ++z) {
+    for (int y = 0; y < kChunkHeight; ++y) {
+      for (int x = 0; x < worldWidth; ++x) {
+        uint8_t blockType = getBlock(x, y, z);
+        if (blockType == kAir) {
+          continue;
         }
-      }
 
-      ++x[d];
+        float fx = static_cast<float>(x);
+        float fy = static_cast<float>(y);
+        float fz = static_cast<float>(z);
+        float fx1 = fx + 1.0f;
+        float fy1 = fy + 1.0f;
+        float fz1 = fz + 1.0f;
 
-      n = 0;
-      for (int j = 0; j < meshSpanV; ++j) {
-        for (int i = 0; i < meshSpanU;) {
-          int c = maskValues[n];
-          if (c == 0) {
-            ++i;
-            ++n;
-            continue;
-          }
+        float heightFactor = 0.6f + 0.4f * (fy / (kChunkHeight - 1));
 
-          int w = 1;
-          while (i + w < meshSpanU && maskValues[n + w] == c) {
-            ++w;
-          }
-
-          int h = 1;
-          bool done = false;
-          while (j + h < meshSpanV && !done) {
-            for (int k = 0; k < w; ++k) {
-              if (maskValues[n + k + h * meshSpanU] != c) {
-                done = true;
-                break;
-              }
-            }
-            if (!done) {
-              ++h;
-            }
-          }
-
-          int du[3] = {0, 0, 0};
-          int dv[3] = {0, 0, 0};
-          du[axisUIndex] = w;
-          dv[axisVIndex] = h;
-
-          int x0[3] = {x[0], x[1], x[2]};
-          x0[axisUIndex] = i;
-          x0[axisVIndex] = j;
-
+        // +X face
+        if (getBlock(x + 1, y, z) == kAir) {
           float shade = 0.8f;
-          if (d == 1) {
-            shade = (c > 0) ? 1.0f : 0.5f;
-          }
-          float heightFactor = 0.6f + 0.4f * (static_cast<float>(x0[1]) / (kChunkHeight - 1));
-          uint8_t blockType = static_cast<uint8_t>(std::abs(c));
           glm::vec3 color = blockColor(blockType) * shade * heightFactor;
-          int tile = tileFor(blockType, d, c > 0);
+          int tile = tileFor(blockType, 0, true);
+          addQuad({fx1, fy, fz}, {fx1, fy1, fz}, {fx1, fy1, fz1}, {fx1, fy, fz1}, color, tile);
+        }
 
-          glm::vec3 v0;
-          glm::vec3 v1;
-          glm::vec3 v2;
-          glm::vec3 v3;
+        // -X face
+        if (getBlock(x - 1, y, z) == kAir) {
+          float shade = 0.8f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 0, false);
+          addQuad({fx, fy, fz}, {fx, fy, fz1}, {fx, fy1, fz1}, {fx, fy1, fz}, color, tile);
+        }
 
-          if (c > 0) {
-            v0 = glm::vec3(x0[0], x0[1], x0[2]) + glm::vec3(q[0], q[1], q[2]);
-            v1 = v0 + glm::vec3(du[0], du[1], du[2]);
-            v2 = v1 + glm::vec3(dv[0], dv[1], dv[2]);
-            v3 = v0 + glm::vec3(dv[0], dv[1], dv[2]);
-          } else {
-            v0 = glm::vec3(x0[0], x0[1], x0[2]);
-            v1 = v0 + glm::vec3(dv[0], dv[1], dv[2]);
-            v2 = v1 + glm::vec3(du[0], du[1], du[2]);
-            v3 = v0 + glm::vec3(du[0], du[1], du[2]);
-          }
+        // +Y face (top)
+        if (getBlock(x, y + 1, z) == kAir) {
+          float shade = 1.0f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 1, true);
+          addQuad({fx, fy1, fz}, {fx, fy1, fz1}, {fx1, fy1, fz1}, {fx1, fy1, fz}, color, tile);
+        }
 
-          glm::vec2 uv0 = uvForTile(tile, 0.0f, 0.0f);
-          glm::vec2 uv1 = uvForTile(tile, 1.0f, 0.0f);
-          glm::vec2 uv2 = uvForTile(tile, 1.0f, 1.0f);
-          glm::vec2 uv3 = uvForTile(tile, 0.0f, 1.0f);
+        // -Y face (bottom)
+        if (getBlock(x, y - 1, z) == kAir) {
+          float shade = 0.5f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 1, false);
+          addQuad({fx, fy, fz}, {fx1, fy, fz}, {fx1, fy, fz1}, {fx, fy, fz1}, color, tile);
+        }
 
-          glm::vec3 e1 = v1 - v0;
-          glm::vec3 e2 = v2 - v0;
-          glm::vec3 normal = glm::cross(e1, e2);
-          glm::vec3 expectedNormal(0.0f);
-          expectedNormal[d] = (c > 0) ? 1.0f : -1.0f;
-          if (glm::dot(normal, expectedNormal) < 0.0f) {
-            std::swap(v1, v3);
-            std::swap(uv1, uv3);
-          }
+        // +Z face
+        if (getBlock(x, y, z + 1) == kAir) {
+          float shade = 0.8f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 2, true);
+          addQuad({fx, fy, fz1}, {fx1, fy, fz1}, {fx1, fy1, fz1}, {fx, fy1, fz1}, color, tile);
+        }
 
-          uint32_t startIndex = static_cast<uint32_t>(outVertices.size());
-          outVertices.push_back({v0, color, uv0});
-          outVertices.push_back({v1, color, uv1});
-          outVertices.push_back({v2, color, uv2});
-          outVertices.push_back({v3, color, uv3});
-
-          outIndices.push_back(startIndex + 0);
-          outIndices.push_back(startIndex + 1);
-          outIndices.push_back(startIndex + 2);
-          outIndices.push_back(startIndex + 0);
-          outIndices.push_back(startIndex + 2);
-          outIndices.push_back(startIndex + 3);
-
-          for (int rowIndexGreedy = 0; rowIndexGreedy < h; ++rowIndexGreedy) {
-            int maskRowOffset = n + rowIndexGreedy * meshSpanU;
-            std::fill_n(maskValues.begin() + maskRowOffset, w, 0);
-          }
-
-          i += w;
-          n += w;
+        // -Z face
+        if (getBlock(x, y, z - 1) == kAir) {
+          float shade = 0.8f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 2, false);
+          addQuad({fx, fy, fz}, {fx, fy1, fz}, {fx1, fy1, fz}, {fx1, fy, fz}, color, tile);
         }
       }
     }
