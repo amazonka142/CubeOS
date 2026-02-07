@@ -225,9 +225,9 @@ CMakeFiles/shaders.dir/clean:
 # Target rules for target CMakeFiles/cubeos_voxel.dir
 
 # All Build rule for target.
+CMakeFiles/cubeos_voxel.dir/all: CMakeFiles/shaders.dir/all
 CMakeFiles/cubeos_voxel.dir/all: _deps/glfw-build/src/CMakeFiles/glfw.dir/all
 CMakeFiles/cubeos_voxel.dir/all: _deps/volk-build/CMakeFiles/volk.dir/all
-CMakeFiles/cubeos_voxel.dir/all: CMakeFiles/shaders.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/cubeos_voxel.dir/build.make CMakeFiles/cubeos_voxel.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/cubeos_voxel.dir/build.make CMakeFiles/cubeos_voxel.dir/build
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/macuser/Documents/CubeOS/build/CMakeFiles --progress-num=1,2,3,4,5 "Built target cubeos_voxel"

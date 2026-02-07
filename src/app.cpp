@@ -53,7 +53,7 @@ int tileForBlock(uint8_t type) {
     case kLeaves:
       return 1;
     case kWater:
-      return 2;
+      return 12;
     case kCoalOre:
     case kIronOre:
     case kGoldOre:
@@ -118,7 +118,9 @@ void App::initVulkan() {
   }
   int initialCx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int initialCz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
-  world.updateActiveChunks(initialCx, initialCz, kChunkViewRadius);
+  constexpr int kSpawnChunkRadius = 8;
+  world.updateActiveChunks(initialCx, initialCz, kSpawnChunkRadius);
+  world.waitForChunkRegion(initialCx, initialCz, kSpawnChunkRadius, 3000);
 
   auto isSpawnGround = [](uint8_t block) {
     return block != kAir && block != kWater && block != kLeaves && block != kGravel;
@@ -128,81 +130,145 @@ void App::initVulkan() {
     return block == kGrass || block == kDirt || block == kSand;
   };
 
+  auto isSkyPassable = [](uint8_t block) {
+    return block == kAir || block == kLeaves;
+  };
+
   auto findSurfaceSpawn = [&]() -> glm::vec3 {
     int baseX = static_cast<int>(std::floor(playerPos.x));
     int baseZ = static_cast<int>(std::floor(playerPos.z));
-    constexpr int kSpawnSearchRadius = 160;
-    constexpr int kMinSpawnY = 54;
+    constexpr int kSpawnSearchRadius = kSpawnChunkRadius * kChunkSize - 2;
 
-    int bestScore = std::numeric_limits<int>::min();
-    glm::vec3 bestPos = playerPos;
+    struct SpawnCandidate {
+      int x = 0;
+      int z = 0;
+      int y = 0;
+      uint8_t ground = kAir;
+      int radius = 0;
+    };
 
+    auto probeSurface = [&](int x, int z, int& outY, uint8_t& outGround) -> bool {
+      for (int y = world.height() - 3; y >= 1; --y) {
+        uint8_t ground = world.getBlock(x, y, z);
+        uint8_t feet = world.getBlock(x, y + 1, z);
+        uint8_t head = world.getBlock(x, y + 2, z);
+        if (!(isSpawnGround(ground) && feet == kAir && head == kAir)) {
+          continue;
+        }
+
+        bool openSky = true;
+        for (int sy = y + 3; sy < world.height(); ++sy) {
+          uint8_t skyBlock = world.getBlock(x, sy, z);
+          if (!isSkyPassable(skyBlock)) {
+            openSky = false;
+            break;
+          }
+        }
+        if (!openSky) {
+          continue;
+        }
+
+        outY = y;
+        outGround = ground;
+        return true;
+      }
+      return false;
+    };
+
+    std::vector<SpawnCandidate> candidates;
+    candidates.reserve(static_cast<size_t>((kSpawnSearchRadius * 2 + 1) * (kSpawnSearchRadius * 2 + 1)));
+
+    int maxSurfaceY = std::numeric_limits<int>::min();
     for (int radius = 0; radius <= kSpawnSearchRadius; ++radius) {
       for (int dz = -radius; dz <= radius; ++dz) {
         for (int dx = -radius; dx <= radius; ++dx) {
           if (std::max(std::abs(dx), std::abs(dz)) != radius) {
             continue;
           }
-
           int x = baseX + dx;
           int z = baseZ + dz;
-          for (int y = world.height() - 3; y >= 1; --y) {
-            uint8_t ground = world.getBlock(x, y, z);
-            uint8_t feet = world.getBlock(x, y + 1, z);
-            uint8_t head = world.getBlock(x, y + 2, z);
-            if (isSpawnGround(ground) && feet == kAir && head == kAir) {
-              if (y < kMinSpawnY) {
-                break;
-              }
-
-              bool openSky = true;
-              for (int sy = y + 3; sy < world.height(); ++sy) {
-                uint8_t skyBlock = world.getBlock(x, sy, z);
-                if (skyBlock != kAir && skyBlock != kLeaves) {
-                  openSky = false;
-                  break;
-                }
-              }
-              if (!openSky) {
-                break;
-              }
-
-              int score = y * 100 - radius * 3;
-              if (isPreferredSpawnGround(ground)) {
-                score += 500;
-              }
-
-              int stableNeighbors = 0;
-              for (int nz = -1; nz <= 1; ++nz) {
-                for (int nx = -1; nx <= 1; ++nx) {
-                  if (nx == 0 && nz == 0) {
-                    continue;
-                  }
-                  uint8_t neighborGround = world.getBlock(x + nx, y, z + nz);
-                  uint8_t neighborFeet = world.getBlock(x + nx, y + 1, z + nz);
-                  if (neighborGround != kAir && neighborGround != kWater && neighborFeet == kAir) {
-                    ++stableNeighbors;
-                  }
-                }
-              }
-              score += stableNeighbors * 35;
-
-              if (score > bestScore) {
-                bestScore = score;
-                bestPos = {static_cast<float>(x) + 0.5f,
-                           static_cast<float>(y) + 2.25f,
-                           static_cast<float>(z) + 0.5f};
-              }
-              break;
-            }
+          int y = 0;
+          uint8_t ground = kAir;
+          if (!probeSurface(x, z, y, ground)) {
+            continue;
           }
+          maxSurfaceY = std::max(maxSurfaceY, y);
+          candidates.push_back({x, z, y, ground, radius});
         }
       }
     }
 
-    if (bestScore == std::numeric_limits<int>::min()) {
-      return playerPos;
+    auto roughness = [&](const SpawnCandidate& c) -> int {
+      static constexpr int kNeighborOffsets[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+      int total = 0;
+      for (const auto& offset : kNeighborOffsets) {
+        int ny = 0;
+        uint8_t neighborGround = kAir;
+        if (!probeSurface(c.x + offset[0], c.z + offset[1], ny, neighborGround)) {
+          total += 12;
+          continue;
+        }
+        total += std::abs(c.y - ny);
+      }
+      return total;
+    };
+
+    glm::vec3 bestPos{};
+    auto pickBest = [&](bool highBandOnly, bool preferredOnly, int maxRoughness) -> bool {
+      int bestScore = std::numeric_limits<int>::min();
+      bool found = false;
+      int highBandFloor = maxSurfaceY - 10;
+
+      for (const SpawnCandidate& c : candidates) {
+        if (highBandOnly && c.y < highBandFloor) {
+          continue;
+        }
+        if (preferredOnly && !isPreferredSpawnGround(c.ground)) {
+          continue;
+        }
+
+        int surfaceRoughness = roughness(c);
+        if (surfaceRoughness > maxRoughness) {
+          continue;
+        }
+
+        int score = c.y * 140 - c.radius * 6 - surfaceRoughness * 12;
+        if (isPreferredSpawnGround(c.ground)) {
+          score += 260;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          found = true;
+          bestPos = {static_cast<float>(c.x) + 0.5f,
+                     static_cast<float>(c.y) + 2.35f,
+                     static_cast<float>(c.z) + 0.5f};
+        }
+      }
+      return found;
+    };
+
+    if (candidates.empty()) {
+      return {static_cast<float>(baseX) + 0.5f,
+              static_cast<float>(world.height() - 6),
+              static_cast<float>(baseZ) + 0.5f};
     }
+
+    if (!pickBest(true, true, 8) &&
+        !pickBest(true, false, 10) &&
+        !pickBest(false, true, 14) &&
+        !pickBest(false, false, 20)) {
+      const SpawnCandidate* fallback = &candidates.front();
+      for (const SpawnCandidate& c : candidates) {
+        if (c.y > fallback->y || (c.y == fallback->y && c.radius < fallback->radius)) {
+          fallback = &c;
+        }
+      }
+      bestPos = {static_cast<float>(fallback->x) + 0.5f,
+                 static_cast<float>(fallback->y) + 2.35f,
+                 static_cast<float>(fallback->z) + 0.5f};
+    }
+
     return bestPos;
   };
 
@@ -224,7 +290,7 @@ void App::initVulkan() {
   world.buildMesh(worldVertices, worldIndices);
   rebuildUiMesh();
   composeMeshData();
-  vk.setMeshData(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
+  vk.setMeshData(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
   uiDirty = false;
   refreshSelectedBlock();
   vk.init(window, &framebufferResized);
@@ -243,6 +309,16 @@ void App::mainLoop() {
       updatePlayer(deltaTime);
     }
     updateStreaming();
+    waterSimAccumulator += deltaTime;
+    if (waterSimAccumulator > 0.35f) {
+      waterSimAccumulator = 0.35f;
+    }
+    while (waterSimAccumulator >= 0.12f) {
+      int px = static_cast<int>(std::floor(playerPos.x));
+      int pz = static_cast<int>(std::floor(playerPos.z));
+      world.simulateWater(px, pz, 56, 180);
+      waterSimAccumulator -= 0.12f;
+    }
 
     bool worldChanged = world.consumeMeshDirty();
     if (worldChanged) {
@@ -253,7 +329,7 @@ void App::mainLoop() {
     }
     if (worldChanged || uiDirty) {
       composeMeshData();
-      vk.updateMesh(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
+      vk.updateMesh(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
       uiDirty = false;
     }
 
@@ -266,6 +342,10 @@ void App::mainLoop() {
                                       200.0f);
     proj[1][1] *= -1.0f;
 
+    bool cameraInWater = world.getBlock(static_cast<int>(std::floor(eye.x)),
+                                        static_cast<int>(std::floor(eye.y)),
+                                        static_cast<int>(std::floor(eye.z))) == kWater;
+    vk.setCameraWorldState(eye, cameraInWater);
     vk.setCameraMatrices(view, proj);
     vk.drawFrame();
   }
@@ -364,11 +444,28 @@ void App::processInput(float deltaTime) {
     wishDir = glm::normalize(wishDir);
   }
 
-  const float moveSpeed = 6.0f;
+  bool inWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
+  const float moveSpeed = inWater ? 3.2f : 6.0f;
   playerVel.x = wishDir.x * moveSpeed;
   playerVel.z = wishDir.z * moveSpeed;
 
-  if (onGround && glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+  if (inWater) {
+    float verticalIntent = 0.0f;
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+      verticalIntent += 1.0f;
+    }
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
+      verticalIntent -= 1.0f;
+    }
+
+    if (std::abs(verticalIntent) > 0.001f) {
+      playerVel.y = verticalIntent * 4.4f;
+    } else if (playerVel.y > -0.9f) {
+      playerVel.y = -0.9f;
+    }
+    onGround = false;
+  } else if (onGround && glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
     playerVel.y = 6.5f;
     onGround = false;
   }
@@ -377,33 +474,91 @@ void App::processInput(float deltaTime) {
     glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
     RaycastHit hit = raycast(origin, cameraFront(), kBreakMaxDistance);
     if (hit.hit) {
-      if (!breakingActive || hit.block != breakingBlock) {
-        breakingActive = true;
-        breakingBlock = hit.block;
-        breakingProgress = 0.0f;
-        breakingStage = 0;
-      }
+      float breakDuration = inWater ? (kBreakDuration * 2.0f) : kBreakDuration;
+      glm::ivec3 targetBlock = hit.block;
+      uint8_t hitType = world.getBlock(targetBlock.x, targetBlock.y, targetBlock.z);
 
-      breakingProgress += deltaTime;
-      int newStage = static_cast<int>((breakingProgress / kBreakDuration) * kBreakStages) + 1;
-      newStage = std::clamp(newStage, 1, kBreakStages);
-      if (newStage != breakingStage) {
-        breakingStage = newStage;
-        world.setBreakOverlay(breakingBlock, breakingStage);
-      }
-
-      if (breakingProgress >= kBreakDuration) {
-        uint8_t removed = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
-        world.setBlock(hit.block.x, hit.block.y, hit.block.z, kAir);
-        if (removed != kAir) {
-          addToInventory(removed, 1);
-          refreshSelectedBlock();
-          uiDirty = true;
+      if (hitType == kWater) {
+        bool foundBelow = false;
+        constexpr int kMaxWaterProbeDepth = 12;
+        int minY = std::max(0, targetBlock.y - kMaxWaterProbeDepth);
+        for (int y = targetBlock.y - 1; y >= minY; --y) {
+          uint8_t belowType = world.getBlock(targetBlock.x, y, targetBlock.z);
+          if (belowType == kAir || belowType == kWater) {
+            continue;
+          }
+          targetBlock.y = y;
+          hitType = belowType;
+          foundBelow = true;
+          break;
         }
-        breakingActive = false;
-        breakingProgress = 0.0f;
-        breakingStage = 0;
-        world.clearBreakOverlay();
+
+        if (!foundBelow) {
+          if (breakingActive) {
+            breakingActive = false;
+            breakingProgress = 0.0f;
+            breakingStage = 0;
+            world.clearBreakOverlay();
+          }
+        } else {
+          if (!breakingActive || targetBlock != breakingBlock) {
+            breakingActive = true;
+            breakingBlock = targetBlock;
+            breakingProgress = 0.0f;
+            breakingStage = 0;
+          }
+
+          breakingProgress += deltaTime;
+          int newStage = static_cast<int>((breakingProgress / breakDuration) * kBreakStages) + 1;
+          newStage = std::clamp(newStage, 1, kBreakStages);
+          if (newStage != breakingStage) {
+            breakingStage = newStage;
+            world.setBreakOverlay(breakingBlock, breakingStage);
+          }
+
+          if (breakingProgress >= breakDuration) {
+            uint8_t removed = world.getBlock(targetBlock.x, targetBlock.y, targetBlock.z);
+            if (removed != kAir && removed != kWater) {
+              world.setBlock(targetBlock.x, targetBlock.y, targetBlock.z, kAir);
+              addToInventory(removed, 1);
+              refreshSelectedBlock();
+              uiDirty = true;
+            }
+            breakingActive = false;
+            breakingProgress = 0.0f;
+            breakingStage = 0;
+            world.clearBreakOverlay();
+          }
+        }
+      } else {
+        if (!breakingActive || targetBlock != breakingBlock) {
+          breakingActive = true;
+          breakingBlock = targetBlock;
+          breakingProgress = 0.0f;
+          breakingStage = 0;
+        }
+
+        breakingProgress += deltaTime;
+        int newStage = static_cast<int>((breakingProgress / breakDuration) * kBreakStages) + 1;
+        newStage = std::clamp(newStage, 1, kBreakStages);
+        if (newStage != breakingStage) {
+          breakingStage = newStage;
+          world.setBreakOverlay(breakingBlock, breakingStage);
+        }
+
+        if (breakingProgress >= breakDuration) {
+          uint8_t removed = world.getBlock(targetBlock.x, targetBlock.y, targetBlock.z);
+          if (removed != kAir && removed != kWater) {
+            world.setBlock(targetBlock.x, targetBlock.y, targetBlock.z, kAir);
+            addToInventory(removed, 1);
+            refreshSelectedBlock();
+            uiDirty = true;
+          }
+          breakingActive = false;
+          breakingProgress = 0.0f;
+          breakingStage = 0;
+          world.clearBreakOverlay();
+        }
       }
     } else if (breakingActive) {
       breakingActive = false;
@@ -447,16 +602,35 @@ void App::processInput(float deltaTime) {
 }
 
 void App::updatePlayer(float deltaTime) {
-  const float gravity = -18.0f;
-  playerVel.y += gravity * deltaTime;
+  bool inWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
+  if (inWater) {
+    const float waterGravity = -5.0f;
+    playerVel.y += waterGravity * deltaTime;
+    playerVel.y = std::clamp(playerVel.y, -2.7f, 4.0f);
+  } else {
+    const float gravity = -18.0f;
+    playerVel.y += gravity * deltaTime;
+  }
 
   glm::vec3 pos = playerPos;
 
   // X axis
   pos.x += playerVel.x * deltaTime;
   if (collidesAt(pos)) {
-    pos.x = playerPos.x;
-    playerVel.x = 0.0f;
+    if (inWater) {
+      glm::vec3 stepPos{playerPos.x + playerVel.x * deltaTime,
+                        playerPos.y + 1.05f,
+                        playerPos.z};
+      if (!collidesAt(stepPos)) {
+        pos = stepPos;
+      } else {
+        pos.x = playerPos.x;
+        playerVel.x = 0.0f;
+      }
+    } else {
+      pos.x = playerPos.x;
+      playerVel.x = 0.0f;
+    }
   }
 
   // Y axis
@@ -474,11 +648,26 @@ void App::updatePlayer(float deltaTime) {
   // Z axis
   pos.z += playerVel.z * deltaTime;
   if (collidesAt(pos)) {
-    pos.z = playerPos.z;
-    playerVel.z = 0.0f;
+    if (inWater) {
+      glm::vec3 stepPos{pos.x,
+                        pos.y + 1.05f,
+                        playerPos.z + playerVel.z * deltaTime};
+      if (!collidesAt(stepPos)) {
+        pos = stepPos;
+      } else {
+        pos.z = playerPos.z;
+        playerVel.z = 0.0f;
+      }
+    } else {
+      pos.z = playerPos.z;
+      playerVel.z = 0.0f;
+    }
   }
 
   playerPos = pos;
+  if (intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f))) {
+    onGround = false;
+  }
 }
 
 void App::updateStreaming() {
@@ -498,6 +687,8 @@ void App::rebuildWorldMesh() {
 }
 
 void App::rebuildUiMesh() {
+  skyVertices.clear();
+  skyIndices.clear();
   uiVertices.clear();
   uiIndices.clear();
 
@@ -516,6 +707,30 @@ void App::rebuildUiMesh() {
     float y = 1.0f - (py / static_cast<float>(height)) * 2.0f;
     return {x, y};
   };
+
+  auto addSkyQuad = [&](float x, float y, float w, float h) {
+    glm::vec2 p0 = toNdc(x, y);
+    glm::vec2 p1 = toNdc(x + w, y);
+    glm::vec2 p2 = toNdc(x + w, y + h);
+    glm::vec2 p3 = toNdc(x, y + h);
+
+    // Negative red channel marks a procedural cloud pass in fragment shader.
+    glm::vec3 skyMarkerColor{-1.0f, 0.0f, 0.0f};
+    uint32_t start = static_cast<uint32_t>(skyVertices.size());
+    skyVertices.push_back({{p0.x, p0.y, 0.0f}, skyMarkerColor, {0.0f, 0.0f}});
+    skyVertices.push_back({{p1.x, p1.y, 0.0f}, skyMarkerColor, {1.0f, 0.0f}});
+    skyVertices.push_back({{p2.x, p2.y, 0.0f}, skyMarkerColor, {1.0f, 1.0f}});
+    skyVertices.push_back({{p3.x, p3.y, 0.0f}, skyMarkerColor, {0.0f, 1.0f}});
+
+    skyIndices.push_back(start + 0);
+    skyIndices.push_back(start + 1);
+    skyIndices.push_back(start + 2);
+    skyIndices.push_back(start + 0);
+    skyIndices.push_back(start + 2);
+    skyIndices.push_back(start + 3);
+  };
+
+  addSkyQuad(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
 
   auto addQuad = [&](float x, float y, float w, float h,
                      const glm::vec3& color,
@@ -670,14 +885,32 @@ void App::rebuildUiMesh() {
     float cy = cursorFbY - kSlotSize * 0.5f;
     drawStack(cursorStack, cx, cy);
   }
+
+  const float centerX = static_cast<float>(width) * 0.5f;
+  const float centerY = static_cast<float>(height) * 0.5f;
+  const float crossArm = 4.0f;
+  const float crossThickness = 2.0f;
+  const int crossTile = 13;
+  addQuad(centerX - crossArm, centerY - crossThickness * 0.5f,
+          crossArm * 2.0f, crossThickness, glm::vec3(0.97f), crossTile);
+  addQuad(centerX - crossThickness * 0.5f, centerY - crossArm,
+          crossThickness, crossArm * 2.0f, glm::vec3(0.97f), crossTile);
 }
 
 void App::composeMeshData() {
-  meshVertices = worldVertices;
-  meshIndices = worldIndices;
-  worldIndexCount = static_cast<uint32_t>(worldIndices.size());
+  meshVertices = skyVertices;
+  meshIndices = skyIndices;
+  skyIndexCount = static_cast<uint32_t>(skyIndices.size());
 
   uint32_t vertexOffset = static_cast<uint32_t>(meshVertices.size());
+  meshVertices.insert(meshVertices.end(), worldVertices.begin(), worldVertices.end());
+  meshIndices.reserve(meshIndices.size() + worldIndices.size());
+  for (uint32_t idx : worldIndices) {
+    meshIndices.push_back(idx + vertexOffset);
+  }
+  worldIndexCount = static_cast<uint32_t>(worldIndices.size());
+
+  vertexOffset = static_cast<uint32_t>(meshVertices.size());
   meshVertices.insert(meshVertices.end(), uiVertices.begin(), uiVertices.end());
   meshIndices.reserve(meshIndices.size() + uiIndices.size());
   for (uint32_t idx : uiIndices) {
@@ -985,7 +1218,38 @@ bool App::collidesAt(const glm::vec3& pos) const {
         if (!world.inBounds(x, y, z)) {
           return true;
         }
-        if (world.getBlock(x, y, z) != kAir) {
+        uint8_t block = world.getBlock(x, y, z);
+        if (block != kAir && block != kWater) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+bool App::intersectsWaterAt(const glm::vec3& pos) const {
+  const float halfWidth = 0.3f;
+  const float height = 1.8f;
+
+  glm::vec3 min = {pos.x - halfWidth, pos.y, pos.z - halfWidth};
+  glm::vec3 max = {pos.x + halfWidth, pos.y + height, pos.z + halfWidth};
+
+  int minX = static_cast<int>(std::floor(min.x));
+  int maxX = static_cast<int>(std::floor(max.x));
+  int minY = static_cast<int>(std::floor(min.y));
+  int maxY = static_cast<int>(std::floor(max.y));
+  int minZ = static_cast<int>(std::floor(min.z));
+  int maxZ = static_cast<int>(std::floor(max.z));
+
+  for (int y = minY; y <= maxY; ++y) {
+    for (int z = minZ; z <= maxZ; ++z) {
+      for (int x = minX; x <= maxX; ++x) {
+        if (!world.inBounds(x, y, z)) {
+          continue;
+        }
+        if (world.getBlock(x, y, z) == kWater) {
           return true;
         }
       }

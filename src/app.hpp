@@ -37,6 +37,7 @@ private:
   bool hitTestHotbar(float x, float y, int& outSlot) const;
   bool hitTestInventory(float x, float y, int& outIndex) const;
   bool collidesAt(const glm::vec3& pos) const;
+  bool intersectsWaterAt(const glm::vec3& pos) const;
   bool blockIntersectsPlayer(int x, int y, int z) const;
   glm::vec3 cameraFront() const;
   struct RaycastHit {
@@ -57,12 +58,15 @@ private:
   VulkanContext vk;
 
   World world{3, 3};
+  std::vector<Vertex> skyVertices;
+  std::vector<uint32_t> skyIndices;
   std::vector<Vertex> worldVertices;
   std::vector<uint32_t> worldIndices;
   std::vector<Vertex> uiVertices;
   std::vector<uint32_t> uiIndices;
   std::vector<Vertex> meshVertices;
   std::vector<uint32_t> meshIndices;
+  uint32_t skyIndexCount = 0;
   uint32_t worldIndexCount = 0;
   uint32_t uiIndexCount = 0;
 
@@ -89,6 +93,7 @@ private:
   bool mouseLeftDown = false;
   bool mouseRightDown = false;
   bool uiDirty = true;
+  float waterSimAccumulator = 0.0f;
 
   float yaw = -90.0f;
   float pitch = 0.0f;

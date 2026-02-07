@@ -17,13 +17,16 @@ public:
   void waitIdle();
   void setMeshData(const std::vector<Vertex>& vertices,
                    const std::vector<uint32_t>& indices,
+                   uint32_t skyIndexCount,
                    uint32_t worldIndexCount,
                    uint32_t uiIndexCount);
   void updateMesh(const std::vector<Vertex>& vertices,
                   const std::vector<uint32_t>& indices,
+                  uint32_t skyIndexCount,
                   uint32_t worldIndexCount,
                   uint32_t uiIndexCount);
   void setCameraMatrices(const glm::mat4& view, const glm::mat4& proj);
+  void setCameraWorldState(const glm::vec3& eyePosition, bool underwater);
 
 private:
   struct QueueFamilyIndices {
@@ -158,10 +161,13 @@ private:
 
   std::vector<Vertex> meshVertices;
   std::vector<uint32_t> meshIndices;
+  uint32_t skyIndexCount = 0;
   uint32_t worldIndexCount = 0;
   uint32_t uiIndexCount = 0;
   glm::mat4 cameraView{1.0f};
   glm::mat4 cameraProj{1.0f};
+  glm::vec3 cameraWorldPos{0.0f};
+  bool cameraUnderwater = false;
 
   std::vector<VkSemaphore> imageAvailableSemaphores;
   std::vector<VkSemaphore> renderFinishedSemaphores;

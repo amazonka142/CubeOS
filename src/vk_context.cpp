@@ -58,6 +58,8 @@ struct UniformBufferObject {
   glm::mat4 model;
   glm::mat4 view;
   glm::mat4 proj;
+  glm::vec4 params{0.0f};
+  glm::vec4 cameraData{0.0f};
 };
 
 const auto kStartTime = std::chrono::high_resolution_clock::now();
@@ -454,20 +456,24 @@ void VulkanContext::waitIdle() {
 
 void VulkanContext::setMeshData(const std::vector<Vertex>& vertices,
                                 const std::vector<uint32_t>& indices,
+                                uint32_t skyIndexCountIn,
                                 uint32_t worldIndexCountIn,
                                 uint32_t uiIndexCountIn) {
   meshVertices = vertices;
   meshIndices = indices;
+  skyIndexCount = skyIndexCountIn;
   worldIndexCount = worldIndexCountIn;
   uiIndexCount = uiIndexCountIn;
 }
 
 void VulkanContext::updateMesh(const std::vector<Vertex>& vertices,
                                const std::vector<uint32_t>& indices,
+                               uint32_t skyIndexCountIn,
                                uint32_t worldIndexCountIn,
                                uint32_t uiIndexCountIn) {
   meshVertices = vertices;
   meshIndices = indices;
+  skyIndexCount = skyIndexCountIn;
   worldIndexCount = worldIndexCountIn;
   uiIndexCount = uiIndexCountIn;
   if (device == VK_NULL_HANDLE) {
@@ -500,6 +506,11 @@ void VulkanContext::updateMesh(const std::vector<Vertex>& vertices,
 void VulkanContext::setCameraMatrices(const glm::mat4& view, const glm::mat4& proj) {
   cameraView = view;
   cameraProj = proj;
+}
+
+void VulkanContext::setCameraWorldState(const glm::vec3& eyePosition, bool underwater) {
+  cameraWorldPos = eyePosition;
+  cameraUnderwater = underwater;
 }
 
 void VulkanContext::createInstance() {
@@ -633,7 +644,7 @@ void VulkanContext::createDescriptorSetLayout() {
   uboLayoutBinding.binding = 0;
   uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   uboLayoutBinding.descriptorCount = 1;
-  uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
   uboLayoutBinding.pImmutableSamplers = nullptr;
 
   VkDescriptorSetLayoutBinding samplerLayoutBinding{};
@@ -1106,6 +1117,31 @@ void VulkanContext::createTextureImage() {
     drawBreakTile(tileIndex, stage + 1);
   }
 
+  // Water tile (index 12, 0,3): semi-transparent with simple wave texture pattern.
+  const int waterTileIndex = 12;
+  const int waterTileX = (waterTileIndex % kAtlasCols) * kAtlasTileSize;
+  const int waterTileY = (waterTileIndex / kAtlasCols) * kAtlasTileSize;
+  for (int y = 0; y < kAtlasTileSize; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      bool stripe = ((x + y * 2) % 5) == 0;
+      uint8_t r = stripe ? 44 : 34;
+      uint8_t g = stripe ? 98 : 84;
+      uint8_t b = stripe ? 196 : 180;
+      uint8_t a = stripe ? 212 : 196;
+      putPixel(waterTileX + x, waterTileY + y, r, g, b, a);
+    }
+  }
+
+  // Solid white tile for HUD markers (crosshair).
+  const int whiteTileIndex = 13;
+  const int whiteTileX = (whiteTileIndex % kAtlasCols) * kAtlasTileSize;
+  const int whiteTileY = (whiteTileIndex / kAtlasCols) * kAtlasTileSize;
+  for (int y = 0; y < kAtlasTileSize; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      putPixel(whiteTileX + x, whiteTileY + y, 255, 255, 255, 255);
+    }
+  }
+
   VkDeviceSize imageSize = static_cast<VkDeviceSize>(pixels.size());
 
   VkBuffer stagingBuffer = VK_NULL_HANDLE;
@@ -1382,6 +1418,19 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
     vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
+    if (skyIndexCount > 0 && uiPipeline != VK_NULL_HANDLE) {
+      vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline);
+      vkCmdBindDescriptorSets(commandBuffer,
+                              VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              pipelineLayout,
+                              0,
+                              1,
+                              &descriptorSets[imageIndex],
+                              0,
+                              nullptr);
+      vkCmdDrawIndexed(commandBuffer, skyIndexCount, 1, 0, 0, 0);
+    }
+
     if (worldIndexCount > 0) {
       vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
       vkCmdBindDescriptorSets(commandBuffer,
@@ -1392,7 +1441,7 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
                               &descriptorSets[imageIndex],
                               0,
                               nullptr);
-      vkCmdDrawIndexed(commandBuffer, worldIndexCount, 1, 0, 0, 0);
+      vkCmdDrawIndexed(commandBuffer, worldIndexCount, 1, skyIndexCount, 0, 0);
     }
 
     if (uiIndexCount > 0 && uiPipeline != VK_NULL_HANDLE) {
@@ -1405,7 +1454,12 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
                               &descriptorSets[imageIndex],
                               0,
                               nullptr);
-      vkCmdDrawIndexed(commandBuffer, uiIndexCount, 1, worldIndexCount, 0, 0);
+      vkCmdDrawIndexed(commandBuffer,
+                       uiIndexCount,
+                       1,
+                       skyIndexCount + worldIndexCount,
+                       0,
+                       0);
     }
   }
   vkCmdEndRenderPass(commandBuffer);
@@ -1420,9 +1474,13 @@ void VulkanContext::updateUniformBuffer(uint32_t imageIndex) {
 
   UniformBufferObject ubo{};
   ubo.model = glm::mat4(1.0f);
-  (void)time;
   ubo.view = cameraView;
   ubo.proj = cameraProj;
+  ubo.params = glm::vec4(time,
+                         std::max(1.0f, static_cast<float>(swapchainExtent.width)),
+                         std::max(1.0f, static_cast<float>(swapchainExtent.height)),
+                         0.0f);
+  ubo.cameraData = glm::vec4(cameraWorldPos, cameraUnderwater ? 1.0f : 0.0f);
 
   std::memcpy(uniformBuffersMapped[imageIndex], &ubo, sizeof(ubo));
 }

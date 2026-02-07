@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <unordered_set>
 #include <utility>
 
 #include <glm/gtc/noise.hpp>
@@ -557,6 +559,208 @@ void World::updateActiveChunks(int centerChunkX, int centerChunkZ, int radius) {
   }
 }
 
+bool World::waitForChunkRegion(int centerChunkX, int centerChunkZ, int radius, int maxWaitMs) {
+  using clock = std::chrono::steady_clock;
+  auto deadline = clock::now() + std::chrono::milliseconds(std::max(1, maxWaitMs));
+
+  while (clock::now() < deadline) {
+    pumpChunkGeneration();
+
+    bool ready = true;
+    for (int cz = centerChunkZ - radius; cz <= centerChunkZ + radius && ready; ++cz) {
+      for (int cx = centerChunkX - radius; cx <= centerChunkX + radius; ++cx) {
+        Chunk* chunk = findChunk(cx, cz);
+        if (!chunk || chunk->generating) {
+          ready = false;
+          break;
+        }
+      }
+    }
+
+    if (ready) {
+      return true;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+
+  pumpChunkGeneration();
+
+  for (int cz = centerChunkZ - radius; cz <= centerChunkZ + radius; ++cz) {
+    for (int cx = centerChunkX - radius; cx <= centerChunkX + radius; ++cx) {
+      Chunk* chunk = findChunk(cx, cz);
+      if (!chunk || chunk->generating) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates) {
+  pumpChunkGeneration();
+
+  if (radiusXZ <= 0 || maxUpdates <= 0) {
+    return;
+  }
+
+  int minX = centerX - radiusXZ;
+  int maxX = centerX + radiusXZ;
+  int minZ = centerZ - radiusXZ;
+  int maxZ = centerZ + radiusXZ;
+
+  int minChunkX = floorDiv(minX, kChunkSize);
+  int maxChunkX = floorDiv(maxX, kChunkSize);
+  int minChunkZ = floorDiv(minZ, kChunkSize);
+  int maxChunkZ = floorDiv(maxZ, kChunkSize);
+
+  struct WaterPos {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+  };
+
+  std::vector<WaterPos> downTargets;
+  std::vector<WaterPos> sideTargets;
+  downTargets.reserve(static_cast<size_t>(maxUpdates * 2));
+  sideTargets.reserve(static_cast<size_t>(maxUpdates * 4));
+
+  std::unordered_set<uint64_t> seenTargets;
+  seenTargets.reserve(static_cast<size_t>(maxUpdates * 8));
+
+  auto posHash = [](int x, int y, int z) -> uint64_t {
+    uint64_t hx = static_cast<uint64_t>(mixBits(static_cast<uint32_t>(x)));
+    uint64_t hy = static_cast<uint64_t>(mixBits(static_cast<uint32_t>(y)));
+    uint64_t hz = static_cast<uint64_t>(mixBits(static_cast<uint32_t>(z)));
+    return (hx << 32) ^ (hy << 16) ^ hz;
+  };
+
+  auto canFill = [&](int x, int y, int z) -> bool {
+    if (!inBounds(x, y, z)) {
+      return false;
+    }
+    int cx = floorDiv(x, kChunkSize);
+    int cz = floorDiv(z, kChunkSize);
+    Chunk* chunk = findChunk(cx, cz);
+    if (!chunk || chunk->generating) {
+      return false;
+    }
+    int lx = positiveMod(x, kChunkSize);
+    int lz = positiveMod(z, kChunkSize);
+    size_t idx = static_cast<size_t>(localIndex(lx, y, lz));
+    return chunk->blocks[idx] == kAir;
+  };
+
+  auto addTarget = [&](std::vector<WaterPos>& list, int x, int y, int z) {
+    if (!canFill(x, y, z)) {
+      return;
+    }
+    uint64_t key = posHash(x, y, z);
+    if (seenTargets.insert(key).second) {
+      list.push_back({x, y, z});
+    }
+  };
+
+  bool stopScan = false;
+  constexpr std::array<std::pair<int, int>, 4> kSideOffsets = {{
+    {1, 0},
+    {-1, 0},
+    {0, 1},
+    {0, -1}
+  }};
+
+  for (int cz = minChunkZ; cz <= maxChunkZ && !stopScan; ++cz) {
+    for (int cx = minChunkX; cx <= maxChunkX && !stopScan; ++cx) {
+      Chunk* chunk = findChunk(cx, cz);
+      if (!chunk || chunk->generating) {
+        continue;
+      }
+
+      int baseX = cx * kChunkSize;
+      int baseZ = cz * kChunkSize;
+      int lxStart = std::clamp(minX - baseX, 0, kChunkSize - 1);
+      int lxEnd = std::clamp(maxX - baseX, 0, kChunkSize - 1);
+      int lzStart = std::clamp(minZ - baseZ, 0, kChunkSize - 1);
+      int lzEnd = std::clamp(maxZ - baseZ, 0, kChunkSize - 1);
+
+      for (int lz = lzStart; lz <= lzEnd && !stopScan; ++lz) {
+        for (int lx = lxStart; lx <= lxEnd && !stopScan; ++lx) {
+          int x = baseX + lx;
+          int z = baseZ + lz;
+          for (int y = 1; y < kChunkHeight - 1; ++y) {
+            size_t idx = static_cast<size_t>(localIndex(lx, y, lz));
+            if (chunk->blocks[idx] != kWater) {
+              continue;
+            }
+
+            uint8_t below = chunk->blocks[static_cast<size_t>(localIndex(lx, y - 1, lz))];
+            if (below == kAir) {
+              addTarget(downTargets, x, y - 1, z);
+            } else {
+              for (const auto& [ox, oz] : kSideOffsets) {
+                addTarget(sideTargets, x + ox, y, z + oz);
+              }
+            }
+
+            if (downTargets.size() + sideTargets.size() >=
+                static_cast<size_t>(maxUpdates * 10)) {
+              stopScan = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  auto placeWater = [&](const WaterPos& p) -> bool {
+    if (!canFill(p.x, p.y, p.z)) {
+      return false;
+    }
+    int cx = floorDiv(p.x, kChunkSize);
+    int cz = floorDiv(p.z, kChunkSize);
+    Chunk* chunk = findChunk(cx, cz);
+    if (!chunk || chunk->generating) {
+      return false;
+    }
+
+    int lx = positiveMod(p.x, kChunkSize);
+    int lz = positiveMod(p.z, kChunkSize);
+    size_t idx = static_cast<size_t>(localIndex(lx, p.y, lz));
+    if (chunk->blocks[idx] != kAir) {
+      return false;
+    }
+
+    chunk->blocks[idx] = kWater;
+    chunk->dirty = true;
+    chunk->modified = true;
+    if (lx == 0 || lx == kChunkSize - 1 || lz == 0 || lz == kChunkSize - 1) {
+      markNeighborChunksDirty(cx, cz);
+    }
+    meshDirty = true;
+    return true;
+  };
+
+  int applied = 0;
+  for (const WaterPos& p : downTargets) {
+    if (applied >= maxUpdates) {
+      break;
+    }
+    if (placeWater(p)) {
+      ++applied;
+    }
+  }
+
+  for (const WaterPos& p : sideTargets) {
+    if (applied >= maxUpdates) {
+      break;
+    }
+    if (placeWater(p)) {
+      ++applied;
+    }
+  }
+}
+
 bool World::consumeMeshDirty() {
   pumpChunkGeneration();
 
@@ -629,7 +833,10 @@ void World::buildChunkMesh(World::Chunk& chunk) {
       }
       return 1;
     }
-    if (type == kDirt || type == kSand || type == kWood || type == kWater) {
+    if (type == kWater) {
+      return 12;
+    }
+    if (type == kDirt || type == kSand || type == kWood) {
       return 2;
     }
     if (type == kLeaves) {
@@ -853,7 +1060,7 @@ bool World::save(const std::string& path) const {
   }
 
   const char magic[4] = {'C', 'U', 'B', '2'};
-  uint32_t version = 6;
+  uint32_t version = 7;
   uint32_t cs = static_cast<uint32_t>(kChunkSize);
   uint32_t ch = static_cast<uint32_t>(kChunkHeight);
   uint32_t seedValue = static_cast<uint32_t>(seed);
@@ -918,7 +1125,7 @@ bool World::load(const std::string& path) {
   in.read(reinterpret_cast<char*>(&seedValue), sizeof(seedValue));
   in.read(reinterpret_cast<char*>(&storedCount), sizeof(storedCount));
 
-  if (std::strncmp(magic, "CUB2", 4) != 0 || version != 6 ||
+  if (std::strncmp(magic, "CUB2", 4) != 0 || version != 7 ||
       cs != static_cast<uint32_t>(kChunkSize) ||
       ch != static_cast<uint32_t>(kChunkHeight)) {
     return false;

@@ -42,6 +42,8 @@ public:
   bool save(const std::string& path) const;
   bool load(const std::string& path);
   void updateActiveChunks(int centerChunkX, int centerChunkZ, int radius);
+  bool waitForChunkRegion(int centerChunkX, int centerChunkZ, int radius, int maxWaitMs);
+  void simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates);
   bool consumeMeshDirty();
   void setBreakOverlay(const glm::ivec3& block, int stage);
   void clearBreakOverlay();
