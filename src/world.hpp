@@ -2,9 +2,13 @@
 
 #include "mesh.hpp"
 
+#include <condition_variable>
 #include <cstdint>
-#include <unordered_map>
+#include <mutex>
+#include <queue>
 #include <string>
+#include <thread>
+#include <unordered_map>
 #include <vector>
 
 constexpr int kChunkSize = 16;
@@ -20,9 +24,13 @@ enum BlockType : uint8_t {
 class World {
 public:
   World(int initialChunksX, int initialChunksZ, int seed = 1337);
+  ~World();
+
+  World(const World&) = delete;
+  World& operator=(const World&) = delete;
 
   void generate();
-  void buildMesh(std::vector<Vertex>& outVertices, std::vector<uint32_t>& outIndices) const;
+  void buildMesh(std::vector<Vertex>& outVertices, std::vector<uint32_t>& outIndices);
   bool save(const std::string& path) const;
   bool load(const std::string& path);
   void updateActiveChunks(int centerChunkX, int centerChunkZ, int radius);
@@ -46,6 +54,27 @@ private:
   const Chunk* findChunk(int cx, int cz) const;
   Chunk& ensureChunk(int cx, int cz);
   void generateChunk(Chunk& chunk);
+  void buildChunkMesh(Chunk& chunk);
+  void markNeighborChunksDirty(int cx, int cz);
+  void startChunkWorkers();
+  void stopChunkWorkers();
+  void queueChunkGeneration(int cx, int cz, uint32_t epoch);
+  void resetChunkGeneration();
+  void pumpChunkGeneration();
+
+  struct ChunkGenerationTask {
+    int cx = 0;
+    int cz = 0;
+    int seed = 1337;
+    uint32_t epoch = 0;
+    uint64_t key = 0;
+  };
+
+  struct ChunkGenerationResult {
+    uint64_t key = 0;
+    uint32_t epoch = 0;
+    std::vector<uint8_t> blocks;
+  };
 
   struct BreakOverlay {
     bool active = false;
@@ -57,8 +86,12 @@ private:
     int cx = 0;
     int cz = 0;
     std::vector<uint8_t> blocks;
+    std::vector<Vertex> meshVertices;
+    std::vector<uint32_t> meshIndices;
     bool dirty = true;
     bool modified = false;
+    bool generating = false;
+    uint32_t generationEpoch = 0;
   };
 
   int initialChunksX;
@@ -69,4 +102,12 @@ private:
   BreakOverlay breakOverlay{};
   std::unordered_map<uint64_t, Chunk> chunks;
   std::unordered_map<uint64_t, std::vector<uint8_t>> savedChunks;
+  uint32_t generationEpoch = 1;
+  std::unordered_map<uint64_t, uint32_t> pendingGenerationEpochByKey;
+  std::queue<ChunkGenerationTask> generationQueue;
+  std::queue<ChunkGenerationResult> generationResults;
+  std::vector<std::thread> generationWorkers;
+  bool stopGenerationWorkers = false;
+  mutable std::mutex generationMutex;
+  std::condition_variable generationCv;
 };

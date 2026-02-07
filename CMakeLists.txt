@@ -31,6 +31,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(glm)
 
 find_package(Vulkan REQUIRED)
+find_package(Threads REQUIRED)
 
 set(SHADER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
@@ -91,7 +92,7 @@ add_executable(cubeos_voxel
 )
 
 target_include_directories(cubeos_voxel PRIVATE src)
-target_link_libraries(cubeos_voxel PRIVATE glfw Vulkan::Vulkan glm::glm)
+target_link_libraries(cubeos_voxel PRIVATE glfw Vulkan::Vulkan glm::glm Threads::Threads)
 target_compile_definitions(cubeos_voxel PRIVATE GLFW_INCLUDE_NONE)
 target_compile_definitions(cubeos_voxel PRIVATE GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
 add_dependencies(cubeos_voxel shaders)

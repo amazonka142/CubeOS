@@ -1,10 +1,12 @@
 #include "world.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <utility>
 
 #include <glm/gtc/noise.hpp>
 
@@ -47,6 +49,42 @@ float fbmNoise(float x, float z, int seed) {
   return total / maxValue;
 }
 
+int chunkLocalIndex(int lx, int ly, int lz) {
+  return lx + lz * kChunkSize + ly * kChunkSize * kChunkSize;
+}
+
+std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
+  std::vector<uint8_t> blocks(static_cast<size_t>(kChunkSize * kChunkSize * kChunkHeight), kAir);
+  int baseX = cx * kChunkSize;
+  int baseZ = cz * kChunkSize;
+
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      int worldX = baseX + lx;
+      int worldZ = baseZ + lz;
+
+      float n1 = fbmNoise(static_cast<float>(worldX), static_cast<float>(worldZ), seed);
+      float n2 = glm::perlin(glm::vec2(static_cast<float>(worldX + seed) * 0.002f,
+                                       static_cast<float>(worldZ - seed) * 0.002f));
+      float heightF = 32.0f + n1 * 18.0f + n2 * 12.0f;
+      int height = static_cast<int>(std::round(heightF));
+      height = std::clamp(height, 1, kChunkHeight - 1);
+
+      for (int y = 0; y < height; ++y) {
+        uint8_t type = kStone;
+        if (y == height - 1) {
+          type = kGrass;
+        } else if (y >= height - 4) {
+          type = kDirt;
+        }
+        blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+      }
+    }
+  }
+
+  return blocks;
+}
+
 } // namespace
 
 World::World(int initialChunksXIn, int initialChunksZIn, int seedIn)
@@ -55,6 +93,67 @@ World::World(int initialChunksXIn, int initialChunksZIn, int seedIn)
       seed(seedIn) {
   int maxDim = std::max(initialChunksX, initialChunksZ);
   initialRadius = std::max(1, maxDim / 2);
+  startChunkWorkers();
+}
+
+World::~World() {
+  stopChunkWorkers();
+}
+
+void World::startChunkWorkers() {
+  uint32_t hw = std::thread::hardware_concurrency();
+  size_t workerCount = hw == 0 ? 2u : static_cast<size_t>(hw);
+  workerCount = std::max<size_t>(1, std::min<size_t>(workerCount, 4));
+
+  generationWorkers.reserve(workerCount);
+  for (size_t i = 0; i < workerCount; ++i) {
+    generationWorkers.emplace_back([this]() {
+      while (true) {
+        ChunkGenerationTask task;
+        {
+          std::unique_lock<std::mutex> lock(generationMutex);
+          generationCv.wait(lock, [this]() {
+            return stopGenerationWorkers || !generationQueue.empty();
+          });
+
+          if (stopGenerationWorkers && generationQueue.empty()) {
+            return;
+          }
+
+          task = generationQueue.front();
+          generationQueue.pop();
+        }
+
+        ChunkGenerationResult result;
+        result.key = task.key;
+        result.epoch = task.epoch;
+        result.blocks = generateChunkBlocks(task.cx, task.cz, task.seed);
+
+        {
+          std::lock_guard<std::mutex> lock(generationMutex);
+          generationResults.push(std::move(result));
+        }
+      }
+    });
+  }
+}
+
+void World::stopChunkWorkers() {
+  {
+    std::lock_guard<std::mutex> lock(generationMutex);
+    stopGenerationWorkers = true;
+    while (!generationQueue.empty()) {
+      generationQueue.pop();
+    }
+  }
+  generationCv.notify_all();
+
+  for (std::thread& worker : generationWorkers) {
+    if (worker.joinable()) {
+      worker.join();
+    }
+  }
+  generationWorkers.clear();
 }
 
 int World::localIndex(int lx, int ly, int lz) const {
@@ -83,6 +182,91 @@ const World::Chunk* World::findChunk(int cx, int cz) const {
   return &it->second;
 }
 
+void World::queueChunkGeneration(int cx, int cz, uint32_t epoch) {
+  uint64_t key = chunkKey(cx, cz);
+  auto pendingIt = pendingGenerationEpochByKey.find(key);
+  if (pendingIt != pendingGenerationEpochByKey.end() && pendingIt->second == epoch) {
+    return;
+  }
+  pendingGenerationEpochByKey[key] = epoch;
+
+  {
+    std::lock_guard<std::mutex> lock(generationMutex);
+    generationQueue.push({cx, cz, seed, epoch, key});
+  }
+  generationCv.notify_one();
+}
+
+void World::resetChunkGeneration() {
+  ++generationEpoch;
+  pendingGenerationEpochByKey.clear();
+
+  {
+    std::lock_guard<std::mutex> lock(generationMutex);
+    while (!generationQueue.empty()) {
+      generationQueue.pop();
+    }
+    while (!generationResults.empty()) {
+      generationResults.pop();
+    }
+  }
+}
+
+void World::markNeighborChunksDirty(int cx, int cz) {
+  constexpr std::array<std::pair<int, int>, 4> offsets = {{
+    {1, 0},
+    {-1, 0},
+    {0, 1},
+    {0, -1}
+  }};
+
+  for (const auto& [ox, oz] : offsets) {
+    Chunk* neighbor = findChunk(cx + ox, cz + oz);
+    if (neighbor) {
+      neighbor->dirty = true;
+    }
+  }
+}
+
+void World::pumpChunkGeneration() {
+  std::vector<ChunkGenerationResult> ready;
+
+  {
+    std::lock_guard<std::mutex> lock(generationMutex);
+    while (!generationResults.empty()) {
+      ready.push_back(std::move(generationResults.front()));
+      generationResults.pop();
+    }
+  }
+
+  if (ready.empty()) {
+    return;
+  }
+
+  for (ChunkGenerationResult& result : ready) {
+    auto pendingIt = pendingGenerationEpochByKey.find(result.key);
+    if (pendingIt != pendingGenerationEpochByKey.end() && pendingIt->second == result.epoch) {
+      pendingGenerationEpochByKey.erase(pendingIt);
+    }
+
+    auto chunkIt = chunks.find(result.key);
+    if (chunkIt == chunks.end()) {
+      continue;
+    }
+
+    Chunk& chunk = chunkIt->second;
+    if (!chunk.generating || chunk.generationEpoch != result.epoch) {
+      continue;
+    }
+
+    chunk.blocks = std::move(result.blocks);
+    chunk.generating = false;
+    chunk.dirty = true;
+    markNeighborChunksDirty(chunk.cx, chunk.cz);
+    meshDirty = true;
+  }
+}
+
 World::Chunk& World::ensureChunk(int cx, int cz) {
   uint64_t key = chunkKey(cx, cz);
   auto it = chunks.find(key);
@@ -102,41 +286,24 @@ World::Chunk& World::ensureChunk(int cx, int cz) {
     chunk.modified = true;
     savedChunks.erase(savedIt);
   } else {
-    generateChunk(chunk);
+    chunk.generating = true;
+    chunk.generationEpoch = generationEpoch;
   }
 
   auto insertResult = chunks.emplace(key, std::move(chunk));
+  if (insertResult.first->second.generating) {
+    queueChunkGeneration(cx, cz, insertResult.first->second.generationEpoch);
+  } else {
+    markNeighborChunksDirty(cx, cz);
+  }
   meshDirty = true;
   return insertResult.first->second;
 }
 
 void World::generateChunk(World::Chunk& chunk) {
-  int baseX = chunk.cx * kChunkSize;
-  int baseZ = chunk.cz * kChunkSize;
-
-  for (int lz = 0; lz < kChunkSize; ++lz) {
-    for (int lx = 0; lx < kChunkSize; ++lx) {
-      int worldX = baseX + lx;
-      int worldZ = baseZ + lz;
-
-      float n1 = fbmNoise(static_cast<float>(worldX), static_cast<float>(worldZ), seed);
-      float n2 = glm::perlin(glm::vec2(static_cast<float>(worldX + seed) * 0.002f,
-                                       static_cast<float>(worldZ - seed) * 0.002f));
-      float heightF = 32.0f + n1 * 18.0f + n2 * 12.0f;
-      int height = static_cast<int>(std::round(heightF));
-      height = std::clamp(height, 1, kChunkHeight - 1);
-
-      for (int y = 0; y < height; ++y) {
-        uint8_t type = kStone;
-        if (y == height - 1) {
-          type = kGrass;
-        } else if (y >= height - 4) {
-          type = kDirt;
-        }
-        chunk.blocks[static_cast<size_t>(localIndex(lx, y, lz))] = type;
-      }
-    }
-  }
+  chunk.blocks = generateChunkBlocks(chunk.cx, chunk.cz, seed);
+  chunk.generating = false;
+  chunk.generationEpoch = generationEpoch;
 }
 
 bool World::inBounds(int x, int y, int z) const {
@@ -161,6 +328,8 @@ uint8_t World::getBlock(int x, int y, int z) const {
 }
 
 void World::setBlock(int x, int y, int z, uint8_t type) {
+  pumpChunkGeneration();
+
   if (!inBounds(x, y, z)) {
     return;
   }
@@ -177,6 +346,11 @@ void World::setBlock(int x, int y, int z, uint8_t type) {
     chunk = &ensureChunk(cx, cz);
   }
 
+  if (chunk->generating) {
+    generateChunk(*chunk);
+    pendingGenerationEpochByKey.erase(chunkKey(cx, cz));
+  }
+
   size_t idx = static_cast<size_t>(localIndex(lx, y, lz));
   if (chunk->blocks[idx] == type) {
     return;
@@ -184,6 +358,9 @@ void World::setBlock(int x, int y, int z, uint8_t type) {
   chunk->blocks[idx] = type;
   chunk->dirty = true;
   chunk->modified = true;
+  if (lx == 0 || lx == kChunkSize - 1 || lz == 0 || lz == kChunkSize - 1) {
+    markNeighborChunksDirty(cx, cz);
+  }
   meshDirty = true;
 }
 
@@ -201,13 +378,18 @@ glm::vec3 World::blockColor(uint8_t type) const {
 }
 
 void World::generate() {
+  resetChunkGeneration();
   chunks.clear();
   savedChunks.clear();
+  breakOverlay.active = false;
+  breakOverlay.stage = 0;
   meshDirty = true;
   updateActiveChunks(0, 0, initialRadius);
 }
 
 void World::updateActiveChunks(int centerChunkX, int centerChunkZ, int radius) {
+  pumpChunkGeneration();
+
   if (radius < 0) {
     return;
   }
@@ -235,6 +417,8 @@ void World::updateActiveChunks(int centerChunkX, int centerChunkZ, int radius) {
 }
 
 bool World::consumeMeshDirty() {
+  pumpChunkGeneration();
+
   if (!meshDirty) {
     return false;
   }
@@ -251,25 +435,47 @@ void World::setBreakOverlay(const glm::ivec3& block, int stage) {
   if (breakOverlay.active && breakOverlay.block == block && breakOverlay.stage == clampedStage) {
     return;
   }
+
+  auto markChunkDirty = [&](const glm::ivec3& pos) {
+    int cx = floorDiv(pos.x, kChunkSize);
+    int cz = floorDiv(pos.z, kChunkSize);
+    Chunk* chunk = findChunk(cx, cz);
+    if (chunk) {
+      chunk->dirty = true;
+    }
+    meshDirty = true;
+  };
+
+  if (breakOverlay.active) {
+    markChunkDirty(breakOverlay.block);
+  }
+
   breakOverlay.active = true;
   breakOverlay.block = block;
   breakOverlay.stage = clampedStage;
-  meshDirty = true;
+  markChunkDirty(block);
 }
 
 void World::clearBreakOverlay() {
   if (!breakOverlay.active) {
     return;
   }
+  glm::ivec3 prevBlock = breakOverlay.block;
   breakOverlay.active = false;
   breakOverlay.stage = 0;
+
+  int cx = floorDiv(prevBlock.x, kChunkSize);
+  int cz = floorDiv(prevBlock.z, kChunkSize);
+  Chunk* chunk = findChunk(cx, cz);
+  if (chunk) {
+    chunk->dirty = true;
+  }
   meshDirty = true;
 }
 
-void World::buildMesh(std::vector<Vertex>& outVertices,
-                      std::vector<uint32_t>& outIndices) const {
-  outVertices.clear();
-  outIndices.clear();
+void World::buildChunkMesh(World::Chunk& chunk) {
+  chunk.meshVertices.clear();
+  chunk.meshIndices.clear();
 
   auto tileFor = [](uint8_t type, int axis, bool positive) {
     // Tile indices in atlas: 0=grass top, 1=grass side, 2=dirt, 3=stone.
@@ -319,149 +525,179 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
     glm::vec2 uv2 = uvForTile(tile, 1.0f, 1.0f);
     glm::vec2 uv3 = uvForTile(tile, 0.0f, 1.0f);
 
-    uint32_t startIndex = static_cast<uint32_t>(outVertices.size());
-    outVertices.push_back({v0, color, uv0});
-    outVertices.push_back({v1, color, uv1});
-    outVertices.push_back({v2, color, uv2});
-    outVertices.push_back({v3, color, uv3});
+    uint32_t startIndex = static_cast<uint32_t>(chunk.meshVertices.size());
+    chunk.meshVertices.push_back({v0, color, uv0});
+    chunk.meshVertices.push_back({v1, color, uv1});
+    chunk.meshVertices.push_back({v2, color, uv2});
+    chunk.meshVertices.push_back({v3, color, uv3});
 
-    outIndices.push_back(startIndex + 0);
-    outIndices.push_back(startIndex + 1);
-    outIndices.push_back(startIndex + 2);
-    outIndices.push_back(startIndex + 0);
-    outIndices.push_back(startIndex + 2);
-    outIndices.push_back(startIndex + 3);
+    chunk.meshIndices.push_back(startIndex + 0);
+    chunk.meshIndices.push_back(startIndex + 1);
+    chunk.meshIndices.push_back(startIndex + 2);
+    chunk.meshIndices.push_back(startIndex + 0);
+    chunk.meshIndices.push_back(startIndex + 2);
+    chunk.meshIndices.push_back(startIndex + 3);
   };
 
   const float overlayOffset = 0.01f;
+  bool overlayActive = breakOverlay.active && breakOverlay.stage > 0;
   int overlayTile = kBreakTileBase + std::clamp(breakOverlay.stage, 1, kBreakStages) - 1;
+  int overlayX = breakOverlay.block.x;
+  int overlayY = breakOverlay.block.y;
+  int overlayZ = breakOverlay.block.z;
 
-  for (const auto& entry : chunks) {
-    const Chunk& chunk = entry.second;
-    int baseX = chunk.cx * kChunkSize;
-    int baseZ = chunk.cz * kChunkSize;
+  int baseX = chunk.cx * kChunkSize;
+  int baseZ = chunk.cz * kChunkSize;
 
-    for (int lz = 0; lz < kChunkSize; ++lz) {
-      for (int lx = 0; lx < kChunkSize; ++lx) {
-        for (int y = 0; y < kChunkHeight; ++y) {
-          uint8_t blockType = chunk.blocks[static_cast<size_t>(localIndex(lx, y, lz))];
-          if (blockType == kAir) {
-            continue;
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      for (int y = 0; y < kChunkHeight; ++y) {
+        uint8_t blockType = chunk.blocks[static_cast<size_t>(localIndex(lx, y, lz))];
+        if (blockType == kAir) {
+          continue;
+        }
+
+        int x = baseX + lx;
+        int z = baseZ + lz;
+
+        float fx = static_cast<float>(x);
+        float fy = static_cast<float>(y);
+        float fz = static_cast<float>(z);
+        float fx1 = fx + 1.0f;
+        float fy1 = fy + 1.0f;
+        float fz1 = fz + 1.0f;
+
+        float heightFactor = 0.6f + 0.4f * (fy / (kChunkHeight - 1));
+
+        bool isBreakTarget = overlayActive &&
+                             overlayX == x && overlayY == y && overlayZ == z;
+
+        if (getBlock(x + 1, y, z) == kAir) {
+          float shade = 0.8f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 0, true);
+          addQuad({fx1, fy, fz}, {fx1, fy1, fz}, {fx1, fy1, fz1}, {fx1, fy, fz1}, color, tile);
+          if (isBreakTarget) {
+            glm::vec3 offset(overlayOffset, 0.0f, 0.0f);
+            addQuad(glm::vec3(fx1, fy, fz) + offset,
+                    glm::vec3(fx1, fy1, fz) + offset,
+                    glm::vec3(fx1, fy1, fz1) + offset,
+                    glm::vec3(fx1, fy, fz1) + offset,
+                    glm::vec3(1.0f),
+                    overlayTile);
           }
+        }
 
-          int x = baseX + lx;
-          int z = baseZ + lz;
-
-          float fx = static_cast<float>(x);
-          float fy = static_cast<float>(y);
-          float fz = static_cast<float>(z);
-          float fx1 = fx + 1.0f;
-          float fy1 = fy + 1.0f;
-          float fz1 = fz + 1.0f;
-
-          float heightFactor = 0.6f + 0.4f * (fy / (kChunkHeight - 1));
-
-          bool isBreakTarget = breakOverlay.active &&
-                               breakOverlay.block == glm::ivec3(x, y, z) &&
-                               breakOverlay.stage > 0;
-
-          if (getBlock(x + 1, y, z) == kAir) {
-            float shade = 0.8f;
-            glm::vec3 color = blockColor(blockType) * shade * heightFactor;
-            int tile = tileFor(blockType, 0, true);
-            addQuad({fx1, fy, fz}, {fx1, fy1, fz}, {fx1, fy1, fz1}, {fx1, fy, fz1}, color, tile);
-            if (isBreakTarget) {
-              glm::vec3 offset(overlayOffset, 0.0f, 0.0f);
-              addQuad(glm::vec3(fx1, fy, fz) + offset,
-                      glm::vec3(fx1, fy1, fz) + offset,
-                      glm::vec3(fx1, fy1, fz1) + offset,
-                      glm::vec3(fx1, fy, fz1) + offset,
-                      glm::vec3(1.0f),
-                      overlayTile);
-            }
+        if (getBlock(x - 1, y, z) == kAir) {
+          float shade = 0.8f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 0, false);
+          addQuad({fx, fy, fz}, {fx, fy, fz1}, {fx, fy1, fz1}, {fx, fy1, fz}, color, tile);
+          if (isBreakTarget) {
+            glm::vec3 offset(-overlayOffset, 0.0f, 0.0f);
+            addQuad(glm::vec3(fx, fy, fz) + offset,
+                    glm::vec3(fx, fy, fz1) + offset,
+                    glm::vec3(fx, fy1, fz1) + offset,
+                    glm::vec3(fx, fy1, fz) + offset,
+                    glm::vec3(1.0f),
+                    overlayTile);
           }
+        }
 
-          if (getBlock(x - 1, y, z) == kAir) {
-            float shade = 0.8f;
-            glm::vec3 color = blockColor(blockType) * shade * heightFactor;
-            int tile = tileFor(blockType, 0, false);
-            addQuad({fx, fy, fz}, {fx, fy, fz1}, {fx, fy1, fz1}, {fx, fy1, fz}, color, tile);
-            if (isBreakTarget) {
-              glm::vec3 offset(-overlayOffset, 0.0f, 0.0f);
-              addQuad(glm::vec3(fx, fy, fz) + offset,
-                      glm::vec3(fx, fy, fz1) + offset,
-                      glm::vec3(fx, fy1, fz1) + offset,
-                      glm::vec3(fx, fy1, fz) + offset,
-                      glm::vec3(1.0f),
-                      overlayTile);
-            }
+        if (getBlock(x, y + 1, z) == kAir) {
+          float shade = 1.0f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 1, true);
+          addQuad({fx, fy1, fz}, {fx, fy1, fz1}, {fx1, fy1, fz1}, {fx1, fy1, fz}, color, tile);
+          if (isBreakTarget) {
+            glm::vec3 offset(0.0f, overlayOffset, 0.0f);
+            addQuad(glm::vec3(fx, fy1, fz) + offset,
+                    glm::vec3(fx, fy1, fz1) + offset,
+                    glm::vec3(fx1, fy1, fz1) + offset,
+                    glm::vec3(fx1, fy1, fz) + offset,
+                    glm::vec3(1.0f),
+                    overlayTile);
           }
+        }
 
-          if (getBlock(x, y + 1, z) == kAir) {
-            float shade = 1.0f;
-            glm::vec3 color = blockColor(blockType) * shade * heightFactor;
-            int tile = tileFor(blockType, 1, true);
-            addQuad({fx, fy1, fz}, {fx, fy1, fz1}, {fx1, fy1, fz1}, {fx1, fy1, fz}, color, tile);
-            if (isBreakTarget) {
-              glm::vec3 offset(0.0f, overlayOffset, 0.0f);
-              addQuad(glm::vec3(fx, fy1, fz) + offset,
-                      glm::vec3(fx, fy1, fz1) + offset,
-                      glm::vec3(fx1, fy1, fz1) + offset,
-                      glm::vec3(fx1, fy1, fz) + offset,
-                      glm::vec3(1.0f),
-                      overlayTile);
-            }
+        if (getBlock(x, y - 1, z) == kAir) {
+          float shade = 0.5f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 1, false);
+          addQuad({fx, fy, fz}, {fx1, fy, fz}, {fx1, fy, fz1}, {fx, fy, fz1}, color, tile);
+          if (isBreakTarget) {
+            glm::vec3 offset(0.0f, -overlayOffset, 0.0f);
+            addQuad(glm::vec3(fx, fy, fz) + offset,
+                    glm::vec3(fx1, fy, fz) + offset,
+                    glm::vec3(fx1, fy, fz1) + offset,
+                    glm::vec3(fx, fy, fz1) + offset,
+                    glm::vec3(1.0f),
+                    overlayTile);
           }
+        }
 
-          if (getBlock(x, y - 1, z) == kAir) {
-            float shade = 0.5f;
-            glm::vec3 color = blockColor(blockType) * shade * heightFactor;
-            int tile = tileFor(blockType, 1, false);
-            addQuad({fx, fy, fz}, {fx1, fy, fz}, {fx1, fy, fz1}, {fx, fy, fz1}, color, tile);
-            if (isBreakTarget) {
-              glm::vec3 offset(0.0f, -overlayOffset, 0.0f);
-              addQuad(glm::vec3(fx, fy, fz) + offset,
-                      glm::vec3(fx1, fy, fz) + offset,
-                      glm::vec3(fx1, fy, fz1) + offset,
-                      glm::vec3(fx, fy, fz1) + offset,
-                      glm::vec3(1.0f),
-                      overlayTile);
-            }
+        if (getBlock(x, y, z + 1) == kAir) {
+          float shade = 0.8f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 2, true);
+          addQuad({fx, fy, fz1}, {fx1, fy, fz1}, {fx1, fy1, fz1}, {fx, fy1, fz1}, color, tile);
+          if (isBreakTarget) {
+            glm::vec3 offset(0.0f, 0.0f, overlayOffset);
+            addQuad(glm::vec3(fx, fy, fz1) + offset,
+                    glm::vec3(fx1, fy, fz1) + offset,
+                    glm::vec3(fx1, fy1, fz1) + offset,
+                    glm::vec3(fx, fy1, fz1) + offset,
+                    glm::vec3(1.0f),
+                    overlayTile);
           }
+        }
 
-          if (getBlock(x, y, z + 1) == kAir) {
-            float shade = 0.8f;
-            glm::vec3 color = blockColor(blockType) * shade * heightFactor;
-            int tile = tileFor(blockType, 2, true);
-            addQuad({fx, fy, fz1}, {fx1, fy, fz1}, {fx1, fy1, fz1}, {fx, fy1, fz1}, color, tile);
-            if (isBreakTarget) {
-              glm::vec3 offset(0.0f, 0.0f, overlayOffset);
-              addQuad(glm::vec3(fx, fy, fz1) + offset,
-                      glm::vec3(fx1, fy, fz1) + offset,
-                      glm::vec3(fx1, fy1, fz1) + offset,
-                      glm::vec3(fx, fy1, fz1) + offset,
-                      glm::vec3(1.0f),
-                      overlayTile);
-            }
-          }
-
-          if (getBlock(x, y, z - 1) == kAir) {
-            float shade = 0.8f;
-            glm::vec3 color = blockColor(blockType) * shade * heightFactor;
-            int tile = tileFor(blockType, 2, false);
-            addQuad({fx, fy, fz}, {fx, fy1, fz}, {fx1, fy1, fz}, {fx1, fy, fz}, color, tile);
-            if (isBreakTarget) {
-              glm::vec3 offset(0.0f, 0.0f, -overlayOffset);
-              addQuad(glm::vec3(fx, fy, fz) + offset,
-                      glm::vec3(fx, fy1, fz) + offset,
-                      glm::vec3(fx1, fy1, fz) + offset,
-                      glm::vec3(fx1, fy, fz) + offset,
-                      glm::vec3(1.0f),
-                      overlayTile);
-            }
+        if (getBlock(x, y, z - 1) == kAir) {
+          float shade = 0.8f;
+          glm::vec3 color = blockColor(blockType) * shade * heightFactor;
+          int tile = tileFor(blockType, 2, false);
+          addQuad({fx, fy, fz}, {fx, fy1, fz}, {fx1, fy1, fz}, {fx1, fy, fz}, color, tile);
+          if (isBreakTarget) {
+            glm::vec3 offset(0.0f, 0.0f, -overlayOffset);
+            addQuad(glm::vec3(fx, fy, fz) + offset,
+                    glm::vec3(fx, fy1, fz) + offset,
+                    glm::vec3(fx1, fy1, fz) + offset,
+                    glm::vec3(fx1, fy, fz) + offset,
+                    glm::vec3(1.0f),
+                    overlayTile);
           }
         }
       }
+    }
+  }
+
+  chunk.dirty = false;
+}
+
+void World::buildMesh(std::vector<Vertex>& outVertices,
+                      std::vector<uint32_t>& outIndices) {
+  pumpChunkGeneration();
+
+  outVertices.clear();
+  outIndices.clear();
+
+  for (auto& entry : chunks) {
+    Chunk& chunk = entry.second;
+    if (chunk.generating) {
+      continue;
+    }
+    if (chunk.dirty) {
+      buildChunkMesh(chunk);
+    }
+
+    uint32_t vertexOffset = static_cast<uint32_t>(outVertices.size());
+    outVertices.insert(outVertices.end(),
+                       chunk.meshVertices.begin(),
+                       chunk.meshVertices.end());
+
+    outIndices.reserve(outIndices.size() + chunk.meshIndices.size());
+    for (uint32_t idx : chunk.meshIndices) {
+      outIndices.push_back(idx + vertexOffset);
     }
   }
 }
@@ -545,8 +781,11 @@ bool World::load(const std::string& path) {
   }
 
   seed = static_cast<int>(seedValue);
+  resetChunkGeneration();
   chunks.clear();
   savedChunks.clear();
+  breakOverlay.active = false;
+  breakOverlay.stage = 0;
 
   size_t blocksSize = static_cast<size_t>(kChunkSize * kChunkSize * kChunkHeight);
   for (uint32_t i = 0; i < storedCount; ++i) {

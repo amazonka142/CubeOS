@@ -955,10 +955,10 @@ void VulkanContext::createTextureImage() {
   };
 
   // Tile layout:
-  // 0: grass top (0,0), 1: grass side (1,0), 2: dirt (0,1), 3: stone (1,1)
+  // 0: grass top (0,0), 1: grass side (1,0), 2: dirt (2,0), 3: stone (3,0)
   fillTile(0, 0, 90, 180, 60);
-  fillTile(0, 1, 110, 85, 50);
-  fillTile(1, 1, 130, 130, 130);
+  fillTile(2, 0, 110, 85, 50);
+  fillTile(3, 0, 130, 130, 130);
 
   // Grass side: top green strip + dirt body.
   int sideX = 1 * kAtlasTileSize;
