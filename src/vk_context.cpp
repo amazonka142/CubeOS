@@ -21,6 +21,7 @@
 #define NOMINMAX
 #include <windows.h>
 #elif defined(__APPLE__)
+#include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <limits.h>
 #include <unistd.h>
@@ -35,26 +36,6 @@ constexpr int kMaxFramesInFlight = 2;
 
 #ifdef CUBEOS_ENABLE_VALIDATION
 constexpr bool kEnableValidationLayers = true;
-#elif defined(__APPLE__)
-  uint32_t size = 0;
-  _NSGetExecutablePath(nullptr, &size);
-  if (size == 0) {
-    return ".";
-  }
-  std::string path(size, '\0');
-  if (_NSGetExecutablePath(path.data(), &size) != 0) {
-    return ".";
-  }
-  path.resize(std::strlen(path.c_str()));
-  char resolved[PATH_MAX];
-  if (realpath(path.c_str(), resolved)) {
-    path = resolved;
-  }
-  size_t pos = path.find_last_of('/');
-  if (pos == std::string::npos) {
-    return ".";
-  }
-  return path.substr(0, pos);
 #else
 constexpr bool kEnableValidationLayers = false;
 #endif
@@ -64,7 +45,10 @@ const std::vector<const char*> kValidationLayers = {
 };
 
 const std::vector<const char*> kDeviceExtensions = {
-  VK_KHR_SWAPCHAIN_EXTENSION_NAME
+  VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+#ifdef __APPLE__
+  "VK_KHR_portability_subset",
+#endif
 };
 
 struct UniformBufferObject {
@@ -131,6 +115,38 @@ std::string getExecutableDir() {
     return ".";
   }
   return path.substr(0, pos);
+#elif defined(__APPLE__)
+  std::string path;
+
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void*>(&getExecutableDir), &info) != 0 && info.dli_fname) {
+    path = info.dli_fname;
+  }
+
+  if (path.empty()) {
+    char pathbuf[PATH_MAX];
+    uint32_t size = static_cast<uint32_t>(sizeof(pathbuf));
+    if (_NSGetExecutablePath(pathbuf, &size) == 0) {
+      path = pathbuf;
+    } else {
+      std::string temp(size, '\0');
+      if (_NSGetExecutablePath(temp.data(), &size) != 0) {
+        return ".";
+      }
+      temp.resize(std::strlen(temp.c_str()));
+      path = temp;
+    }
+  }
+
+  char resolved[PATH_MAX];
+  if (realpath(path.c_str(), resolved)) {
+    path = resolved;
+  }
+  size_t pos = path.find_last_of('/');
+  if (pos == std::string::npos) {
+    return ".";
+  }
+  return path.substr(0, pos);
 #else
   char buffer[4096];
   ssize_t length = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
@@ -149,7 +165,17 @@ std::string getExecutableDir() {
 
 std::string buildShaderPath(const char* filename) {
   std::string base = getExecutableDir();
-  return base + "/shaders/" + filename;
+  std::string path = base + "/shaders/" + filename;
+  std::ifstream direct(path, std::ios::binary);
+  if (direct.is_open()) {
+    return path;
+  }
+  std::string fallback = base + "/../shaders/" + filename;
+  std::ifstream fallbackFile(fallback, std::ios::binary);
+  if (fallbackFile.is_open()) {
+    return fallback;
+  }
+  return path;
 }
 
 } // namespace
@@ -409,6 +435,12 @@ void VulkanContext::createInstance() {
   VkInstanceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   createInfo.pApplicationInfo = &appInfo;
+#ifdef __APPLE__
+  #ifndef VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
+  #define VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR 0x00000001
+  #endif
+  createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
 
   auto extensions = getRequiredExtensions();
   createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
@@ -1479,6 +1511,9 @@ std::vector<const char*> VulkanContext::getRequiredExtensions() const {
   if (kEnableValidationLayers) {
     extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   }
+#ifdef __APPLE__
+  extensions.push_back("VK_KHR_portability_enumeration");
+#endif
 
   return extensions;
 }
