@@ -134,9 +134,19 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
     float tileSizeV = 1.0f / static_cast<float>(kAtlasRows);
     int tx = tile % kAtlasCols;
     int ty = tile / kAtlasCols;
-    float u0 = tx * tileSizeU;
-    float v0 = ty * tileSizeV;
-    return glm::vec2(u0 + u * tileSizeU, v0 + v * tileSizeV);
+    float u0 = static_cast<float>(tx) * tileSizeU;
+    float v0 = static_cast<float>(ty) * tileSizeV;
+    float atlasWidth = static_cast<float>(kAtlasTileSize * kAtlasCols);
+    float atlasHeight = static_cast<float>(kAtlasTileSize * kAtlasRows);
+    float padU = 0.5f / atlasWidth;
+    float padV = 0.5f / atlasHeight;
+    float uMin = u0 + padU;
+    float vMin = v0 + padV;
+    float uMax = u0 + tileSizeU - padU;
+    float vMax = v0 + tileSizeV - padV;
+    float uClamped = uMin + u * (uMax - uMin);
+    float vClamped = vMin + v * (vMax - vMin);
+    return glm::vec2(uClamped, vClamped);
   };
 
   for (int d = 0; d < 3; ++d) {

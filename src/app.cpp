@@ -55,7 +55,17 @@ glm::vec2 uvForTile(int tile, float u, float v) {
   int ty = tile / kAtlasCols;
   float u0 = static_cast<float>(tx) * tileSizeU;
   float v0 = static_cast<float>(ty) * tileSizeV;
-  return glm::vec2(u0 + u * tileSizeU, v0 + v * tileSizeV);
+  float atlasWidth = static_cast<float>(kAtlasTileSize * kAtlasCols);
+  float atlasHeight = static_cast<float>(kAtlasTileSize * kAtlasRows);
+  float padU = 0.5f / atlasWidth;
+  float padV = 0.5f / atlasHeight;
+  float uMin = u0 + padU;
+  float vMin = v0 + padV;
+  float uMax = u0 + tileSizeU - padU;
+  float vMax = v0 + tileSizeV - padV;
+  float uClamped = uMin + u * (uMax - uMin);
+  float vClamped = vMin + v * (vMax - vMin);
+  return glm::vec2(uClamped, vClamped);
 }
 
 } // namespace
