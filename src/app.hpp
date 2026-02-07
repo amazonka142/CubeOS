@@ -30,6 +30,7 @@ private:
   void rebuildWorldMesh();
   void rebuildUiMesh();
   void composeMeshData();
+  void updateStreaming();
   void setInventoryOpen(bool open);
   bool handleInventoryClick(double xpos, double ypos, bool rightClick);
   glm::vec2 cursorToFramebuffer(double xpos, double ypos) const;
@@ -68,6 +69,13 @@ private:
   glm::vec3 playerPos{8.0f, 30.0f, 8.0f};
   glm::vec3 playerVel{0.0f};
   bool onGround = false;
+  int currentChunkX = 0;
+  int currentChunkZ = 0;
+  bool chunkCenterValid = false;
+  bool breakingActive = false;
+  glm::ivec3 breakingBlock{};
+  float breakingProgress = 0.0f;
+  int breakingStage = 0;
   uint8_t selectedBlock = kGrass;
   std::array<ItemStack, 9> hotbar = {{
     {kGrass, 64}, {kDirt, 64}, {kStone, 64},

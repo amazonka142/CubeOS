@@ -96,6 +96,10 @@ target_compile_definitions(cubeos_voxel PRIVATE GLFW_INCLUDE_NONE)
 target_compile_definitions(cubeos_voxel PRIVATE GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
 add_dependencies(cubeos_voxel shaders)
 
+if (APPLE)
+  target_compile_definitions(cubeos_voxel PRIVATE VK_USE_PLATFORM_MACOS_MVK)
+endif()
+
 add_custom_command(
   TARGET cubeos_voxel POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:cubeos_voxel>/shaders

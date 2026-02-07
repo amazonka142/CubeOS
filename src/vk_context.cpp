@@ -20,6 +20,11 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <limits.h>
+#include <unistd.h>
+#include <stdlib.h>
 #else
 #include <unistd.h>
 #endif
@@ -30,6 +35,26 @@ constexpr int kMaxFramesInFlight = 2;
 
 #ifdef CUBEOS_ENABLE_VALIDATION
 constexpr bool kEnableValidationLayers = true;
+#elif defined(__APPLE__)
+  uint32_t size = 0;
+  _NSGetExecutablePath(nullptr, &size);
+  if (size == 0) {
+    return ".";
+  }
+  std::string path(size, '\0');
+  if (_NSGetExecutablePath(path.data(), &size) != 0) {
+    return ".";
+  }
+  path.resize(std::strlen(path.c_str()));
+  char resolved[PATH_MAX];
+  if (realpath(path.c_str(), resolved)) {
+    path = resolved;
+  }
+  size_t pos = path.find_last_of('/');
+  if (pos == std::string::npos) {
+    return ".";
+  }
+  return path.substr(0, pos);
 #else
 constexpr bool kEnableValidationLayers = false;
 #endif
@@ -771,7 +796,13 @@ void VulkanContext::createGraphicsPipeline() {
   colorBlendAttachment.colorWriteMask =
     VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
     VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-  colorBlendAttachment.blendEnable = VK_FALSE;
+  colorBlendAttachment.blendEnable = VK_TRUE;
+  colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+  colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+  colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
   VkPipelineColorBlendStateCreateInfo colorBlending{};
   colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -851,14 +882,14 @@ void VulkanContext::createDepthResources() {
 void VulkanContext::createTextureImage() {
   const int texWidth = kAtlasTileSize * kAtlasCols;
   const int texHeight = kAtlasTileSize * kAtlasRows;
-  std::vector<uint8_t> pixels(static_cast<size_t>(texWidth * texHeight * 4));
+  std::vector<uint8_t> pixels(static_cast<size_t>(texWidth * texHeight * 4), 0);
 
-  auto putPixel = [&](int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+  auto putPixel = [&](int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     size_t idx = static_cast<size_t>((y * texWidth + x) * 4);
     pixels[idx + 0] = r;
     pixels[idx + 1] = g;
     pixels[idx + 2] = b;
-    pixels[idx + 3] = 255;
+    pixels[idx + 3] = a;
   };
 
   auto fillTile = [&](int tileX, int tileY, uint8_t r, uint8_t g, uint8_t b) {
@@ -870,7 +901,8 @@ void VulkanContext::createTextureImage() {
         putPixel(startX + x, startY + y,
                  static_cast<uint8_t>(std::min(255, r + shade)),
                  static_cast<uint8_t>(std::min(255, g + shade)),
-                 static_cast<uint8_t>(std::min(255, b + shade)));
+                 static_cast<uint8_t>(std::min(255, b + shade)),
+                 255);
       }
     }
   };
@@ -894,8 +926,67 @@ void VulkanContext::createTextureImage() {
       putPixel(sideX + x, sideY + y,
                static_cast<uint8_t>(std::min(255, r + shade)),
                static_cast<uint8_t>(std::min(255, g + shade)),
-               static_cast<uint8_t>(std::min(255, b + shade)));
+               static_cast<uint8_t>(std::min(255, b + shade)),
+               255);
     }
+  }
+
+  auto hash = [](int x, int y, int s) -> uint32_t {
+    uint32_t h = static_cast<uint32_t>(x) * 374761393u +
+                 static_cast<uint32_t>(y) * 668265263u +
+                 static_cast<uint32_t>(s) * 362437u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return h;
+  };
+
+  auto drawBreakTile = [&](int tileIndex, int stage) {
+    int tileX = tileIndex % kAtlasCols;
+    int tileY = tileIndex / kAtlasCols;
+    int startX = tileX * kAtlasTileSize;
+    int startY = tileY * kAtlasTileSize;
+    int size = kAtlasTileSize;
+    int center = size / 2;
+
+    for (int y = 0; y < size; ++y) {
+      for (int x = 0; x < size; ++x) {
+        bool crack = false;
+        if (stage >= 1 && std::abs(x - y) <= 0) {
+          crack = true;
+        }
+        if (stage >= 2 && std::abs((x + y) - (size - 1)) <= 0) {
+          crack = true;
+        }
+        if (stage >= 3 && std::abs(x - center) <= 0) {
+          crack = true;
+        }
+        if (stage >= 4 && std::abs(y - (size / 3)) <= 0) {
+          crack = true;
+        }
+        if (stage >= 5 && std::abs(x - (2 * size / 3)) <= 0) {
+          crack = true;
+        }
+        if (stage >= 6 && std::abs(y - (2 * size / 3)) <= 0) {
+          crack = true;
+        }
+        if (stage >= 7) {
+          uint32_t h = hash(x, y, stage);
+          if ((h % 100u) < static_cast<uint32_t>(stage * 3)) {
+            crack = true;
+          }
+        }
+        if (crack) {
+          putPixel(startX + x, startY + y, 255, 255, 255, 200);
+        }
+      }
+    }
+  };
+
+  for (int stage = 0; stage < kBreakStages; ++stage) {
+    int tileIndex = kBreakTileBase + stage;
+    if (tileIndex >= kAtlasCols * kAtlasRows) {
+      break;
+    }
+    drawBreakTile(tileIndex, stage + 1);
   }
 
   VkDeviceSize imageSize = static_cast<VkDeviceSize>(pixels.size());
@@ -908,9 +999,9 @@ void VulkanContext::createTextureImage() {
                stagingBuffer,
                stagingBufferMemory);
 
-  void* data = nullptr;
-  vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
-  std::memcpy(data, pixels.data(), static_cast<size_t>(imageSize));
+  void* dataPtr = nullptr;
+  vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &dataPtr);
+  std::memcpy(dataPtr, pixels.data(), static_cast<size_t>(imageSize));
   vkUnmapMemory(device, stagingBufferMemory);
 
   createImage(static_cast<uint32_t>(texWidth),

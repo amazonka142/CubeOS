@@ -14,11 +14,29 @@ cmake --build build --config Debug
 
 The first configure/build will fetch GLFW via CMake `FetchContent`.
 
+## macOS build (MoltenVK)
+1. Install the Vulkan SDK for macOS (MoltenVK) from LunarG and ensure `VULKAN_SDK` is set.
+2. Install CMake and Xcode command line tools.
+3. Configure and build:
+
+```bash
+cmake -S . -B build
+cmake --build build
+```
+
+The shaders are compiled with `glslc` from the Vulkan SDK and copied next to the binary.
+
 ## Running
 The executable will be under:
 
 ```
 build/Debug/cubeos_voxel.exe
+```
+
+On macOS and other non-Windows builds:
+
+```
+build/cubeos_voxel
 ```
 
 ## Controls

@@ -16,11 +16,14 @@ constexpr float kSlotBorder = 3.0f;
 constexpr float kMarginBottom = 20.0f;
 constexpr float kIconPadding = 6.0f;
 constexpr float kPanelPadding = 12.0f;
+constexpr int kChunkViewRadius = 6;
 constexpr int kInventoryCols = 9;
 constexpr int kInventoryRows = 3;
 constexpr uint16_t kMaxStack = 64;
 constexpr int kDigitWidth = 3;
 constexpr int kDigitHeight = 5;
+constexpr float kBreakDuration = 0.6f;
+constexpr float kBreakMaxDistance = 6.0f;
 
 constexpr uint8_t kDigitMap[10][kDigitHeight] = {
   {0b111, 0b101, 0b101, 0b101, 0b111}, // 0
@@ -100,7 +103,16 @@ void App::initVulkan() {
   if (!world.load("world.bin")) {
     world.generate();
   }
-  rebuildWorldMesh();
+  int cx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
+  int cz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
+  world.updateActiveChunks(cx, cz, kChunkViewRadius);
+  currentChunkX = cx;
+  currentChunkZ = cz;
+  chunkCenterValid = true;
+  world.buildMesh(worldVertices, worldIndices);
+  rebuildUiMesh();
+  composeMeshData();
+  vk.setMeshData(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
   uiDirty = false;
   refreshSelectedBlock();
   vk.init(window, &framebufferResized);
@@ -118,9 +130,16 @@ void App::mainLoop() {
     if (!inventoryOpen) {
       updatePlayer(deltaTime);
     }
+    updateStreaming();
 
+    bool worldChanged = world.consumeMeshDirty();
+    if (worldChanged) {
+      world.buildMesh(worldVertices, worldIndices);
+    }
     if (uiDirty) {
       rebuildUiMesh();
+    }
+    if (worldChanged || uiDirty) {
       composeMeshData();
       vk.updateMesh(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
       uiDirty = false;
@@ -200,6 +219,13 @@ void App::processInput(float deltaTime) {
     mouseLeftDown = leftPressed;
     mouseRightDown = rightPressed;
 
+    if (breakingActive) {
+      breakingActive = false;
+      breakingProgress = 0.0f;
+      breakingStage = 0;
+      world.clearBreakOverlay();
+    }
+
     (void)deltaTime;
     return;
   }
@@ -235,25 +261,54 @@ void App::processInput(float deltaTime) {
     onGround = false;
   }
 
-  if (leftPressed && !mouseLeftDown) {
+  if (leftPressed) {
     glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
-    RaycastHit hit = raycast(origin, cameraFront(), 6.0f);
+    RaycastHit hit = raycast(origin, cameraFront(), kBreakMaxDistance);
     if (hit.hit) {
-      uint8_t removed = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
-      world.setBlock(hit.block.x, hit.block.y, hit.block.z, kAir);
-      if (removed != kAir) {
-        addToInventory(removed, 1);
-        refreshSelectedBlock();
-        uiDirty = true;
+      if (!breakingActive || hit.block != breakingBlock) {
+        breakingActive = true;
+        breakingBlock = hit.block;
+        breakingProgress = 0.0f;
+        breakingStage = 0;
       }
-      rebuildWorldMesh();
-      vk.updateMesh(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
+
+      breakingProgress += deltaTime;
+      int newStage = static_cast<int>((breakingProgress / kBreakDuration) * kBreakStages) + 1;
+      newStage = std::clamp(newStage, 1, kBreakStages);
+      if (newStage != breakingStage) {
+        breakingStage = newStage;
+        world.setBreakOverlay(breakingBlock, breakingStage);
+      }
+
+      if (breakingProgress >= kBreakDuration) {
+        uint8_t removed = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+        world.setBlock(hit.block.x, hit.block.y, hit.block.z, kAir);
+        if (removed != kAir) {
+          addToInventory(removed, 1);
+          refreshSelectedBlock();
+          uiDirty = true;
+        }
+        breakingActive = false;
+        breakingProgress = 0.0f;
+        breakingStage = 0;
+        world.clearBreakOverlay();
+      }
+    } else if (breakingActive) {
+      breakingActive = false;
+      breakingProgress = 0.0f;
+      breakingStage = 0;
+      world.clearBreakOverlay();
     }
+  } else if (breakingActive) {
+    breakingActive = false;
+    breakingProgress = 0.0f;
+    breakingStage = 0;
+    world.clearBreakOverlay();
   }
 
   if (rightPressed && !mouseRightDown) {
     glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
-    RaycastHit hit = raycast(origin, cameraFront(), 6.0f);
+    RaycastHit hit = raycast(origin, cameraFront(), kBreakMaxDistance);
     if (hit.hit) {
       glm::ivec3 target = hit.block + hit.normal;
       if (world.inBounds(target.x, target.y, target.z) &&
@@ -268,8 +323,6 @@ void App::processInput(float deltaTime) {
           }
           refreshSelectedBlock();
           uiDirty = true;
-          rebuildWorldMesh();
-          vk.updateMesh(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
         }
       }
     }
@@ -316,11 +369,20 @@ void App::updatePlayer(float deltaTime) {
   playerPos = pos;
 }
 
+void App::updateStreaming() {
+  int cx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
+  int cz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
+  if (!chunkCenterValid || cx != currentChunkX || cz != currentChunkZ) {
+    currentChunkX = cx;
+    currentChunkZ = cz;
+    chunkCenterValid = true;
+    world.updateActiveChunks(cx, cz, kChunkViewRadius);
+  }
+}
+
 void App::rebuildWorldMesh() {
   world.buildMesh(worldVertices, worldIndices);
-  rebuildUiMesh();
   composeMeshData();
-  vk.setMeshData(meshVertices, meshIndices, worldIndexCount, uiIndexCount);
 }
 
 void App::rebuildUiMesh() {

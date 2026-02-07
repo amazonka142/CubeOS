@@ -6,8 +6,10 @@
 #include <vulkan/vulkan.h>
 
 constexpr int kAtlasTileSize = 16;
-constexpr int kAtlasCols = 2;
-constexpr int kAtlasRows = 2;
+constexpr int kAtlasCols = 4;
+constexpr int kAtlasRows = 4;
+constexpr int kBreakTileBase = 4;
+constexpr int kBreakStages = 8;
 
 struct Vertex {
   glm::vec3 pos;
