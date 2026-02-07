@@ -1,0 +1,116 @@
+[
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build",
+  "command": "/usr/bin/c++ -DCUBEOS_ENABLE_VALIDATION=1 -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/main.cpp.o -c /Users/macuser/Documents/CubeOS/src/main.cpp",
+  "file": "/Users/macuser/Documents/CubeOS/src/main.cpp",
+  "output": "CMakeFiles/cubeos_voxel.dir/src/main.cpp.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build",
+  "command": "/usr/bin/c++ -DCUBEOS_ENABLE_VALIDATION=1 -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/app.cpp.o -c /Users/macuser/Documents/CubeOS/src/app.cpp",
+  "file": "/Users/macuser/Documents/CubeOS/src/app.cpp",
+  "output": "CMakeFiles/cubeos_voxel.dir/src/app.cpp.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build",
+  "command": "/usr/bin/c++ -DCUBEOS_ENABLE_VALIDATION=1 -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/vk_context.cpp.o -c /Users/macuser/Documents/CubeOS/src/vk_context.cpp",
+  "file": "/Users/macuser/Documents/CubeOS/src/vk_context.cpp",
+  "output": "CMakeFiles/cubeos_voxel.dir/src/vk_context.cpp.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build",
+  "command": "/usr/bin/c++ -DCUBEOS_ENABLE_VALIDATION=1 -DGLFW_INCLUDE_NONE -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DVK_USE_PLATFORM_MACOS_MVK -I/Users/macuser/Documents/CubeOS/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glm-src/glm/.. -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -o CMakeFiles/cubeos_voxel.dir/src/world.cpp.o -c /Users/macuser/Documents/CubeOS/src/world.cpp",
+  "file": "/Users/macuser/Documents/CubeOS/src/world.cpp",
+  "output": "CMakeFiles/cubeos_voxel.dir/src/world.cpp.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/context.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/context.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/context.c",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/context.c.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/init.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/init.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/init.c",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/init.c.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/input.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/input.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/input.c",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/input.c.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/monitor.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/monitor.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/monitor.c",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/monitor.c.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/vulkan.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/vulkan.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/vulkan.c",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/vulkan.c.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/window.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/window.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/window.c",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/window.c.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/cocoa_init.m.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/cocoa_init.m",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/cocoa_init.m",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/cocoa_init.m.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/cocoa_joystick.m.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/cocoa_joystick.m",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/cocoa_joystick.m",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/cocoa_joystick.m.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/cocoa_monitor.m.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/cocoa_monitor.m",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/cocoa_monitor.m",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/cocoa_monitor.m.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/cocoa_window.m.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/cocoa_window.m",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/cocoa_window.m",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/cocoa_window.m.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/cocoa_time.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/cocoa_time.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/cocoa_time.c",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/cocoa_time.c.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/posix_thread.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/posix_thread.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/posix_thread.c",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/posix_thread.c.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/nsgl_context.m.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/nsgl_context.m",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/nsgl_context.m",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/nsgl_context.m.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/egl_context.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/egl_context.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/egl_context.c",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/egl_context.c.o"
+},
+{
+  "directory": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src",
+  "command": "/usr/bin/cc -D_GLFW_USE_CONFIG_H -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/include -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src -I/Users/macuser/Documents/CubeOS/build/_deps/glfw-build/src -std=gnu99 -arch arm64 -fPIC -Wall -o CMakeFiles/glfw.dir/osmesa_context.c.o -c /Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/osmesa_context.c",
+  "file": "/Users/macuser/Documents/CubeOS/build/_deps/glfw-src/src/osmesa_context.c",
+  "output": "_deps/glfw-build/src/CMakeFiles/glfw.dir/osmesa_context.c.o"
+}
+]

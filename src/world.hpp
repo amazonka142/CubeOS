@@ -38,13 +38,14 @@ public:
   int chunkCount() const { return static_cast<int>(chunks.size()); }
 
 private:
+  struct Chunk;
   int localIndex(int lx, int ly, int lz) const;
   glm::vec3 blockColor(uint8_t type) const;
   uint64_t chunkKey(int cx, int cz) const;
-  struct Chunk* findChunk(int cx, int cz);
-  const struct Chunk* findChunk(int cx, int cz) const;
-  struct Chunk& ensureChunk(int cx, int cz);
-  void generateChunk(struct Chunk& chunk);
+  Chunk* findChunk(int cx, int cz);
+  const Chunk* findChunk(int cx, int cz) const;
+  Chunk& ensureChunk(int cx, int cz);
+  void generateChunk(Chunk& chunk);
 
   struct BreakOverlay {
     bool active = false;

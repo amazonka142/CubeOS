@@ -372,10 +372,10 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
             addQuad({fx1, fy, fz}, {fx1, fy1, fz}, {fx1, fy1, fz1}, {fx1, fy, fz1}, color, tile);
             if (isBreakTarget) {
               glm::vec3 offset(overlayOffset, 0.0f, 0.0f);
-              addQuad({fx1, fy, fz} + offset,
-                      {fx1, fy1, fz} + offset,
-                      {fx1, fy1, fz1} + offset,
-                      {fx1, fy, fz1} + offset,
+              addQuad(glm::vec3(fx1, fy, fz) + offset,
+                      glm::vec3(fx1, fy1, fz) + offset,
+                      glm::vec3(fx1, fy1, fz1) + offset,
+                      glm::vec3(fx1, fy, fz1) + offset,
                       glm::vec3(1.0f),
                       overlayTile);
             }
@@ -388,10 +388,10 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
             addQuad({fx, fy, fz}, {fx, fy, fz1}, {fx, fy1, fz1}, {fx, fy1, fz}, color, tile);
             if (isBreakTarget) {
               glm::vec3 offset(-overlayOffset, 0.0f, 0.0f);
-              addQuad({fx, fy, fz} + offset,
-                      {fx, fy, fz1} + offset,
-                      {fx, fy1, fz1} + offset,
-                      {fx, fy1, fz} + offset,
+              addQuad(glm::vec3(fx, fy, fz) + offset,
+                      glm::vec3(fx, fy, fz1) + offset,
+                      glm::vec3(fx, fy1, fz1) + offset,
+                      glm::vec3(fx, fy1, fz) + offset,
                       glm::vec3(1.0f),
                       overlayTile);
             }
@@ -404,10 +404,10 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
             addQuad({fx, fy1, fz}, {fx, fy1, fz1}, {fx1, fy1, fz1}, {fx1, fy1, fz}, color, tile);
             if (isBreakTarget) {
               glm::vec3 offset(0.0f, overlayOffset, 0.0f);
-              addQuad({fx, fy1, fz} + offset,
-                      {fx, fy1, fz1} + offset,
-                      {fx1, fy1, fz1} + offset,
-                      {fx1, fy1, fz} + offset,
+              addQuad(glm::vec3(fx, fy1, fz) + offset,
+                      glm::vec3(fx, fy1, fz1) + offset,
+                      glm::vec3(fx1, fy1, fz1) + offset,
+                      glm::vec3(fx1, fy1, fz) + offset,
                       glm::vec3(1.0f),
                       overlayTile);
             }
@@ -420,10 +420,10 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
             addQuad({fx, fy, fz}, {fx1, fy, fz}, {fx1, fy, fz1}, {fx, fy, fz1}, color, tile);
             if (isBreakTarget) {
               glm::vec3 offset(0.0f, -overlayOffset, 0.0f);
-              addQuad({fx, fy, fz} + offset,
-                      {fx1, fy, fz} + offset,
-                      {fx1, fy, fz1} + offset,
-                      {fx, fy, fz1} + offset,
+              addQuad(glm::vec3(fx, fy, fz) + offset,
+                      glm::vec3(fx1, fy, fz) + offset,
+                      glm::vec3(fx1, fy, fz1) + offset,
+                      glm::vec3(fx, fy, fz1) + offset,
                       glm::vec3(1.0f),
                       overlayTile);
             }
@@ -436,10 +436,10 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
             addQuad({fx, fy, fz1}, {fx1, fy, fz1}, {fx1, fy1, fz1}, {fx, fy1, fz1}, color, tile);
             if (isBreakTarget) {
               glm::vec3 offset(0.0f, 0.0f, overlayOffset);
-              addQuad({fx, fy, fz1} + offset,
-                      {fx1, fy, fz1} + offset,
-                      {fx1, fy1, fz1} + offset,
-                      {fx, fy1, fz1} + offset,
+              addQuad(glm::vec3(fx, fy, fz1) + offset,
+                      glm::vec3(fx1, fy, fz1) + offset,
+                      glm::vec3(fx1, fy1, fz1) + offset,
+                      glm::vec3(fx, fy1, fz1) + offset,
                       glm::vec3(1.0f),
                       overlayTile);
             }
@@ -452,10 +452,10 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
             addQuad({fx, fy, fz}, {fx, fy1, fz}, {fx1, fy1, fz}, {fx1, fy, fz}, color, tile);
             if (isBreakTarget) {
               glm::vec3 offset(0.0f, 0.0f, -overlayOffset);
-              addQuad({fx, fy, fz} + offset,
-                      {fx, fy1, fz} + offset,
-                      {fx1, fy1, fz} + offset,
-                      {fx1, fy, fz} + offset,
+              addQuad(glm::vec3(fx, fy, fz) + offset,
+                      glm::vec3(fx, fy1, fz) + offset,
+                      glm::vec3(fx1, fy1, fz) + offset,
+                      glm::vec3(fx1, fy, fz) + offset,
                       glm::vec3(1.0f),
                       overlayTile);
             }
