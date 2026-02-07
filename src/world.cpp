@@ -106,13 +106,13 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
       float mountainMask = smooth01((ridgeNoise - 0.70f) / 0.30f);
       float mountainHeight = mountainMask * (12.0f + 34.0f * mountainMask);
 
-      float canyonSignal = 1.0f - std::abs(glm::perlin(glm::vec2(
+      float erosionSignal = 1.0f - std::abs(glm::perlin(glm::vec2(
         static_cast<float>(worldX + seed * 17) * 0.0016f,
         static_cast<float>(worldZ - seed * 11) * 0.0016f)));
-      float canyonMask = smooth01((canyonSignal - 0.95f) / 0.05f);
-      float canyonDepth = canyonMask * (4.0f + 10.0f * canyonMask);
+      float erosionMask = smooth01((erosionSignal - 0.97f) / 0.03f);
+      float erosionDepth = erosionMask * (2.0f + 4.0f * erosionMask);
 
-      float heightF = baseHeight + mountainHeight - canyonDepth;
+      float heightF = baseHeight + mountainHeight - erosionDepth;
       int height = static_cast<int>(std::round(heightF));
       height = std::clamp(height, 8, kChunkHeight - 2);
 
@@ -120,21 +120,16 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
         uint8_t type = kStone;
         bool isSurface = (y == height - 1);
         bool isSubsurface = (y >= height - 4);
-        bool isCanyonFloor = canyonMask > 0.55f;
         bool isBeach = height <= kSeaLevel;
 
         if (isSurface) {
-          if (isCanyonFloor) {
-            type = kGravel;
-          } else if (isBeach) {
+          if (isBeach) {
             type = kSand;
           } else {
             type = kGrass;
           }
         } else if (isSubsurface) {
-          if (isCanyonFloor) {
-            type = kGravel;
-          } else if (isBeach) {
+          if (isBeach) {
             type = kSand;
           } else {
             type = kDirt;
@@ -198,6 +193,43 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
           blocks[idx] = kIronOre;
         } else if (y < 96 && coalNoise > 0.84f) {
           blocks[idx] = kCoalOre;
+        }
+      }
+
+      float ravineRegion = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        static_cast<float>(worldX - seed * 47) * 0.00085f,
+        static_cast<float>(worldZ + seed * 53) * 0.00085f));
+      float ravineLineA = 1.0f - std::abs(glm::perlin(glm::vec2(
+        static_cast<float>(worldX + seed * 61) * 0.0017f,
+        static_cast<float>(worldZ - seed * 59) * 0.0017f)));
+      float ravineLineB = 1.0f - std::abs(glm::perlin(glm::vec2(
+        static_cast<float>(worldX - seed * 23) * 0.0031f,
+        static_cast<float>(worldZ + seed * 19) * 0.0031f)));
+      float ravineLine = 0.72f * ravineLineA + 0.28f * ravineLineB;
+      float ravineCore = smooth01((ravineLine - 0.962f) / 0.038f);
+      float ravineChance = smooth01((ravineRegion - 0.72f) / 0.28f);
+      float ravineMask = ravineCore * ravineChance;
+
+      if (ravineMask > 0.20f && height > 24) {
+        float depthNoise = 0.5f + 0.5f * glm::perlin(glm::vec2(
+          static_cast<float>(worldX - seed * 13) * 0.0062f,
+          static_cast<float>(worldZ + seed * 7) * 0.0062f));
+        int ravineDepth = static_cast<int>(12.0f + ravineMask * 34.0f + depthNoise * 10.0f);
+        ravineDepth = std::clamp(ravineDepth, 12, 56);
+        int bottomY = std::max(4, height - ravineDepth);
+
+        for (int y = height - 1; y >= bottomY; --y) {
+          float depthT = static_cast<float>((height - 1) - y) /
+                         static_cast<float>(std::max(1, ravineDepth - 1));
+          float wallThreshold = 0.14f + depthT * 0.60f;
+          float wallRough = glm::perlin(glm::vec3(
+            static_cast<float>(worldX + seed * 3) * 0.085f,
+            static_cast<float>(y - seed * 7) * 0.11f,
+            static_cast<float>(worldZ - seed * 5) * 0.085f));
+          float carveStrength = ravineMask + wallRough * 0.09f;
+          if (carveStrength > wallThreshold) {
+            blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = kAir;
+          }
         }
       }
 
