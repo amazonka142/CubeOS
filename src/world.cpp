@@ -492,6 +492,10 @@ void World::setBlock(int x, int y, int z, uint8_t type) {
 }
 
 glm::vec3 World::blockColor(uint8_t type) const {
+  if (isWaterBlock(type)) {
+    return {0.22f, 0.45f, 0.88f};
+  }
+
   switch (type) {
     case kGrass:
       return {0.2f, 0.8f, 0.2f};
@@ -505,8 +509,6 @@ glm::vec3 World::blockColor(uint8_t type) const {
       return {0.49f, 0.33f, 0.16f};
     case kLeaves:
       return {0.16f, 0.58f, 0.16f};
-    case kWater:
-      return {0.22f, 0.45f, 0.88f};
     case kCoalOre:
       return {0.22f, 0.22f, 0.22f};
     case kIronOre:
@@ -614,19 +616,19 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
   int minChunkZ = floorDiv(minZ, kChunkSize);
   int maxChunkZ = floorDiv(maxZ, kChunkSize);
 
-  struct WaterPos {
+  struct WaterCell {
     int x = 0;
     int y = 0;
     int z = 0;
+    uint8_t next = kAir;
+    uint8_t current = kAir;
+    int priority = 0;
   };
 
-  std::vector<WaterPos> downTargets;
-  std::vector<WaterPos> sideTargets;
-  downTargets.reserve(static_cast<size_t>(maxUpdates * 2));
-  sideTargets.reserve(static_cast<size_t>(maxUpdates * 4));
-
-  std::unordered_set<uint64_t> seenTargets;
-  seenTargets.reserve(static_cast<size_t>(maxUpdates * 8));
+  std::vector<WaterCell> updates;
+  updates.reserve(static_cast<size_t>(maxUpdates * 6));
+  std::unordered_set<uint64_t> touched;
+  touched.reserve(static_cast<size_t>(maxUpdates * 16));
 
   auto posHash = [](int x, int y, int z) -> uint64_t {
     uint64_t hx = static_cast<uint64_t>(mixBits(static_cast<uint32_t>(x)));
@@ -635,33 +637,100 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
     return (hx << 32) ^ (hy << 16) ^ hz;
   };
 
-  auto canFill = [&](int x, int y, int z) -> bool {
-    if (!inBounds(x, y, z)) {
-      return false;
-    }
+  auto chunkReadyAt = [&](int x, int z) -> bool {
     int cx = floorDiv(x, kChunkSize);
     int cz = floorDiv(z, kChunkSize);
     Chunk* chunk = findChunk(cx, cz);
-    if (!chunk || chunk->generating) {
-      return false;
-    }
-    int lx = positiveMod(x, kChunkSize);
-    int lz = positiveMod(z, kChunkSize);
-    size_t idx = static_cast<size_t>(localIndex(lx, y, lz));
-    return chunk->blocks[idx] == kAir;
+    return chunk && !chunk->generating;
   };
 
-  auto addTarget = [&](std::vector<WaterPos>& list, int x, int y, int z) {
-    if (!canFill(x, y, z)) {
+  auto getLoadedBlock = [&](int x, int y, int z) -> uint8_t {
+    if (!inBounds(x, y, z) || !chunkReadyAt(x, z)) {
+      return kAir;
+    }
+    return getBlock(x, y, z);
+  };
+
+  auto computeDesired = [&](int x, int y, int z, uint8_t current) -> uint8_t {
+    if (!inBounds(x, y, z) || !chunkReadyAt(x, z)) {
+      return current;
+    }
+
+    if (current == kWater) {
+      return kWater; // Source block never decays.
+    }
+    if (current != kAir && !isWaterBlock(current)) {
+      return current;
+    }
+
+    uint8_t above = getLoadedBlock(x, y + 1, z);
+    if (isWaterBlock(above)) {
+      return kWaterFlow1; // Vertical flow keeps strongest level.
+    }
+
+    constexpr std::array<std::pair<int, int>, 4> kSideOffsets = {{
+      {1, 0},
+      {-1, 0},
+      {0, 1},
+      {0, -1}
+    }};
+
+    int bestLevel = 99;
+    for (const auto& [ox, oz] : kSideOffsets) {
+      uint8_t neighbor = getLoadedBlock(x + ox, y, z + oz);
+      if (!isWaterBlock(neighbor)) {
+        continue;
+      }
+      int level = static_cast<int>(waterLevelFromBlock(neighbor));
+      if (level == 0) {
+        bestLevel = std::min(bestLevel, 1);
+      } else if (level < 7) {
+        bestLevel = std::min(bestLevel, level + 1);
+      }
+    }
+
+    if (bestLevel <= 7) {
+      return blockFromWaterLevel(static_cast<uint8_t>(bestLevel));
+    }
+    return kAir;
+  };
+
+  auto addCandidate = [&](int x, int y, int z) {
+    if (!inBounds(x, y, z)) {
       return;
     }
-    uint64_t key = posHash(x, y, z);
-    if (seenTargets.insert(key).second) {
-      list.push_back({x, y, z});
+    if (x < minX || x > maxX || z < minZ || z > maxZ) {
+      return;
     }
+    if (!chunkReadyAt(x, z)) {
+      return;
+    }
+
+    uint64_t key = posHash(x, y, z);
+    if (!touched.insert(key).second) {
+      return;
+    }
+
+    uint8_t current = getBlock(x, y, z);
+    if (current != kAir && !isWaterBlock(current)) {
+      return;
+    }
+
+    uint8_t desired = computeDesired(x, y, z, current);
+    if (desired == current) {
+      return;
+    }
+
+    int priority = 2;
+    if (current == kAir && isWaterBlock(desired)) {
+      priority = (desired == kWaterFlow1 ? 0 : 1);
+    } else if (isWaterBlock(current) && desired == kAir) {
+      priority = 3;
+    }
+
+    updates.push_back({x, y, z, desired, current, priority});
   };
 
-  bool stopScan = false;
   constexpr std::array<std::pair<int, int>, 4> kSideOffsets = {{
     {1, 0},
     {-1, 0},
@@ -669,8 +738,8 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
     {0, -1}
   }};
 
-  for (int cz = minChunkZ; cz <= maxChunkZ && !stopScan; ++cz) {
-    for (int cx = minChunkX; cx <= maxChunkX && !stopScan; ++cx) {
+  for (int cz = minChunkZ; cz <= maxChunkZ; ++cz) {
+    for (int cx = minChunkX; cx <= maxChunkX; ++cx) {
       Chunk* chunk = findChunk(cx, cz);
       if (!chunk || chunk->generating) {
         continue;
@@ -683,28 +752,24 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
       int lzStart = std::clamp(minZ - baseZ, 0, kChunkSize - 1);
       int lzEnd = std::clamp(maxZ - baseZ, 0, kChunkSize - 1);
 
-      for (int lz = lzStart; lz <= lzEnd && !stopScan; ++lz) {
-        for (int lx = lxStart; lx <= lxEnd && !stopScan; ++lx) {
+      for (int lz = lzStart; lz <= lzEnd; ++lz) {
+        for (int lx = lxStart; lx <= lxEnd; ++lx) {
           int x = baseX + lx;
           int z = baseZ + lz;
           for (int y = 1; y < kChunkHeight - 1; ++y) {
-            size_t idx = static_cast<size_t>(localIndex(lx, y, lz));
-            if (chunk->blocks[idx] != kWater) {
+            uint8_t block = chunk->blocks[static_cast<size_t>(localIndex(lx, y, lz))];
+            if (!isWaterBlock(block)) {
               continue;
             }
 
-            uint8_t below = chunk->blocks[static_cast<size_t>(localIndex(lx, y - 1, lz))];
-            if (below == kAir) {
-              addTarget(downTargets, x, y - 1, z);
-            } else {
-              for (const auto& [ox, oz] : kSideOffsets) {
-                addTarget(sideTargets, x + ox, y, z + oz);
-              }
+            addCandidate(x, y, z);
+            addCandidate(x, y - 1, z);
+            addCandidate(x, y + 1, z);
+            for (const auto& [ox, oz] : kSideOffsets) {
+              addCandidate(x + ox, y, z + oz);
             }
 
-            if (downTargets.size() + sideTargets.size() >=
-                static_cast<size_t>(maxUpdates * 10)) {
-              stopScan = true;
+            if (updates.size() > static_cast<size_t>(maxUpdates * 16)) {
               break;
             }
           }
@@ -713,51 +778,241 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
     }
   }
 
-  auto placeWater = [&](const WaterPos& p) -> bool {
-    if (!canFill(p.x, p.y, p.z)) {
-      return false;
+  if (updates.empty()) {
+    return;
+  }
+
+  std::stable_sort(updates.begin(),
+                   updates.end(),
+                   [](const WaterCell& a, const WaterCell& b) {
+                     if (a.priority != b.priority) {
+                       return a.priority < b.priority;
+                     }
+                     if (a.y != b.y) {
+                       return a.y < b.y;
+                     }
+                     if (a.x != b.x) {
+                       return a.x < b.x;
+                     }
+                     return a.z < b.z;
+                   });
+
+  int applied = 0;
+  for (const WaterCell& cell : updates) {
+    if (applied >= maxUpdates) {
+      break;
     }
-    int cx = floorDiv(p.x, kChunkSize);
-    int cz = floorDiv(p.z, kChunkSize);
+    if (!chunkReadyAt(cell.x, cell.z)) {
+      continue;
+    }
+
+    int cx = floorDiv(cell.x, kChunkSize);
+    int cz = floorDiv(cell.z, kChunkSize);
     Chunk* chunk = findChunk(cx, cz);
     if (!chunk || chunk->generating) {
-      return false;
+      continue;
     }
 
-    int lx = positiveMod(p.x, kChunkSize);
-    int lz = positiveMod(p.z, kChunkSize);
-    size_t idx = static_cast<size_t>(localIndex(lx, p.y, lz));
-    if (chunk->blocks[idx] != kAir) {
-      return false;
+    int lx = positiveMod(cell.x, kChunkSize);
+    int lz = positiveMod(cell.z, kChunkSize);
+    size_t idx = static_cast<size_t>(localIndex(lx, cell.y, lz));
+    uint8_t current = chunk->blocks[idx];
+    if (current != cell.current) {
+      continue;
+    }
+    if (current == cell.next) {
+      continue;
     }
 
-    chunk->blocks[idx] = kWater;
+    chunk->blocks[idx] = cell.next;
     chunk->dirty = true;
     chunk->modified = true;
     if (lx == 0 || lx == kChunkSize - 1 || lz == 0 || lz == kChunkSize - 1) {
       markNeighborChunksDirty(cx, cz);
     }
+    ++applied;
     meshDirty = true;
-    return true;
+  }
+}
+
+void World::simulateFallingBlocks(int centerX, int centerZ, int radiusXZ, int maxUpdates) {
+  pumpChunkGeneration();
+
+  if (radiusXZ <= 0 || maxUpdates <= 0) {
+    return;
+  }
+
+  int minX = centerX - radiusXZ;
+  int maxX = centerX + radiusXZ;
+  int minZ = centerZ - radiusXZ;
+  int maxZ = centerZ + radiusXZ;
+
+  int minChunkX = floorDiv(minX, kChunkSize);
+  int maxChunkX = floorDiv(maxX, kChunkSize);
+  int minChunkZ = floorDiv(minZ, kChunkSize);
+  int maxChunkZ = floorDiv(maxZ, kChunkSize);
+
+  auto chunkReadyAt = [&](int x, int z) -> bool {
+    int cx = floorDiv(x, kChunkSize);
+    int cz = floorDiv(z, kChunkSize);
+    Chunk* chunk = findChunk(cx, cz);
+    return chunk && !chunk->generating;
   };
 
-  int applied = 0;
-  for (const WaterPos& p : downTargets) {
-    if (applied >= maxUpdates) {
-      break;
-    }
-    if (placeWater(p)) {
-      ++applied;
+  struct FallingMove {
+    int fromX = 0;
+    int fromY = 0;
+    int fromZ = 0;
+    int toX = 0;
+    int toY = 0;
+    int toZ = 0;
+    uint8_t type = kAir;
+  };
+
+  std::vector<FallingMove> moves;
+  moves.reserve(static_cast<size_t>(maxUpdates * 3));
+
+  for (int cz = minChunkZ; cz <= maxChunkZ; ++cz) {
+    for (int cx = minChunkX; cx <= maxChunkX; ++cx) {
+      Chunk* chunk = findChunk(cx, cz);
+      if (!chunk || chunk->generating) {
+        continue;
+      }
+
+      int baseX = cx * kChunkSize;
+      int baseZ = cz * kChunkSize;
+      int lxStart = std::clamp(minX - baseX, 0, kChunkSize - 1);
+      int lxEnd = std::clamp(maxX - baseX, 0, kChunkSize - 1);
+      int lzStart = std::clamp(minZ - baseZ, 0, kChunkSize - 1);
+      int lzEnd = std::clamp(maxZ - baseZ, 0, kChunkSize - 1);
+
+      for (int y = 1; y < kChunkHeight; ++y) {
+        for (int lz = lzStart; lz <= lzEnd; ++lz) {
+          for (int lx = lxStart; lx <= lxEnd; ++lx) {
+            size_t idx = static_cast<size_t>(localIndex(lx, y, lz));
+            uint8_t type = chunk->blocks[idx];
+            if (type != kSand) {
+              continue;
+            }
+
+            int x = baseX + lx;
+            int z = baseZ + lz;
+            int belowY = y - 1;
+            if (!inBounds(x, belowY, z) || !chunkReadyAt(x, z)) {
+              continue;
+            }
+
+            uint8_t below = getBlock(x, belowY, z);
+            if (below != kAir && !isWaterBlock(below)) {
+              continue;
+            }
+
+            moves.push_back({x, y, z, x, belowY, z, type});
+            if (static_cast<int>(moves.size()) >= maxUpdates * 4) {
+              break;
+            }
+          }
+          if (static_cast<int>(moves.size()) >= maxUpdates * 4) {
+            break;
+          }
+        }
+        if (static_cast<int>(moves.size()) >= maxUpdates * 4) {
+          break;
+        }
+      }
     }
   }
 
-  for (const WaterPos& p : sideTargets) {
+  if (moves.empty()) {
+    return;
+  }
+
+  std::stable_sort(moves.begin(),
+                   moves.end(),
+                   [](const FallingMove& a, const FallingMove& b) {
+                     if (a.fromY != b.fromY) {
+                       return a.fromY < b.fromY;
+                     }
+                     if (a.fromX != b.fromX) {
+                       return a.fromX < b.fromX;
+                     }
+                     return a.fromZ < b.fromZ;
+                   });
+
+  struct CellRef {
+    Chunk* chunk = nullptr;
+    size_t idx = 0;
+    int cx = 0;
+    int cz = 0;
+    int lx = 0;
+    int lz = 0;
+  };
+
+  auto resolveCell = [&](int x, int y, int z, CellRef& out) -> bool {
+    if (!inBounds(x, y, z)) {
+      return false;
+    }
+    int cx = floorDiv(x, kChunkSize);
+    int cz = floorDiv(z, kChunkSize);
+    Chunk* chunk = findChunk(cx, cz);
+    if (!chunk || chunk->generating) {
+      return false;
+    }
+    int lx = positiveMod(x, kChunkSize);
+    int lz = positiveMod(z, kChunkSize);
+    out.chunk = chunk;
+    out.idx = static_cast<size_t>(localIndex(lx, y, lz));
+    out.cx = cx;
+    out.cz = cz;
+    out.lx = lx;
+    out.lz = lz;
+    return true;
+  };
+
+  auto markChunkEdited = [&](const CellRef& cell) {
+    cell.chunk->dirty = true;
+    cell.chunk->modified = true;
+    if (cell.lx == 0 || cell.lx == kChunkSize - 1 ||
+        cell.lz == 0 || cell.lz == kChunkSize - 1) {
+      markNeighborChunksDirty(cell.cx, cell.cz);
+    }
+  };
+
+  int applied = 0;
+  for (const FallingMove& move : moves) {
     if (applied >= maxUpdates) {
       break;
     }
-    if (placeWater(p)) {
-      ++applied;
+    CellRef fromCell;
+    CellRef toCell;
+    if (!resolveCell(move.fromX, move.fromY, move.fromZ, fromCell) ||
+        !resolveCell(move.toX, move.toY, move.toZ, toCell)) {
+      continue;
     }
+
+    uint8_t fromNow = fromCell.chunk->blocks[fromCell.idx];
+    if (fromNow != move.type) {
+      continue;
+    }
+
+    uint8_t toNow = toCell.chunk->blocks[toCell.idx];
+    if (toNow != kAir && !isWaterBlock(toNow)) {
+      continue;
+    }
+
+    toCell.chunk->blocks[toCell.idx] = move.type;
+    if (isWaterBlock(toNow)) {
+      fromCell.chunk->blocks[fromCell.idx] = toNow;
+    } else {
+      fromCell.chunk->blocks[fromCell.idx] = kAir;
+    }
+    markChunkEdited(fromCell);
+    markChunkEdited(toCell);
+    ++applied;
+  }
+
+  if (applied > 0) {
+    meshDirty = true;
   }
 }
 
@@ -822,6 +1077,13 @@ void World::buildChunkMesh(World::Chunk& chunk) {
   chunk.meshVertices.clear();
   chunk.meshIndices.clear();
 
+  auto isFaceVisible = [](uint8_t current, uint8_t neighbor) {
+    if (isWaterBlock(current)) {
+      return neighbor == kAir;
+    }
+    return neighbor == kAir || isWaterBlock(neighbor);
+  };
+
   auto tileFor = [](uint8_t type, int axis, bool positive) {
     // Tile indices in atlas: 0=grass top, 1=grass side, 2=dirt, 3=stone.
     if (type == kGrass) {
@@ -833,10 +1095,16 @@ void World::buildChunkMesh(World::Chunk& chunk) {
       }
       return 1;
     }
-    if (type == kWater) {
+    if (isWaterBlock(type)) {
       return 12;
     }
-    if (type == kDirt || type == kSand || type == kWood) {
+    if (type == kSand) {
+      return 14;
+    }
+    if (type == kGravel) {
+      return 15;
+    }
+    if (type == kDirt || type == kWood) {
       return 2;
     }
     if (type == kLeaves) {
@@ -923,7 +1191,7 @@ void World::buildChunkMesh(World::Chunk& chunk) {
         bool isBreakTarget = overlayActive &&
                              overlayX == x && overlayY == y && overlayZ == z;
 
-        if (getBlock(x + 1, y, z) == kAir) {
+        if (isFaceVisible(blockType, getBlock(x + 1, y, z))) {
           float shade = 0.8f;
           glm::vec3 color = blockColor(blockType) * shade * heightFactor;
           int tile = tileFor(blockType, 0, true);
@@ -939,7 +1207,7 @@ void World::buildChunkMesh(World::Chunk& chunk) {
           }
         }
 
-        if (getBlock(x - 1, y, z) == kAir) {
+        if (isFaceVisible(blockType, getBlock(x - 1, y, z))) {
           float shade = 0.8f;
           glm::vec3 color = blockColor(blockType) * shade * heightFactor;
           int tile = tileFor(blockType, 0, false);
@@ -955,7 +1223,7 @@ void World::buildChunkMesh(World::Chunk& chunk) {
           }
         }
 
-        if (getBlock(x, y + 1, z) == kAir) {
+        if (isFaceVisible(blockType, getBlock(x, y + 1, z))) {
           float shade = 1.0f;
           glm::vec3 color = blockColor(blockType) * shade * heightFactor;
           int tile = tileFor(blockType, 1, true);
@@ -971,7 +1239,7 @@ void World::buildChunkMesh(World::Chunk& chunk) {
           }
         }
 
-        if (getBlock(x, y - 1, z) == kAir) {
+        if (isFaceVisible(blockType, getBlock(x, y - 1, z))) {
           float shade = 0.5f;
           glm::vec3 color = blockColor(blockType) * shade * heightFactor;
           int tile = tileFor(blockType, 1, false);
@@ -987,7 +1255,7 @@ void World::buildChunkMesh(World::Chunk& chunk) {
           }
         }
 
-        if (getBlock(x, y, z + 1) == kAir) {
+        if (isFaceVisible(blockType, getBlock(x, y, z + 1))) {
           float shade = 0.8f;
           glm::vec3 color = blockColor(blockType) * shade * heightFactor;
           int tile = tileFor(blockType, 2, true);
@@ -1003,7 +1271,7 @@ void World::buildChunkMesh(World::Chunk& chunk) {
           }
         }
 
-        if (getBlock(x, y, z - 1) == kAir) {
+        if (isFaceVisible(blockType, getBlock(x, y, z - 1))) {
           float shade = 0.8f;
           glm::vec3 color = blockColor(blockType) * shade * heightFactor;
           int tile = tileFor(blockType, 2, false);

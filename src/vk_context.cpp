@@ -1037,6 +1037,7 @@ void VulkanContext::createTextureImage() {
 
   // Tile layout:
   // 0: grass top (0,0), 1: grass side (1,0), 2: dirt (2,0), 3: stone (3,0)
+  // 12: water, 13: white HUD, 14: sand, 15: gravel
   fillTile(0, 0, 90, 180, 60);
   fillTile(2, 0, 110, 85, 50);
   fillTile(3, 0, 130, 130, 130);
@@ -1139,6 +1140,36 @@ void VulkanContext::createTextureImage() {
   for (int y = 0; y < kAtlasTileSize; ++y) {
     for (int x = 0; x < kAtlasTileSize; ++x) {
       putPixel(whiteTileX + x, whiteTileY + y, 255, 255, 255, 255);
+    }
+  }
+
+  // Sand tile (index 14): warm, light, slightly speckled.
+  const int sandTileIndex = 14;
+  const int sandTileX = (sandTileIndex % kAtlasCols) * kAtlasTileSize;
+  const int sandTileY = (sandTileIndex / kAtlasCols) * kAtlasTileSize;
+  for (int y = 0; y < kAtlasTileSize; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      uint32_t h = hash(x, y, 140);
+      int grain = static_cast<int>(h % 18u) - 9;
+      uint8_t r = static_cast<uint8_t>(std::clamp(220 + grain, 0, 255));
+      uint8_t g = static_cast<uint8_t>(std::clamp(198 + grain, 0, 255));
+      uint8_t b = static_cast<uint8_t>(std::clamp(140 + grain, 0, 255));
+      putPixel(sandTileX + x, sandTileY + y, r, g, b, 255);
+    }
+  }
+
+  // Gravel tile (index 15): neutral gray with stronger mottling.
+  const int gravelTileIndex = 15;
+  const int gravelTileX = (gravelTileIndex % kAtlasCols) * kAtlasTileSize;
+  const int gravelTileY = (gravelTileIndex / kAtlasCols) * kAtlasTileSize;
+  for (int y = 0; y < kAtlasTileSize; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      uint32_t h = hash(x, y, 151);
+      int grain = static_cast<int>(h % 38u) - 19;
+      uint8_t r = static_cast<uint8_t>(std::clamp(132 + grain, 0, 255));
+      uint8_t g = static_cast<uint8_t>(std::clamp(128 + grain, 0, 255));
+      uint8_t b = static_cast<uint8_t>(std::clamp(124 + grain, 0, 255));
+      putPixel(gravelTileX + x, gravelTileY + y, r, g, b, 255);
     }
   }
 

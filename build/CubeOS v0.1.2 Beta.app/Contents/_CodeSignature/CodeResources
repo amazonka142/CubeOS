@@ -10,7 +10,7 @@
 		</data>
 		<key>Resources/world.bin</key>
 		<data>
-		uLtPUSUFj0TmXeBz2tGYITXB3jM=
+		MoxSRaiHms2plqctH8HKjwsjeZI=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -37,10 +37,10 @@
 		<dict>
 			<key>cdhash</key>
 			<data>
-			03/HMyHx7g52eRQv0sOEAlK/kO4=
+			aa+OIXyQh9XlI7vPx9yrDXPndcY=
 			</data>
 			<key>requirement</key>
-			<string>cdhash H"d37fc73321f1ee0e7679142fd2c3840252bf90ee"</string>
+			<string>cdhash H"69af8e217c9087d5e523bbcfc7dcab0d73e775c6"</string>
 		</dict>
 		<key>MacOS/shaders/cube.vert.spv</key>
 		<dict>
@@ -71,7 +71,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			41rxguO+dowaYiDlORuXrm9WUwiXsWds87vjHje1K9U=
+			ur3SgJDM65io6x6iROTI11cO6G1fLSdYAzlHXSffeLs=
 			</data>
 		</dict>
 	</dict>

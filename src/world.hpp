@@ -26,8 +26,39 @@ enum BlockType : uint8_t {
   kWater = 8,
   kCoalOre = 9,
   kIronOre = 10,
-  kGoldOre = 11
+  kGoldOre = 11,
+  kWaterFlow1 = 12,
+  kWaterFlow2 = 13,
+  kWaterFlow3 = 14,
+  kWaterFlow4 = 15,
+  kWaterFlow5 = 16,
+  kWaterFlow6 = 17,
+  kWaterFlow7 = 18
 };
+
+constexpr bool isWaterBlock(uint8_t type) {
+  return type == kWater || (type >= kWaterFlow1 && type <= kWaterFlow7);
+}
+
+constexpr uint8_t waterLevelFromBlock(uint8_t type) {
+  if (type == kWater) {
+    return 0;
+  }
+  if (type >= kWaterFlow1 && type <= kWaterFlow7) {
+    return static_cast<uint8_t>(1 + (type - kWaterFlow1));
+  }
+  return 255;
+}
+
+constexpr uint8_t blockFromWaterLevel(uint8_t level) {
+  if (level == 0) {
+    return kWater;
+  }
+  if (level >= 1 && level <= 7) {
+    return static_cast<uint8_t>(kWaterFlow1 + (level - 1));
+  }
+  return kAir;
+}
 
 class World {
 public:
@@ -44,6 +75,7 @@ public:
   void updateActiveChunks(int centerChunkX, int centerChunkZ, int radius);
   bool waitForChunkRegion(int centerChunkX, int centerChunkZ, int radius, int maxWaitMs);
   void simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates);
+  void simulateFallingBlocks(int centerX, int centerZ, int radiusXZ, int maxUpdates);
   bool consumeMeshDirty();
   void setBreakOverlay(const glm::ivec3& block, int stage);
   void clearBreakOverlay();

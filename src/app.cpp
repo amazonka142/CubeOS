@@ -39,21 +39,23 @@ constexpr uint8_t kDigitMap[10][kDigitHeight] = {
 };
 
 int tileForBlock(uint8_t type) {
+  if (isWaterBlock(type)) {
+    return 12;
+  }
+
   switch (type) {
     case kGrass:
       return 0;
     case kDirt:
       return 2;
     case kSand:
-      return 2;
+      return 14;
     case kGravel:
-      return 3;
+      return 15;
     case kWood:
       return 2;
     case kLeaves:
       return 1;
-    case kWater:
-      return 12;
     case kCoalOre:
     case kIronOre:
     case kGoldOre:
@@ -123,7 +125,7 @@ void App::initVulkan() {
   world.waitForChunkRegion(initialCx, initialCz, kSpawnChunkRadius, 3000);
 
   auto isSpawnGround = [](uint8_t block) {
-    return block != kAir && block != kWater && block != kLeaves && block != kGravel;
+    return block != kAir && !isWaterBlock(block) && block != kLeaves && block != kGravel;
   };
 
   auto isPreferredSpawnGround = [](uint8_t block) {
@@ -310,14 +312,19 @@ void App::mainLoop() {
     }
     updateStreaming();
     waterSimAccumulator += deltaTime;
-    if (waterSimAccumulator > 0.35f) {
-      waterSimAccumulator = 0.35f;
+    if (waterSimAccumulator > 0.5f) {
+      waterSimAccumulator = 0.5f;
     }
-    while (waterSimAccumulator >= 0.12f) {
+    while (waterSimAccumulator >= 0.16f) {
       int px = static_cast<int>(std::floor(playerPos.x));
       int pz = static_cast<int>(std::floor(playerPos.z));
-      world.simulateWater(px, pz, 56, 180);
-      waterSimAccumulator -= 0.12f;
+      bool nearWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.65f, 0.0f));
+      int simRadius = nearWater ? 30 : 42;
+      int waterUpdates = nearWater ? 72 : 120;
+      int fallingUpdates = nearWater ? 56 : 96;
+      world.simulateWater(px, pz, simRadius, waterUpdates);
+      world.simulateFallingBlocks(px, pz, simRadius, fallingUpdates);
+      waterSimAccumulator -= 0.16f;
     }
 
     bool worldChanged = world.consumeMeshDirty();
@@ -342,9 +349,9 @@ void App::mainLoop() {
                                       200.0f);
     proj[1][1] *= -1.0f;
 
-    bool cameraInWater = world.getBlock(static_cast<int>(std::floor(eye.x)),
-                                        static_cast<int>(std::floor(eye.y)),
-                                        static_cast<int>(std::floor(eye.z))) == kWater;
+    bool cameraInWater = isWaterBlock(world.getBlock(static_cast<int>(std::floor(eye.x)),
+                                                     static_cast<int>(std::floor(eye.y)),
+                                                     static_cast<int>(std::floor(eye.z))));
     vk.setCameraWorldState(eye, cameraInWater);
     vk.setCameraMatrices(view, proj);
     vk.drawFrame();
@@ -472,68 +479,17 @@ void App::processInput(float deltaTime) {
 
   if (leftPressed) {
     glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
-    RaycastHit hit = raycast(origin, cameraFront(), kBreakMaxDistance);
+    glm::vec3 breakDir = cameraFront();
+    RaycastHit hit = raycast(origin, breakDir, kBreakMaxDistance);
     if (hit.hit) {
       float breakDuration = inWater ? (kBreakDuration * 2.0f) : kBreakDuration;
       glm::ivec3 targetBlock = hit.block;
       uint8_t hitType = world.getBlock(targetBlock.x, targetBlock.y, targetBlock.z);
 
-      if (hitType == kWater) {
-        bool foundBelow = false;
-        constexpr int kMaxWaterProbeDepth = 12;
-        int minY = std::max(0, targetBlock.y - kMaxWaterProbeDepth);
-        for (int y = targetBlock.y - 1; y >= minY; --y) {
-          uint8_t belowType = world.getBlock(targetBlock.x, y, targetBlock.z);
-          if (belowType == kAir || belowType == kWater) {
-            continue;
-          }
-          targetBlock.y = y;
-          hitType = belowType;
-          foundBelow = true;
-          break;
-        }
-
-        if (!foundBelow) {
-          if (breakingActive) {
-            breakingActive = false;
-            breakingProgress = 0.0f;
-            breakingStage = 0;
-            world.clearBreakOverlay();
-          }
-        } else {
-          if (!breakingActive || targetBlock != breakingBlock) {
-            breakingActive = true;
-            breakingBlock = targetBlock;
-            breakingProgress = 0.0f;
-            breakingStage = 0;
-          }
-
-          breakingProgress += deltaTime;
-          int newStage = static_cast<int>((breakingProgress / breakDuration) * kBreakStages) + 1;
-          newStage = std::clamp(newStage, 1, kBreakStages);
-          if (newStage != breakingStage) {
-            breakingStage = newStage;
-            world.setBreakOverlay(breakingBlock, breakingStage);
-          }
-
-          if (breakingProgress >= breakDuration) {
-            uint8_t removed = world.getBlock(targetBlock.x, targetBlock.y, targetBlock.z);
-            if (removed != kAir && removed != kWater) {
-              world.setBlock(targetBlock.x, targetBlock.y, targetBlock.z, kAir);
-              addToInventory(removed, 1);
-              refreshSelectedBlock();
-              uiDirty = true;
-            }
-            breakingActive = false;
-            breakingProgress = 0.0f;
-            breakingStage = 0;
-            world.clearBreakOverlay();
-          }
-        }
-      } else {
-        if (!breakingActive || targetBlock != breakingBlock) {
+      auto breakTarget = [&](const glm::ivec3& blockPos) {
+        if (!breakingActive || blockPos != breakingBlock) {
           breakingActive = true;
-          breakingBlock = targetBlock;
+          breakingBlock = blockPos;
           breakingProgress = 0.0f;
           breakingStage = 0;
         }
@@ -547,9 +503,9 @@ void App::processInput(float deltaTime) {
         }
 
         if (breakingProgress >= breakDuration) {
-          uint8_t removed = world.getBlock(targetBlock.x, targetBlock.y, targetBlock.z);
-          if (removed != kAir && removed != kWater) {
-            world.setBlock(targetBlock.x, targetBlock.y, targetBlock.z, kAir);
+          uint8_t removed = world.getBlock(blockPos.x, blockPos.y, blockPos.z);
+          if (removed != kAir && !isWaterBlock(removed)) {
+            world.setBlock(blockPos.x, blockPos.y, blockPos.z, kAir);
             addToInventory(removed, 1);
             refreshSelectedBlock();
             uiDirty = true;
@@ -559,6 +515,64 @@ void App::processInput(float deltaTime) {
           breakingStage = 0;
           world.clearBreakOverlay();
         }
+      };
+
+      if (isWaterBlock(hitType)) {
+        bool foundTarget = false;
+
+        // Prefer the block directly behind water along the crosshair ray.
+        glm::ivec3 lastVoxel = hit.block;
+        for (float d = 0.06f; d <= kBreakMaxDistance; d += 0.06f) {
+          glm::vec3 sample = origin + breakDir * d;
+          glm::ivec3 voxel(static_cast<int>(std::floor(sample.x)),
+                           static_cast<int>(std::floor(sample.y)),
+                           static_cast<int>(std::floor(sample.z)));
+          if (voxel == lastVoxel) {
+            continue;
+          }
+          lastVoxel = voxel;
+          if (!world.inBounds(voxel.x, voxel.y, voxel.z)) {
+            break;
+          }
+
+          uint8_t candidate = world.getBlock(voxel.x, voxel.y, voxel.z);
+          if (candidate == kAir || isWaterBlock(candidate)) {
+            continue;
+          }
+          targetBlock = voxel;
+          hitType = candidate;
+          foundTarget = true;
+          break;
+        }
+
+        // Fallback: if ray did not find a solid, mine in the water column below.
+        if (!foundTarget) {
+          constexpr int kMaxWaterProbeDepth = 12;
+          int minY = std::max(0, hit.block.y - kMaxWaterProbeDepth);
+          for (int y = hit.block.y - 1; y >= minY; --y) {
+            uint8_t belowType = world.getBlock(hit.block.x, y, hit.block.z);
+            if (belowType == kAir || isWaterBlock(belowType)) {
+              continue;
+            }
+            targetBlock = {hit.block.x, y, hit.block.z};
+            hitType = belowType;
+            foundTarget = true;
+            break;
+          }
+        }
+
+        if (!foundTarget) {
+          if (breakingActive) {
+            breakingActive = false;
+            breakingProgress = 0.0f;
+            breakingStage = 0;
+            world.clearBreakOverlay();
+          }
+        } else {
+          breakTarget(targetBlock);
+        }
+      } else {
+        breakTarget(targetBlock);
       }
     } else if (breakingActive) {
       breakingActive = false;
@@ -575,11 +589,53 @@ void App::processInput(float deltaTime) {
 
   if (rightPressed && !mouseRightDown) {
     glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
-    RaycastHit hit = raycast(origin, cameraFront(), kBreakMaxDistance);
+    glm::vec3 placeDir = cameraFront();
+    RaycastHit hit = raycast(origin, placeDir, kBreakMaxDistance);
     if (hit.hit) {
       glm::ivec3 target = hit.block + hit.normal;
+      uint8_t hitType = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+
+      if (isWaterBlock(hitType)) {
+        bool foundPlace = false;
+        glm::ivec3 lastReplaceable = hit.block;
+        glm::ivec3 lastVoxel = hit.block;
+
+        for (float d = 0.06f; d <= kBreakMaxDistance; d += 0.06f) {
+          glm::vec3 sample = origin + placeDir * d;
+          glm::ivec3 voxel(static_cast<int>(std::floor(sample.x)),
+                           static_cast<int>(std::floor(sample.y)),
+                           static_cast<int>(std::floor(sample.z)));
+          if (voxel == lastVoxel) {
+            continue;
+          }
+          lastVoxel = voxel;
+          if (!world.inBounds(voxel.x, voxel.y, voxel.z)) {
+            break;
+          }
+
+          uint8_t candidate = world.getBlock(voxel.x, voxel.y, voxel.z);
+          if (candidate == kAir || isWaterBlock(candidate)) {
+            lastReplaceable = voxel;
+            continue;
+          }
+
+          uint8_t replaceType = world.getBlock(lastReplaceable.x, lastReplaceable.y, lastReplaceable.z);
+          if (replaceType == kAir || isWaterBlock(replaceType)) {
+            target = lastReplaceable;
+            foundPlace = true;
+          }
+          break;
+        }
+
+        if (!foundPlace) {
+          target = hit.block;
+        }
+      }
+
+      uint8_t targetType = world.getBlock(target.x, target.y, target.z);
+      bool targetReplaceable = targetType == kAir || isWaterBlock(targetType);
       if (world.inBounds(target.x, target.y, target.z) &&
-          world.getBlock(target.x, target.y, target.z) == kAir &&
+          targetReplaceable &&
           !blockIntersectsPlayer(target.x, target.y, target.z)) {
         ItemStack& stack = hotbar[static_cast<size_t>(selectedSlot)];
         if (stack.count > 0 && stack.type != kAir) {
@@ -1219,7 +1275,7 @@ bool App::collidesAt(const glm::vec3& pos) const {
           return true;
         }
         uint8_t block = world.getBlock(x, y, z);
-        if (block != kAir && block != kWater) {
+        if (block != kAir && !isWaterBlock(block)) {
           return true;
         }
       }
@@ -1249,7 +1305,7 @@ bool App::intersectsWaterAt(const glm::vec3& pos) const {
         if (!world.inBounds(x, y, z)) {
           continue;
         }
-        if (world.getBlock(x, y, z) == kWater) {
+        if (isWaterBlock(world.getBlock(x, y, z))) {
           return true;
         }
       }

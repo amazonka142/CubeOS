@@ -96,9 +96,11 @@ void main() {
     vec3 waterTint = vColor + vec3(0.03, 0.07, 0.11) * shimmer;
     outColor = vec4(waterTint, 1.0) * texColor;
     if (ubo.cameraData.w > 0.5) {
-      outColor.a = max(outColor.a, 0.64);
+      outColor.a = max(outColor.a, 0.84);
     } else {
-      outColor.a = max(outColor.a, 0.88);
+      // Keep water almost opaque from above to avoid ore "x-ray" effect.
+      outColor.a = max(outColor.a, 0.97);
+      outColor.rgb = mix(outColor.rgb, vec3(0.10, 0.26, 0.50), 0.20);
     }
   } else {
     outColor = vec4(vColor, 1.0) * texColor;
