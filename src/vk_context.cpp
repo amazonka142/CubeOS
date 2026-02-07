@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <fstream>
 #include <chrono>
 #include <iostream>
@@ -164,6 +165,15 @@ std::string getExecutableDir() {
 }
 
 std::string buildShaderPath(const char* filename) {
+  const char* envDir = std::getenv("CUBEOS_SHADER_DIR");
+  if (envDir && envDir[0] != '\0') {
+    std::string envPath = std::string(envDir) + "/" + filename;
+    std::ifstream envFile(envPath, std::ios::binary);
+    if (envFile.is_open()) {
+      return envPath;
+    }
+  }
+
   std::string base = getExecutableDir();
   std::string path = base + "/shaders/" + filename;
   std::ifstream direct(path, std::ios::binary);
@@ -174,6 +184,11 @@ std::string buildShaderPath(const char* filename) {
   std::ifstream fallbackFile(fallback, std::ios::binary);
   if (fallbackFile.is_open()) {
     return fallback;
+  }
+  std::string cwdFallback = std::string("./shaders/") + filename;
+  std::ifstream cwdFile(cwdFallback, std::ios::binary);
+  if (cwdFile.is_open()) {
+    return cwdFallback;
   }
   return path;
 }
