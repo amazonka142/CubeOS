@@ -1039,16 +1039,14 @@ void VulkanContext::createTextureImage() {
     }
   };
 
-  // Tile layout:
-  // 0: grass top (0,0), 1: grass side (1,0), 2: dirt (2,0), 3: stone (3,0)
-  // 12: water, 13: white HUD, 14: sand, 15: gravel
-  fillTile(0, 0, 90, 180, 60);
-  fillTile(2, 0, 110, 85, 50);
-  fillTile(3, 0, 130, 130, 130);
+  // Core terrain tiles.
+  fillTile(kTileGrassTop % kAtlasCols, kTileGrassTop / kAtlasCols, 90, 180, 60);
+  fillTile(kTileDirt % kAtlasCols, kTileDirt / kAtlasCols, 110, 85, 50);
+  fillTile(kTileStone % kAtlasCols, kTileStone / kAtlasCols, 130, 130, 130);
 
   // Grass side: top green strip + dirt body.
-  int sideX = 1 * kAtlasTileSize;
-  int sideY = 0 * kAtlasTileSize;
+  int sideX = (kTileGrassSide % kAtlasCols) * kAtlasTileSize;
+  int sideY = (kTileGrassSide / kAtlasCols) * kAtlasTileSize;
   for (int y = 0; y < kAtlasTileSize; ++y) {
     for (int x = 0; x < kAtlasTileSize; ++x) {
       bool top = y < 4;
@@ -1122,8 +1120,8 @@ void VulkanContext::createTextureImage() {
     drawBreakTile(tileIndex, stage + 1);
   }
 
-  // Water tile (index 12, 0,3): semi-transparent with simple wave texture pattern.
-  const int waterTileIndex = 12;
+  // Water tile: semi-transparent with simple wave texture pattern.
+  const int waterTileIndex = kTileWater;
   const int waterTileX = (waterTileIndex % kAtlasCols) * kAtlasTileSize;
   const int waterTileY = (waterTileIndex / kAtlasCols) * kAtlasTileSize;
   for (int y = 0; y < kAtlasTileSize; ++y) {
@@ -1138,7 +1136,7 @@ void VulkanContext::createTextureImage() {
   }
 
   // Solid white tile for HUD markers (crosshair).
-  const int whiteTileIndex = 13;
+  const int whiteTileIndex = kTileUiWhite;
   const int whiteTileX = (whiteTileIndex % kAtlasCols) * kAtlasTileSize;
   const int whiteTileY = (whiteTileIndex / kAtlasCols) * kAtlasTileSize;
   for (int y = 0; y < kAtlasTileSize; ++y) {
@@ -1147,8 +1145,8 @@ void VulkanContext::createTextureImage() {
     }
   }
 
-  // Sand tile (index 14): warm, light, slightly speckled.
-  const int sandTileIndex = 14;
+  // Sand tile: warm, light, slightly speckled.
+  const int sandTileIndex = kTileSand;
   const int sandTileX = (sandTileIndex % kAtlasCols) * kAtlasTileSize;
   const int sandTileY = (sandTileIndex / kAtlasCols) * kAtlasTileSize;
   for (int y = 0; y < kAtlasTileSize; ++y) {
@@ -1162,8 +1160,8 @@ void VulkanContext::createTextureImage() {
     }
   }
 
-  // Gravel tile (index 15): neutral gray with stronger mottling.
-  const int gravelTileIndex = 15;
+  // Gravel tile: neutral gray with stronger mottling.
+  const int gravelTileIndex = kTileGravel;
   const int gravelTileX = (gravelTileIndex % kAtlasCols) * kAtlasTileSize;
   const int gravelTileY = (gravelTileIndex / kAtlasCols) * kAtlasTileSize;
   for (int y = 0; y < kAtlasTileSize; ++y) {
@@ -1176,6 +1174,77 @@ void VulkanContext::createTextureImage() {
       putPixel(gravelTileX + x, gravelTileY + y, r, g, b, 255);
     }
   }
+
+  // Wood tile: warm bark with vertical grain.
+  const int woodTileIndex = kTileWood;
+  const int woodTileX = (woodTileIndex % kAtlasCols) * kAtlasTileSize;
+  const int woodTileY = (woodTileIndex / kAtlasCols) * kAtlasTileSize;
+  for (int y = 0; y < kAtlasTileSize; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      uint32_t h = hash(x, y, 161);
+      int grain = static_cast<int>(h % 24u) - 12;
+      bool barkLine = ((x + static_cast<int>((h >> 5) & 3u)) % 5) == 0;
+      int r = 126 + grain + (barkLine ? -20 : 0);
+      int g = 92 + grain / 2 + (barkLine ? -16 : 0);
+      int b = 58 + grain / 3 + (barkLine ? -12 : 0);
+      putPixel(woodTileX + x,
+               woodTileY + y,
+               static_cast<uint8_t>(std::clamp(r, 0, 255)),
+               static_cast<uint8_t>(std::clamp(g, 0, 255)),
+               static_cast<uint8_t>(std::clamp(b, 0, 255)),
+               255);
+    }
+  }
+
+  // Leaves tile: rich green with mottled highlights.
+  const int leavesTileIndex = kTileLeaves;
+  const int leavesTileX = (leavesTileIndex % kAtlasCols) * kAtlasTileSize;
+  const int leavesTileY = (leavesTileIndex / kAtlasCols) * kAtlasTileSize;
+  for (int y = 0; y < kAtlasTileSize; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      uint32_t h = hash(x, y, 171);
+      int grain = static_cast<int>(h % 30u) - 15;
+      bool highlight = ((h >> 4) & 7u) == 0u;
+      int r = 56 + grain / 3 + (highlight ? 18 : 0);
+      int g = 146 + grain + (highlight ? 24 : 0);
+      int b = 54 + grain / 4 + (highlight ? 12 : 0);
+      putPixel(leavesTileX + x,
+               leavesTileY + y,
+               static_cast<uint8_t>(std::clamp(r, 0, 255)),
+               static_cast<uint8_t>(std::clamp(g, 0, 255)),
+               static_cast<uint8_t>(std::clamp(b, 0, 255)),
+               255);
+    }
+  }
+
+  auto drawOreTile = [&](int tileIndex, int oreR, int oreG, int oreB, int salt) {
+    int tileX = (tileIndex % kAtlasCols) * kAtlasTileSize;
+    int tileY = (tileIndex / kAtlasCols) * kAtlasTileSize;
+    for (int y = 0; y < kAtlasTileSize; ++y) {
+      for (int x = 0; x < kAtlasTileSize; ++x) {
+        uint32_t h = hash(x, y, salt);
+        int stoneGrain = static_cast<int>(h % 22u) - 11;
+        int r = 130 + stoneGrain;
+        int g = 130 + stoneGrain;
+        int b = 130 + stoneGrain;
+        if ((h % 11u) < 3u) {
+          r = oreR + static_cast<int>((h >> 8) % 18u) - 9;
+          g = oreG + static_cast<int>((h >> 13) % 18u) - 9;
+          b = oreB + static_cast<int>((h >> 18) % 18u) - 9;
+        }
+        putPixel(tileX + x,
+                 tileY + y,
+                 static_cast<uint8_t>(std::clamp(r, 0, 255)),
+                 static_cast<uint8_t>(std::clamp(g, 0, 255)),
+                 static_cast<uint8_t>(std::clamp(b, 0, 255)),
+                 255);
+      }
+    }
+  };
+
+  drawOreTile(kTileCoalOre, 42, 42, 42, 181);
+  drawOreTile(kTileIronOre, 184, 128, 92, 191);
+  drawOreTile(kTileGoldOre, 214, 176, 52, 201);
 
   VkDeviceSize imageSize = static_cast<VkDeviceSize>(pixels.size());
 

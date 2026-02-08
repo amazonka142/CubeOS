@@ -29,9 +29,15 @@ private:
 
   enum class ScreenState : uint8_t {
     kMainMenu = 0,
-    kSettings = 1,
-    kCreateWorld = 2,
-    kPlaying = 3
+    kWorldSelect = 1,
+    kSettings = 2,
+    kCreateWorld = 3,
+    kPlaying = 4
+  };
+
+  struct WorldSelectEntry {
+    std::string displayName;
+    std::string path;
   };
 
   void refreshSelectedBlock();
@@ -41,6 +47,14 @@ private:
   void setupGameplaySession();
   void setScreenState(ScreenState state);
   void processMenuInput(float deltaTime);
+  void beginWorldSelectFlow();
+  void refreshWorldSelectEntries();
+  void loadWorldFromSelection(int entryIndex);
+  void saveCurrentPlayerState() const;
+  bool loadPlayerStateForWorld(const std::string& worldPath,
+                               glm::vec3& outPos,
+                               float& outYaw,
+                               float& outPitch) const;
   void beginCreateWorldFlow();
   void createWorldFromMenu();
   void updateWindowTitle();
@@ -123,12 +137,19 @@ private:
   float waterSimBoostTimer = 0.0f;
   ScreenState screenState = ScreenState::kMainMenu;
   int mainMenuSelection = 0;
+  int worldSelectSelection = 0;
+  int worldSelectScroll = 0;
   int settingsSelection = 0;
   int createWorldSelection = 0;
+  std::vector<WorldSelectEntry> worldSelectEntries;
   std::string pendingWorldName = "World";
   std::string pendingSeedText{};
   std::string currentWorldPath = "world.bin";
   WorldGenSettings pendingWorldSettings{};
+  bool hasPendingPlayerResume = false;
+  glm::vec3 pendingResumePlayerPos{0.0f};
+  float pendingResumeYaw = -90.0f;
+  float pendingResumePitch = 0.0f;
   bool menuUpDown = false;
   bool menuDownDown = false;
   bool menuLeftDown = false;

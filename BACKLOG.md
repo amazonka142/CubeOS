@@ -12,53 +12,63 @@
   - Scope: remove pre-filled hotbar/inventory; new save starts empty.
   - Depends on: none.
   - Acceptance: new world starts with all slots empty.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-202` Add new block IDs and data.
   - Scope: add sand, gravel, wood, leaves, water, coal ore, iron ore, gold ore.
   - Depends on: none.
   - Acceptance: blocks can exist in world/save without crashes.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-203` Mountains generation pass.
   - Scope: extend terrain noise for high peaks and smoother foothills.
   - Depends on: `CUBE-202`.
   - Acceptance: terrain includes visible mountain ranges.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-204` Caves generation pass.
   - Scope: add 3D carve noise pass under surface.
   - Depends on: `CUBE-203`.
   - Acceptance: connected cave systems appear in generated chunks.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-205` Canyons generation pass.
   - Scope: add canyon mask and vertical carving.
   - Depends on: `CUBE-203`.
   - Acceptance: deep canyon structures appear naturally.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-206` Ore distribution.
   - Scope: coal/iron/gold spawn by depth bands and density settings.
   - Depends on: `CUBE-202`, `CUBE-204`.
   - Acceptance: ores are present with depth-based frequency.
+  - Status: `Done` (implemented in current build).
 
 ### P2
 - `CUBE-207` Tree generation.
   - Scope: place trunk + leaf canopies on valid surface blocks.
   - Depends on: `CUBE-202`, `CUBE-203`.
   - Acceptance: trees spawn without floating leaves/trunks.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-208` Water block behavior (basic).
   - Scope: source + short-range flow update (no advanced fluid sim).
   - Depends on: `CUBE-202`.
   - Acceptance: placed/generated water spreads and settles consistently.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-209` Meshing/render update for new blocks.
   - Scope: atlas tiles/material handling for all added block types.
   - Depends on: `CUBE-202`.
   - Acceptance: new blocks render with correct textures/colors.
+  - Status: `Done` (implemented in current build).
 
 ### P3
 - `CUBE-210` Worldgen tuning preset v0.2.
   - Scope: expose and tune constants for mountains/caves/canyons/trees/ores.
   - Depends on: `CUBE-203`..`CUBE-208`.
   - Acceptance: no extreme barren or overfilled worlds in smoke tests.
+  - Status: `Done` (implemented in current build).
 
 ## v0.2.0-v0.2.2 Issues (Main Menu + World Creation)
 
@@ -92,7 +102,7 @@
   - Scope: cave density slider, ravine frequency slider, structures toggle.
   - Depends on: `CUBE-222`.
   - Acceptance: settings affect new world generation.
-  - Status: `Partial` (cave density and ravine frequency affect generation; structures toggle is UI + persistence only for now).
+  - Status: `Done` (cave/ravine sliders and structures toggle now all affect generated chunks).
 
 - `CUBE-225` Main menu settings screen.
   - Scope: graphics quality, sensitivity, audio placeholders, save/apply/reset.
@@ -111,7 +121,7 @@
   - Scope: subtle animations, hover/focus feedback, keyboard/controller navigation prep.
   - Depends on: `CUBE-220`, `CUBE-225`.
   - Acceptance: menu interaction is responsive and visually consistent.
-  - Status: `Partial` (animations and focus feedback are present; controller navigation prep remains open).
+  - Status: `Done` (animations/focus feedback present; controller menu navigation input wired).
 
 ## v0.2.3 Issues (Coins + Upgrades)
 
