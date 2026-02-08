@@ -83,7 +83,10 @@ int chunkLocalIndex(int lx, int ly, int lz) {
   return lx + lz * kChunkSize + ly * kChunkSize * kChunkSize;
 }
 
-std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
+std::vector<uint8_t> generateChunkBlocks(int cx,
+                                         int cz,
+                                         int seed,
+                                         const WorldGenSettings& settings) {
   std::vector<uint8_t> blocks(static_cast<size_t>(kChunkSize * kChunkSize * kChunkHeight), kAir);
   int baseX = cx * kChunkSize;
   int baseZ = cz * kChunkSize;
@@ -93,6 +96,20 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
     for (int lx = 0; lx < kChunkSize; ++lx) {
       int worldX = baseX + lx;
       int worldZ = baseZ + lz;
+
+      if (settings.preset == WorldPreset::kClassicFlat) {
+        constexpr int kFlatSurfaceY = 40;
+        for (int y = 0; y <= kFlatSurfaceY; ++y) {
+          uint8_t type = kStone;
+          if (y == kFlatSurfaceY) {
+            type = kGrass;
+          } else if (y >= kFlatSurfaceY - 3) {
+            type = kDirt;
+          }
+          blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+        }
+        continue;
+      }
 
       // Domain-warped coordinates break up repetitive flat noise patterns.
       float warpX = glm::perlin(glm::vec2(
@@ -177,10 +194,12 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
         blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
       }
 
+      float caveDensity = std::clamp(settings.caveDensity, 0.25f, 2.5f);
       float caveRegion = glm::perlin(glm::vec2(
         static_cast<float>(worldX + seed * 41) * 0.0022f,
         static_cast<float>(worldZ - seed * 37) * 0.0022f));
-      bool allowCavesHere = caveRegion > 0.62f;
+      float caveRegionThreshold = std::clamp(0.62f - 0.10f * (caveDensity - 1.0f), 0.42f, 0.78f);
+      bool allowCavesHere = caveRegion > caveRegionThreshold;
 
       for (int y = 10; y < height - 10; ++y) {
         size_t idx = static_cast<size_t>(chunkLocalIndex(lx, y, lz));
@@ -199,7 +218,8 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
             static_cast<float>(worldZ + seed * 23) * 0.125f));
           float tubeShape = std::abs(caveA) + 0.62f * std::abs(caveB);
           float depthT = saturate(static_cast<float>(height - y - 10) / 48.0f);
-          float caveThreshold = 0.038f + 0.014f * depthT;
+          float caveThreshold = (0.038f + 0.014f * depthT) *
+                                std::clamp(caveDensity, 0.45f, 1.85f);
           if (tubeShape < caveThreshold) {
             blocks[idx] = kAir;
             continue;
@@ -246,9 +266,11 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
       float ravineLine = 0.72f * ravineLineA + 0.28f * ravineLineB;
       float ravineCore = smooth01((ravineLine - 0.962f) / 0.038f);
       float ravineChance = smooth01((ravineRegion - 0.72f) / 0.28f);
-      float ravineMask = ravineCore * ravineChance;
+      float ravineFrequency = std::clamp(settings.ravineFrequency, 0.25f, 2.5f);
+      float ravineMask = std::clamp(ravineCore * ravineChance * ravineFrequency, 0.0f, 1.0f);
+      float ravineMaskThreshold = std::clamp(0.20f - 0.08f * (ravineFrequency - 1.0f), 0.08f, 0.30f);
 
-      if (ravineMask > 0.20f && height > 24) {
+      if (ravineMask > ravineMaskThreshold && height > 24) {
         float depthNoise = 0.5f + 0.5f * glm::perlin(glm::vec2(
           static_cast<float>(worldX - seed * 13) * 0.0062f,
           static_cast<float>(worldZ + seed * 7) * 0.0062f));
@@ -324,7 +346,7 @@ void World::startChunkWorkers() {
         ChunkGenerationResult result;
         result.key = task.key;
         result.epoch = task.epoch;
-        result.blocks = generateChunkBlocks(task.cx, task.cz, task.seed);
+        result.blocks = generateChunkBlocks(task.cx, task.cz, task.seed, task.settings);
 
         {
           std::lock_guard<std::mutex> lock(generationMutex);
@@ -389,7 +411,7 @@ void World::queueChunkGeneration(int cx, int cz, uint32_t epoch) {
 
   {
     std::lock_guard<std::mutex> lock(generationMutex);
-    generationQueue.push({cx, cz, seed, epoch, key});
+    generationQueue.push({cx, cz, seed, genSettings, epoch, key});
   }
   generationCv.notify_one();
 }
@@ -498,7 +520,7 @@ World::Chunk& World::ensureChunk(int cx, int cz) {
 }
 
 void World::generateChunk(World::Chunk& chunk) {
-  chunk.blocks = generateChunkBlocks(chunk.cx, chunk.cz, seed);
+  chunk.blocks = generateChunkBlocks(chunk.cx, chunk.cz, seed, genSettings);
   chunk.generating = false;
   chunk.generationEpoch = generationEpoch;
 }
@@ -1398,10 +1420,15 @@ bool World::save(const std::string& path) const {
   }
 
   const char magic[4] = {'C', 'U', 'B', '2'};
-  uint32_t version = 7;
+  uint32_t version = 8;
   uint32_t cs = static_cast<uint32_t>(kChunkSize);
   uint32_t ch = static_cast<uint32_t>(kChunkHeight);
   uint32_t seedValue = static_cast<uint32_t>(seed);
+  uint8_t presetValue = static_cast<uint8_t>(genSettings.preset);
+  uint8_t structuresValue = genSettings.generateStructures ? 1u : 0u;
+  float caveDensityValue = genSettings.caveDensity;
+  float ravineFrequencyValue = genSettings.ravineFrequency;
+  uint8_t startInventoryModeValue = genSettings.startInventoryMode;
 
   uint32_t modifiedCount = 0;
   for (const auto& entry : chunks) {
@@ -1416,6 +1443,11 @@ bool World::save(const std::string& path) const {
   out.write(reinterpret_cast<const char*>(&cs), sizeof(cs));
   out.write(reinterpret_cast<const char*>(&ch), sizeof(ch));
   out.write(reinterpret_cast<const char*>(&seedValue), sizeof(seedValue));
+  out.write(reinterpret_cast<const char*>(&presetValue), sizeof(presetValue));
+  out.write(reinterpret_cast<const char*>(&structuresValue), sizeof(structuresValue));
+  out.write(reinterpret_cast<const char*>(&caveDensityValue), sizeof(caveDensityValue));
+  out.write(reinterpret_cast<const char*>(&ravineFrequencyValue), sizeof(ravineFrequencyValue));
+  out.write(reinterpret_cast<const char*>(&startInventoryModeValue), sizeof(startInventoryModeValue));
   out.write(reinterpret_cast<const char*>(&storedCount), sizeof(storedCount));
 
   for (const auto& entry : savedChunks) {
@@ -1454,6 +1486,11 @@ bool World::load(const std::string& path) {
   uint32_t cs = 0;
   uint32_t ch = 0;
   uint32_t seedValue = 0;
+  uint8_t presetValue = static_cast<uint8_t>(WorldPreset::kMinecraftStyle);
+  uint8_t structuresValue = 0;
+  float caveDensityValue = 1.0f;
+  float ravineFrequencyValue = 1.0f;
+  uint8_t startInventoryModeValue = 0;
   uint32_t storedCount = 0;
 
   in.read(magic, 4);
@@ -1461,15 +1498,31 @@ bool World::load(const std::string& path) {
   in.read(reinterpret_cast<char*>(&cs), sizeof(cs));
   in.read(reinterpret_cast<char*>(&ch), sizeof(ch));
   in.read(reinterpret_cast<char*>(&seedValue), sizeof(seedValue));
-  in.read(reinterpret_cast<char*>(&storedCount), sizeof(storedCount));
 
-  if (std::strncmp(magic, "CUB2", 4) != 0 || version != 7 ||
+  if (std::strncmp(magic, "CUB2", 4) != 0 || (version != 7 && version != 8) ||
       cs != static_cast<uint32_t>(kChunkSize) ||
       ch != static_cast<uint32_t>(kChunkHeight)) {
     return false;
   }
 
+  if (version >= 8) {
+    in.read(reinterpret_cast<char*>(&presetValue), sizeof(presetValue));
+    in.read(reinterpret_cast<char*>(&structuresValue), sizeof(structuresValue));
+    in.read(reinterpret_cast<char*>(&caveDensityValue), sizeof(caveDensityValue));
+    in.read(reinterpret_cast<char*>(&ravineFrequencyValue), sizeof(ravineFrequencyValue));
+    in.read(reinterpret_cast<char*>(&startInventoryModeValue), sizeof(startInventoryModeValue));
+  }
+  in.read(reinterpret_cast<char*>(&storedCount), sizeof(storedCount));
+
   seed = static_cast<int>(seedValue);
+  if (presetValue > static_cast<uint8_t>(WorldPreset::kClassicFlat)) {
+    presetValue = static_cast<uint8_t>(WorldPreset::kMinecraftStyle);
+  }
+  genSettings.preset = static_cast<WorldPreset>(presetValue);
+  genSettings.generateStructures = (structuresValue != 0);
+  genSettings.caveDensity = std::clamp(caveDensityValue, 0.25f, 2.5f);
+  genSettings.ravineFrequency = std::clamp(ravineFrequencyValue, 0.25f, 2.5f);
+  genSettings.startInventoryMode = startInventoryModeValue;
   resetChunkGeneration();
   chunks.clear();
   savedChunks.clear();

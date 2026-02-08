@@ -7,8 +7,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/cubeos_voxel.dir/src/vk_context.cpp.o.d"
   "CMakeFiles/cubeos_voxel.dir/src/world.cpp.o"
   "CMakeFiles/cubeos_voxel.dir/src/world.cpp.o.d"
-  "CubeOS v0.1.2 Beta.app/Contents/MacOS/CubeOS v0.1.2 Beta"
-  "CubeOS v0.1.2 Beta.pdb"
+  "CubeOS v0.2.0 Beta.app/Contents/MacOS/CubeOS v0.2.0 Beta"
+  "CubeOS v0.2.0 Beta.pdb"
 )
 
 # Per-language clean rules from dependency scanning.

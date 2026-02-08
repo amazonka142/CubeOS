@@ -3,8 +3,13 @@
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
+#include <chrono>
+#include <cctype>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <stdexcept>
 
@@ -16,7 +21,6 @@ constexpr float kSlotBorder = 3.0f;
 constexpr float kMarginBottom = 20.0f;
 constexpr float kIconPadding = 6.0f;
 constexpr float kPanelPadding = 12.0f;
-constexpr int kChunkViewRadius = 6;
 constexpr int kInventoryCols = 9;
 constexpr int kInventoryRows = 3;
 constexpr uint16_t kMaxStack = 64;
@@ -24,6 +28,10 @@ constexpr int kDigitWidth = 3;
 constexpr int kDigitHeight = 5;
 constexpr float kBreakDuration = 0.6f;
 constexpr float kBreakMaxDistance = 6.0f;
+constexpr float kMenuButtonWidth = 320.0f;
+constexpr float kMenuButtonHeight = 44.0f;
+constexpr float kMenuButtonGap = 14.0f;
+constexpr char kSettingsFilePath[] = "settings.cfg";
 
 constexpr uint8_t kDigitMap[10][kDigitHeight] = {
   {0b111, 0b101, 0b101, 0b101, 0b111}, // 0
@@ -37,6 +45,47 @@ constexpr uint8_t kDigitMap[10][kDigitHeight] = {
   {0b111, 0b101, 0b111, 0b101, 0b111}, // 8
   {0b111, 0b101, 0b111, 0b001, 0b111}  // 9
 };
+
+constexpr int kGlyphWidth = 3;
+constexpr int kGlyphHeight = 5;
+constexpr uint8_t kAlphabetMap[26][kGlyphHeight] = {
+  {0b111, 0b101, 0b111, 0b101, 0b101}, // A
+  {0b110, 0b101, 0b110, 0b101, 0b110}, // B
+  {0b111, 0b100, 0b100, 0b100, 0b111}, // C
+  {0b110, 0b101, 0b101, 0b101, 0b110}, // D
+  {0b111, 0b100, 0b110, 0b100, 0b111}, // E
+  {0b111, 0b100, 0b110, 0b100, 0b100}, // F
+  {0b111, 0b100, 0b101, 0b101, 0b111}, // G
+  {0b101, 0b101, 0b111, 0b101, 0b101}, // H
+  {0b111, 0b010, 0b010, 0b010, 0b111}, // I
+  {0b001, 0b001, 0b001, 0b101, 0b111}, // J
+  {0b101, 0b101, 0b110, 0b101, 0b101}, // K
+  {0b100, 0b100, 0b100, 0b100, 0b111}, // L
+  {0b101, 0b111, 0b111, 0b101, 0b101}, // M
+  {0b101, 0b111, 0b111, 0b111, 0b101}, // N
+  {0b111, 0b101, 0b101, 0b101, 0b111}, // O
+  {0b111, 0b101, 0b111, 0b100, 0b100}, // P
+  {0b111, 0b101, 0b101, 0b111, 0b001}, // Q
+  {0b111, 0b101, 0b111, 0b110, 0b101}, // R
+  {0b111, 0b100, 0b111, 0b001, 0b111}, // S
+  {0b111, 0b010, 0b010, 0b010, 0b010}, // T
+  {0b101, 0b101, 0b101, 0b101, 0b111}, // U
+  {0b101, 0b101, 0b101, 0b101, 0b010}, // V
+  {0b101, 0b101, 0b111, 0b111, 0b101}, // W
+  {0b101, 0b101, 0b010, 0b101, 0b101}, // X
+  {0b101, 0b101, 0b010, 0b010, 0b010}, // Y
+  {0b111, 0b001, 0b010, 0b100, 0b111}  // Z
+};
+
+const uint8_t* glyphForChar(char c) {
+  if (c >= 'A' && c <= 'Z') {
+    return kAlphabetMap[static_cast<size_t>(c - 'A')];
+  }
+  if (c >= '0' && c <= '9') {
+    return kDigitMap[static_cast<size_t>(c - '0')];
+  }
+  return nullptr;
+}
 
 int tileForBlock(uint8_t type) {
   if (isWaterBlock(type)) {
@@ -86,38 +135,238 @@ glm::vec2 uvForTile(int tile, float u, float v) {
   return glm::vec2(uClamped, vClamped);
 }
 
+std::string trimAscii(const std::string& value) {
+  size_t first = 0;
+  while (first < value.size() && std::isspace(static_cast<unsigned char>(value[first])) != 0) {
+    ++first;
+  }
+  size_t last = value.size();
+  while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1])) != 0) {
+    --last;
+  }
+  return value.substr(first, last - first);
+}
+
+std::string sanitizeWorldNameForFile(const std::string& value) {
+  std::string source = trimAscii(value);
+  if (source.empty()) {
+    source = "World";
+  }
+
+  std::string out;
+  out.reserve(source.size());
+  for (char c : source) {
+    unsigned char uc = static_cast<unsigned char>(c);
+    if (std::isalnum(uc) != 0 || c == '-' || c == '_' || c == ' ') {
+      out.push_back(c == ' ' ? '_' : c);
+    }
+  }
+
+  if (out.empty()) {
+    out = "World";
+  }
+
+  if (out.size() > 48) {
+    out.resize(48);
+  }
+  return out;
+}
+
+std::string worldPathForName(const std::string& worldName) {
+  std::filesystem::path savesDir("saves");
+  std::error_code ec;
+  std::filesystem::create_directories(savesDir, ec);
+  std::filesystem::path file = sanitizeWorldNameForFile(worldName) + ".bin";
+  return (savesDir / file).string();
+}
+
 } // namespace
 
-void App::run() {
-  initWindow();
-  initVulkan();
-  mainLoop();
-  cleanup();
-}
-
-void App::initWindow() {
-  if (glfwInit() != GLFW_TRUE) {
-    throw std::runtime_error("Failed to initialize GLFW.");
+void App::setScreenState(ScreenState state) {
+  if (screenState == state) {
+    return;
   }
 
-  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+  if (state != ScreenState::kPlaying && inventoryOpen) {
+    setInventoryOpen(false);
+  }
 
-  window = glfwCreateWindow(width, height, "CubeOS Voxel", nullptr, nullptr);
+  if (state != ScreenState::kPlaying && breakingActive) {
+    breakingActive = false;
+    breakingProgress = 0.0f;
+    breakingStage = 0;
+    world.clearBreakOverlay();
+  }
+
+  screenState = state;
+  if (screenState == ScreenState::kPlaying) {
+    menuIntro = 1.0f;
+  } else {
+    menuIntro = 0.0f;
+  }
+  if (window) {
+    int cursorMode = (screenState == ScreenState::kPlaying && !inventoryOpen)
+      ? GLFW_CURSOR_DISABLED
+      : GLFW_CURSOR_NORMAL;
+    glfwSetInputMode(window, GLFW_CURSOR, cursorMode);
+  }
+  firstMouse = true;
+  menuUpDown = false;
+  menuDownDown = false;
+  menuLeftDown = false;
+  menuRightDown = false;
+  menuEnterDown = false;
+  menuBackspaceDown = false;
+  menuEscDown = false;
+  uiDirty = true;
+  updateWindowTitle();
+
+  if (vkReady) {
+    rebuildUiMesh();
+    composeMeshData();
+    vk.updateMesh(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
+    uiDirty = false;
+  }
+}
+
+void App::updateWindowTitle() {
   if (!window) {
-    throw std::runtime_error("Failed to create GLFW window.");
+    return;
   }
 
-  glfwSetWindowUserPointer(window, this);
-  glfwSetFramebufferSizeCallback(window, App::framebufferResizeCallback);
-  glfwSetCursorPosCallback(window, App::mouseCallback);
-  glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+  auto mark = [](int current, int index, const char* label) {
+    return current == index
+      ? std::string("[") + label + "]"
+      : std::string(label);
+  };
+
+  std::string title = "CubeOS v0.2.0";
+  switch (screenState) {
+    case ScreenState::kMainMenu:
+      title += " | Menu: " + mark(mainMenuSelection, 0, "Start") + "  "
+            + mark(mainMenuSelection, 1, "Settings") + "  "
+            + mark(mainMenuSelection, 2, "Quit");
+      break;
+    case ScreenState::kSettings:
+      title += " | Settings | Up/Down Select | Left/Right Adjust | Enter Action";
+      break;
+    case ScreenState::kCreateWorld: {
+      std::string presetName = pendingWorldSettings.preset == WorldPreset::kClassicFlat
+        ? "Classic Flat"
+        : "Minecraft-style";
+      std::string invMode = pendingWorldSettings.startInventoryMode == 0
+        ? "Empty"
+        : "Creative test";
+      std::string seedText = pendingSeedText.empty() ? "random" : pendingSeedText;
+      std::string nameText = pendingWorldName.empty() ? "World" : pendingWorldName;
+      title += " | Create World | Name: " + nameText +
+               " | Seed: " + seedText +
+               " | Preset: " + presetName +
+               " | Cave: " + std::to_string(pendingWorldSettings.caveDensity).substr(0, 4) +
+               " | Ravine: " + std::to_string(pendingWorldSettings.ravineFrequency).substr(0, 4) +
+               " | Structures: " + std::string(pendingWorldSettings.generateStructures ? "On" : "Off") +
+               " | Start: " + invMode;
+      break;
+    }
+    case ScreenState::kPlaying:
+      title += " | In Game";
+      break;
+  }
+
+  glfwSetWindowTitle(window, title.c_str());
 }
 
-void App::initVulkan() {
-  if (!world.load("world.bin")) {
-    world.generate();
+void App::beginCreateWorldFlow() {
+  createWorldSelection = 0;
+  if (pendingWorldName.empty()) {
+    pendingWorldName = "World";
   }
+  pendingWorldSettings = world.getGenerationSettings();
+  pendingWorldSettings.preset = WorldPreset::kMinecraftStyle;
+  pendingWorldSettings.caveDensity = std::clamp(pendingWorldSettings.caveDensity, 0.25f, 2.5f);
+  pendingWorldSettings.ravineFrequency = std::clamp(pendingWorldSettings.ravineFrequency, 0.25f, 2.5f);
+  pendingSeedText.clear();
+  setScreenState(ScreenState::kCreateWorld);
+}
+
+void App::createWorldFromMenu() {
+  pendingWorldName = trimAscii(pendingWorldName);
+  if (pendingWorldName.empty()) {
+    pendingWorldName = "World";
+  }
+
+  int seedValue = 0;
+  bool parsedSeed = false;
+  if (!pendingSeedText.empty()) {
+    try {
+      seedValue = std::stoi(pendingSeedText);
+      parsedSeed = true;
+    } catch (...) {
+      parsedSeed = false;
+    }
+  }
+
+  if (!parsedSeed) {
+    auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    seedValue = static_cast<int>(static_cast<uint64_t>(now) & 0x7fffffffu);
+  }
+
+  WorldGenSettings settings = pendingWorldSettings;
+  settings.caveDensity = std::clamp(settings.caveDensity, 0.25f, 2.5f);
+  settings.ravineFrequency = std::clamp(settings.ravineFrequency, 0.25f, 2.5f);
+
+  currentWorldPath = worldPathForName(pendingWorldName);
+  bool loadedExistingWorld = false;
+  if (std::filesystem::exists(currentWorldPath)) {
+    loadedExistingWorld = world.load(currentWorldPath);
+  }
+
+  if (!loadedExistingWorld) {
+    world.setSeed(seedValue);
+    world.setGenerationSettings(settings);
+    world.generate();
+  } else {
+    settings = world.getGenerationSettings();
+    pendingWorldSettings = settings;
+    pendingSeedText = std::to_string(world.getSeed());
+  }
+
+  for (ItemStack& slot : hotbar) {
+    slot.type = kAir;
+    slot.count = 0;
+  }
+  for (ItemStack& slot : inventory) {
+    slot.type = kAir;
+    slot.count = 0;
+  }
+  cursorStack.type = kAir;
+  cursorStack.count = 0;
+  selectedSlot = 0;
+
+  if (settings.startInventoryMode != 0) {
+    std::array<uint8_t, 9> creativeBlocks = {
+      kGrass, kDirt, kStone, kSand, kWater, kWood, kLeaves, kCoalOre, kGoldOre
+    };
+    for (size_t i = 0; i < hotbar.size() && i < creativeBlocks.size(); ++i) {
+      hotbar[i].type = creativeBlocks[i];
+      hotbar[i].count = 64;
+    }
+  }
+
+  setupGameplaySession();
+  setScreenState(ScreenState::kPlaying);
+}
+
+void App::setupGameplaySession() {
+  playerPos = glm::vec3(8.0f, static_cast<float>(world.height() - 6), 8.0f);
+  playerVel = glm::vec3(0.0f);
+  onGround = false;
+  inventoryOpen = false;
+  breakingActive = false;
+  breakingProgress = 0.0f;
+  breakingStage = 0;
+  world.clearBreakOverlay();
+
   int initialCx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int initialCz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
   constexpr int kSpawnChunkRadius = 8;
@@ -284,7 +533,7 @@ void App::initVulkan() {
   int cx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int cz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
   if (cx != initialCx || cz != initialCz) {
-    world.updateActiveChunks(cx, cz, kChunkViewRadius);
+    world.updateActiveChunks(cx, cz, activeChunkViewRadius);
   }
   currentChunkX = cx;
   currentChunkZ = cz;
@@ -292,10 +541,397 @@ void App::initVulkan() {
   world.buildMesh(worldVertices, worldIndices);
   rebuildUiMesh();
   composeMeshData();
-  vk.setMeshData(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
+  if (vkReady) {
+    vk.updateMesh(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
+  } else {
+    vk.setMeshData(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
+  }
   uiDirty = false;
   refreshSelectedBlock();
+
+  world.save(currentWorldPath);
+}
+
+void App::processMenuInput(float deltaTime) {
+  (void)deltaTime;
+
+  bool upPressed = glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS ||
+                   glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS;
+  bool downPressed = glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS ||
+                     glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS;
+  bool leftPressed = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS ||
+                     glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS;
+  bool rightPressed = glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS ||
+                      glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS;
+  bool enterPressed = glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS ||
+                      glfwGetKey(window, GLFW_KEY_KP_ENTER) == GLFW_PRESS;
+  bool backspacePressed = glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
+  bool escPressed = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+
+  auto togglePreset = [&]() {
+    pendingWorldSettings.preset =
+      (pendingWorldSettings.preset == WorldPreset::kMinecraftStyle)
+      ? WorldPreset::kClassicFlat
+      : WorldPreset::kMinecraftStyle;
+    updateWindowTitle();
+    uiDirty = true;
+  };
+
+  auto adjustCreateSetting = [&](bool increase) {
+    constexpr float kStep = 0.25f;
+    bool changed = false;
+    switch (createWorldSelection) {
+      case 2:
+        togglePreset();
+        return;
+      case 3: {
+        float oldValue = pendingWorldSettings.caveDensity;
+        float delta = increase ? kStep : -kStep;
+        pendingWorldSettings.caveDensity = std::clamp(oldValue + delta, 0.25f, 2.5f);
+        changed = (pendingWorldSettings.caveDensity != oldValue);
+        break;
+      }
+      case 4: {
+        float oldValue = pendingWorldSettings.ravineFrequency;
+        float delta = increase ? kStep : -kStep;
+        pendingWorldSettings.ravineFrequency = std::clamp(oldValue + delta, 0.25f, 2.5f);
+        changed = (pendingWorldSettings.ravineFrequency != oldValue);
+        break;
+      }
+      case 5: {
+        pendingWorldSettings.generateStructures = !pendingWorldSettings.generateStructures;
+        changed = true;
+        break;
+      }
+      case 6: {
+        pendingWorldSettings.startInventoryMode =
+          pendingWorldSettings.startInventoryMode == 0 ? 1 : 0;
+        changed = true;
+        break;
+      }
+      default:
+        break;
+    }
+
+    if (changed) {
+      updateWindowTitle();
+      uiDirty = true;
+    }
+  };
+
+  auto updateSettingsDirtyFlag = [&]() {
+    settingsDirty =
+      pendingSettings.graphicsQuality != appliedSettings.graphicsQuality ||
+      std::abs(pendingSettings.sensitivity - appliedSettings.sensitivity) > 0.0001f ||
+      pendingSettings.audioVolume != appliedSettings.audioVolume;
+  };
+
+  auto adjustSettingsValue = [&](bool increase) {
+    switch (settingsSelection) {
+      case 0: {
+        int delta = increase ? 1 : -1;
+        pendingSettings.graphicsQuality = std::clamp(pendingSettings.graphicsQuality + delta, 0, 2);
+        break;
+      }
+      case 1: {
+        float delta = increase ? 0.01f : -0.01f;
+        pendingSettings.sensitivity = std::clamp(pendingSettings.sensitivity + delta, 0.03f, 0.40f);
+        break;
+      }
+      case 2: {
+        int delta = increase ? 5 : -5;
+        pendingSettings.audioVolume = std::clamp(pendingSettings.audioVolume + delta, 0, 100);
+        break;
+      }
+      default:
+        return;
+    }
+
+    updateSettingsDirtyFlag();
+    uiDirty = true;
+  };
+
+  if (screenState == ScreenState::kMainMenu) {
+    if (upPressed && !menuUpDown) {
+      mainMenuSelection = (mainMenuSelection + 2) % 3;
+      updateWindowTitle();
+      uiDirty = true;
+    }
+    if (downPressed && !menuDownDown) {
+      mainMenuSelection = (mainMenuSelection + 1) % 3;
+      updateWindowTitle();
+      uiDirty = true;
+    }
+    if (enterPressed && !menuEnterDown) {
+      if (mainMenuSelection == 0) {
+        beginCreateWorldFlow();
+      } else if (mainMenuSelection == 1) {
+        settingsSelection = 0;
+        pendingSettings = appliedSettings;
+        settingsDirty = false;
+        setScreenState(ScreenState::kSettings);
+      } else {
+        glfwSetWindowShouldClose(window, GLFW_TRUE);
+      }
+    }
+    if (escPressed && !menuEscDown) {
+      glfwSetWindowShouldClose(window, GLFW_TRUE);
+    }
+  } else if (screenState == ScreenState::kSettings) {
+    constexpr int kSettingsFieldCount = 6;
+    if (upPressed && !menuUpDown) {
+      settingsSelection = (settingsSelection + (kSettingsFieldCount - 1)) % kSettingsFieldCount;
+      uiDirty = true;
+    }
+    if (downPressed && !menuDownDown) {
+      settingsSelection = (settingsSelection + 1) % kSettingsFieldCount;
+      uiDirty = true;
+    }
+    if ((leftPressed && !menuLeftDown) || (rightPressed && !menuRightDown)) {
+      adjustSettingsValue(rightPressed && !menuRightDown);
+    }
+    if (enterPressed && !menuEnterDown) {
+      if (settingsSelection <= 2) {
+        adjustSettingsValue(true);
+      } else if (settingsSelection == 3) {
+        applySettings(screenState == ScreenState::kPlaying);
+        saveSettings();
+      } else if (settingsSelection == 4) {
+        pendingSettings = UserSettings{};
+        updateSettingsDirtyFlag();
+        uiDirty = true;
+      } else if (settingsSelection == 5) {
+        pendingSettings = appliedSettings;
+        settingsDirty = false;
+        setScreenState(ScreenState::kMainMenu);
+      }
+    }
+    if (escPressed && !menuEscDown) {
+      pendingSettings = appliedSettings;
+      settingsDirty = false;
+      setScreenState(ScreenState::kMainMenu);
+    }
+  } else if (screenState == ScreenState::kCreateWorld) {
+    constexpr int kCreateFieldCount = 9;
+
+    if (upPressed && !menuUpDown) {
+      createWorldSelection = (createWorldSelection + (kCreateFieldCount - 1)) % kCreateFieldCount;
+      updateWindowTitle();
+      uiDirty = true;
+    }
+    if (downPressed && !menuDownDown) {
+      createWorldSelection = (createWorldSelection + 1) % kCreateFieldCount;
+      updateWindowTitle();
+      uiDirty = true;
+    }
+    if ((leftPressed && !menuLeftDown) || (rightPressed && !menuRightDown)) {
+      adjustCreateSetting(rightPressed && !menuRightDown);
+    }
+    if (backspacePressed && !menuBackspaceDown) {
+      if (createWorldSelection == 0 && !pendingWorldName.empty()) {
+        pendingWorldName.pop_back();
+        updateWindowTitle();
+      } else if (createWorldSelection == 1 && !pendingSeedText.empty()) {
+        pendingSeedText.pop_back();
+        updateWindowTitle();
+      }
+      uiDirty = true;
+    }
+    if (enterPressed && !menuEnterDown) {
+      if (createWorldSelection >= 2 && createWorldSelection <= 6) {
+        adjustCreateSetting(true);
+      } else if (createWorldSelection == 7) {
+        createWorldFromMenu();
+      } else if (createWorldSelection == 8) {
+        setScreenState(ScreenState::kMainMenu);
+      }
+    }
+    if (escPressed && !menuEscDown) {
+      setScreenState(ScreenState::kMainMenu);
+    }
+  }
+
+  menuUpDown = upPressed;
+  menuDownDown = downPressed;
+  menuLeftDown = leftPressed;
+  menuRightDown = rightPressed;
+  menuEnterDown = enterPressed;
+  menuBackspaceDown = backspacePressed;
+  menuEscDown = escPressed;
+}
+
+void App::onCharInput(unsigned int codepoint) {
+  if (screenState != ScreenState::kCreateWorld) {
+    return;
+  }
+
+  if (createWorldSelection == 0) {
+    if (codepoint >= 32 && codepoint <= 126 && pendingWorldName.size() < 24) {
+      char ch = static_cast<char>(codepoint);
+      unsigned char uch = static_cast<unsigned char>(ch);
+      bool allowed = std::isalnum(uch) != 0 || ch == ' ' || ch == '-' || ch == '_';
+      if (!allowed) {
+        return;
+      }
+      if (pendingWorldName == "World") {
+        pendingWorldName.clear();
+      }
+      pendingWorldName.push_back(ch);
+      uiDirty = true;
+      updateWindowTitle();
+    }
+    return;
+  }
+
+  if (createWorldSelection == 1) {
+    if ((codepoint >= '0' && codepoint <= '9') && pendingSeedText.size() < 11) {
+      pendingSeedText.push_back(static_cast<char>(codepoint));
+      uiDirty = true;
+      updateWindowTitle();
+      return;
+    }
+    if (codepoint == '-' && pendingSeedText.empty()) {
+      pendingSeedText.push_back('-');
+      uiDirty = true;
+      updateWindowTitle();
+    }
+  }
+}
+
+void App::loadSettings() {
+  appliedSettings = UserSettings{};
+  std::ifstream in(kSettingsFilePath);
+  if (in.is_open()) {
+    std::string line;
+    while (std::getline(in, line)) {
+      line = trimAscii(line);
+      if (line.empty() || line[0] == '#') {
+        continue;
+      }
+
+      size_t sep = line.find('=');
+      if (sep == std::string::npos) {
+        continue;
+      }
+
+      std::string key = trimAscii(line.substr(0, sep));
+      std::string value = trimAscii(line.substr(sep + 1));
+      if (key == "graphics_quality") {
+        try {
+          appliedSettings.graphicsQuality = std::stoi(value);
+        } catch (...) {
+        }
+      } else if (key == "sensitivity") {
+        try {
+          appliedSettings.sensitivity = std::stof(value);
+        } catch (...) {
+        }
+      } else if (key == "audio_volume") {
+        try {
+          appliedSettings.audioVolume = std::stoi(value);
+        } catch (...) {
+        }
+      }
+    }
+  }
+
+  pendingSettings = appliedSettings;
+  applySettings(false);
+  settingsDirty = false;
+}
+
+bool App::saveSettings() const {
+  std::ofstream out(kSettingsFilePath, std::ios::trunc);
+  if (!out.is_open()) {
+    return false;
+  }
+
+  out << "graphics_quality=" << appliedSettings.graphicsQuality << "\n";
+  out << "sensitivity=" << appliedSettings.sensitivity << "\n";
+  out << "audio_volume=" << appliedSettings.audioVolume << "\n";
+  return true;
+}
+
+void App::applySettings(bool refreshWorldStreaming) {
+  appliedSettings.graphicsQuality = std::clamp(pendingSettings.graphicsQuality, 0, 2);
+  appliedSettings.sensitivity = std::clamp(pendingSettings.sensitivity, 0.03f, 0.40f);
+  appliedSettings.audioVolume = std::clamp(pendingSettings.audioVolume, 0, 100);
+  pendingSettings = appliedSettings;
+  settingsDirty = false;
+
+  static constexpr int kQualityToRadius[3] = {4, 6, 8};
+  activeChunkViewRadius = kQualityToRadius[appliedSettings.graphicsQuality];
+
+  if (refreshWorldStreaming && screenState == ScreenState::kPlaying) {
+    int cx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
+    int cz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
+    world.updateActiveChunks(cx, cz, activeChunkViewRadius);
+    currentChunkX = cx;
+    currentChunkZ = cz;
+    chunkCenterValid = true;
+  }
+
+  uiDirty = true;
+}
+
+void App::run() {
+  initWindow();
+  initVulkan();
+  mainLoop();
+  cleanup();
+}
+
+void App::initWindow() {
+  if (glfwInit() != GLFW_TRUE) {
+    throw std::runtime_error("Failed to initialize GLFW.");
+  }
+
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+
+  window = glfwCreateWindow(width, height, "CubeOS Voxel", nullptr, nullptr);
+  if (!window) {
+    throw std::runtime_error("Failed to create GLFW window.");
+  }
+
+  glfwSetWindowUserPointer(window, this);
+  glfwSetFramebufferSizeCallback(window, App::framebufferResizeCallback);
+  glfwSetCursorPosCallback(window, App::mouseCallback);
+  glfwSetCharCallback(window, App::charCallback);
+  glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+  loadSettings();
+  menuIntro = 0.0f;
+  updateWindowTitle();
+}
+
+void App::initVulkan() {
+  WorldGenSettings startupSettings{};
+  startupSettings.preset = WorldPreset::kMinecraftStyle;
+  startupSettings.generateStructures = false;
+  startupSettings.caveDensity = 1.0f;
+  startupSettings.ravineFrequency = 1.0f;
+  startupSettings.startInventoryMode = 0;
+
+  world.setGenerationSettings(startupSettings);
+  world.setSeed(1337);
+  world.generate();
+  world.updateActiveChunks(0, 0, 3);
+  world.waitForChunkRegion(0, 0, 3, 2500);
+  world.buildMesh(worldVertices, worldIndices);
+
+  pendingWorldSettings = startupSettings;
+  pendingWorldName = "World";
+  pendingSeedText.clear();
+  currentWorldPath = worldPathForName(pendingWorldName);
+
+  rebuildUiMesh();
+  composeMeshData();
+  uiDirty = false;
+  refreshSelectedBlock();
+
+  vk.setMeshData(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
   vk.init(window, &framebufferResized);
+  vkReady = true;
 }
 
 void App::mainLoop() {
@@ -307,31 +943,44 @@ void App::mainLoop() {
 
     glfwPollEvents();
     processInput(deltaTime);
-    if (!inventoryOpen) {
+    if (screenState != ScreenState::kPlaying) {
+      if (menuIntro < 1.0f) {
+        menuIntro = std::min(1.0f, menuIntro + deltaTime * 3.2f);
+      }
+      // Keep menu animated (focus pulse + subtle panel motion).
+      uiDirty = true;
+    }
+    if (screenState == ScreenState::kPlaying && !inventoryOpen) {
       updatePlayer(deltaTime);
     }
-    updateStreaming();
-    waterSimBoostTimer = std::max(0.0f, waterSimBoostTimer - deltaTime);
-    waterSimAccumulator += deltaTime;
-    if (waterSimAccumulator > 0.6f) {
-      waterSimAccumulator = 0.6f;
-    }
-    while (waterSimAccumulator >= 0.24f) {
-      int px = static_cast<int>(std::floor(playerPos.x));
-      int pz = static_cast<int>(std::floor(playerPos.z));
-      bool nearWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.65f, 0.0f));
-      bool highActivity = waterSimBoostTimer > 0.0f;
 
-      // Keep background water work very small to avoid frame drops in ocean areas.
-      if (highActivity || nearWater) {
-        int simRadius = highActivity ? 20 : 12;
-        int waterUpdates = highActivity ? 52 : 8;
-        int fallingUpdates = highActivity ? 44 : 10;
-        world.simulateWater(px, pz, simRadius, waterUpdates);
-        world.simulateFallingBlocks(px, pz, simRadius, fallingUpdates);
+    if (screenState == ScreenState::kPlaying) {
+      updateStreaming();
+      waterSimBoostTimer = std::max(0.0f, waterSimBoostTimer - deltaTime);
+      waterSimAccumulator += deltaTime;
+      if (waterSimAccumulator > 0.6f) {
+        waterSimAccumulator = 0.6f;
       }
+      while (waterSimAccumulator >= 0.24f) {
+        int px = static_cast<int>(std::floor(playerPos.x));
+        int pz = static_cast<int>(std::floor(playerPos.z));
+        bool nearWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.65f, 0.0f));
+        bool highActivity = waterSimBoostTimer > 0.0f;
 
-      waterSimAccumulator -= 0.24f;
+        // Keep background water work very small to avoid frame drops in ocean areas.
+        if (highActivity || nearWater) {
+          int simRadius = highActivity ? 20 : 12;
+          int waterUpdates = highActivity ? 52 : 8;
+          int fallingUpdates = highActivity ? 44 : 10;
+          world.simulateWater(px, pz, simRadius, waterUpdates);
+          world.simulateFallingBlocks(px, pz, simRadius, fallingUpdates);
+        }
+
+        waterSimAccumulator -= 0.24f;
+      }
+    } else {
+      waterSimBoostTimer = 0.0f;
+      waterSimAccumulator = 0.0f;
     }
 
     bool worldChanged = world.consumeMeshDirty();
@@ -347,8 +996,20 @@ void App::mainLoop() {
       uiDirty = false;
     }
 
-    glm::vec3 eye = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
-    glm::vec3 front = cameraFront();
+    glm::vec3 eye;
+    glm::vec3 front;
+    bool cameraInWater = false;
+    if (screenState == ScreenState::kPlaying) {
+      eye = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
+      front = cameraFront();
+      cameraInWater = isWaterBlock(world.getBlock(static_cast<int>(std::floor(eye.x)),
+                                                   static_cast<int>(std::floor(eye.y)),
+                                                   static_cast<int>(std::floor(eye.z))));
+    } else {
+      eye = glm::vec3(6.0f, 62.0f, -18.0f);
+      front = glm::normalize(glm::vec3(0.2f, -0.16f, 1.0f));
+    }
+
     glm::mat4 view = glm::lookAt(eye, eye + front, glm::vec3(0.0f, 1.0f, 0.0f));
     glm::mat4 proj = glm::perspective(glm::radians(70.0f),
                                       width / static_cast<float>(height),
@@ -356,9 +1017,6 @@ void App::mainLoop() {
                                       200.0f);
     proj[1][1] *= -1.0f;
 
-    bool cameraInWater = isWaterBlock(world.getBlock(static_cast<int>(std::floor(eye.x)),
-                                                     static_cast<int>(std::floor(eye.y)),
-                                                     static_cast<int>(std::floor(eye.z))));
     vk.setCameraWorldState(eye, cameraInWater);
     vk.setCameraMatrices(view, proj);
     vk.drawFrame();
@@ -368,12 +1026,24 @@ void App::mainLoop() {
 }
 
 void App::processInput(float deltaTime) {
+  if (screenState != ScreenState::kPlaying) {
+    processMenuInput(deltaTime);
+    escDown = false;
+    tabDown = false;
+    mouseLeftDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    mouseRightDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+    return;
+  }
+
   bool escPressed = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
   if (escPressed && !escDown) {
     if (inventoryOpen) {
       setInventoryOpen(false);
     } else {
-      glfwSetWindowShouldClose(window, GLFW_TRUE);
+      if (!currentWorldPath.empty()) {
+        world.save(currentWorldPath);
+      }
+      setScreenState(ScreenState::kMainMenu);
     }
     escDown = true;
   } else if (!escPressed) {
@@ -742,7 +1412,7 @@ void App::updateStreaming() {
     currentChunkX = cx;
     currentChunkZ = cz;
     chunkCenterValid = true;
-    world.updateActiveChunks(cx, cz, kChunkViewRadius);
+    world.updateActiveChunks(cx, cz, activeChunkViewRadius);
   }
 }
 
@@ -824,7 +1494,366 @@ void App::rebuildUiMesh() {
     uiIndices.push_back(start + 3);
   };
 
+  auto addSolidQuad = [&](float x, float y, float w, float h, const glm::vec3& color) {
+    glm::vec2 p0 = toNdc(x, y);
+    glm::vec2 p1 = toNdc(x + w, y);
+    glm::vec2 p2 = toNdc(x + w, y + h);
+    glm::vec2 p3 = toNdc(x, y + h);
+
+    // Negative green channel flags a texture-free UI primitive in fragment shader.
+    glm::vec3 markerColor{
+      std::clamp(color.r, 0.0f, 1.0f),
+      -(1.0f + std::clamp(color.g, 0.0f, 1.0f)),
+      std::clamp(color.b, 0.0f, 1.0f)
+    };
+    uint32_t start = static_cast<uint32_t>(uiVertices.size());
+    uiVertices.push_back({{p0.x, p0.y, 0.0f}, markerColor, {0.0f, 0.0f}});
+    uiVertices.push_back({{p1.x, p1.y, 0.0f}, markerColor, {0.0f, 0.0f}});
+    uiVertices.push_back({{p2.x, p2.y, 0.0f}, markerColor, {0.0f, 0.0f}});
+    uiVertices.push_back({{p3.x, p3.y, 0.0f}, markerColor, {0.0f, 0.0f}});
+
+    uiIndices.push_back(start + 0);
+    uiIndices.push_back(start + 1);
+    uiIndices.push_back(start + 2);
+    uiIndices.push_back(start + 0);
+    uiIndices.push_back(start + 2);
+    uiIndices.push_back(start + 3);
+  };
+
   const int backgroundTile = tileForBlock(kStone);
+
+  auto measureTextWidth = [&](const std::string& text, float pixel) -> float {
+    float widthPx = 0.0f;
+    for (char raw : text) {
+      char c = static_cast<char>(std::toupper(static_cast<unsigned char>(raw)));
+      if (c == ' ') {
+        widthPx += pixel * 2.0f;
+        continue;
+      }
+      widthPx += pixel * static_cast<float>(kGlyphWidth + 1);
+    }
+    if (widthPx > 0.0f) {
+      widthPx -= pixel;
+    }
+    return widthPx;
+  };
+
+  auto drawText = [&](const std::string& text,
+                      float x,
+                      float y,
+                      float pixel,
+                      const glm::vec3& color,
+                      bool centered) {
+    if (pixel <= 0.0f) {
+      return;
+    }
+
+    if (centered) {
+      x -= measureTextWidth(text, pixel) * 0.5f;
+    }
+
+    for (auto it = text.rbegin(); it != text.rend(); ++it) {
+      char raw = *it;
+      char c = static_cast<char>(std::toupper(static_cast<unsigned char>(raw)));
+      if (c == ' ') {
+        x += pixel * 2.0f;
+        continue;
+      }
+
+      uint8_t fallback[kGlyphHeight] = {0, 0, 0, 0, 0};
+      const uint8_t* glyph = glyphForChar(c);
+      if (!glyph) {
+        switch (c) {
+          case '-':
+            fallback[2] = 0b111;
+            glyph = fallback;
+            break;
+          case '.':
+            fallback[4] = 0b010;
+            glyph = fallback;
+            break;
+          case ':':
+            fallback[1] = 0b010;
+            fallback[3] = 0b010;
+            glyph = fallback;
+            break;
+          case '/':
+            fallback[0] = 0b001;
+            fallback[1] = 0b001;
+            fallback[2] = 0b010;
+            fallback[3] = 0b100;
+            fallback[4] = 0b100;
+            glyph = fallback;
+            break;
+          default:
+            x += pixel * static_cast<float>(kGlyphWidth + 1);
+            continue;
+        }
+      }
+
+      for (int row = 0; row < kGlyphHeight; ++row) {
+        uint8_t bits = glyph[row];
+        for (int col = 0; col < kGlyphWidth; ++col) {
+          int bit = col;
+          if ((bits & (1u << bit)) == 0) {
+            continue;
+          }
+          addSolidQuad(x + static_cast<float>(col) * pixel,
+                       y + static_cast<float>(row) * pixel,
+                       pixel,
+                       pixel,
+                       color);
+        }
+      }
+
+      x += pixel * static_cast<float>(kGlyphWidth + 1);
+    }
+  };
+
+  if (screenState != ScreenState::kPlaying) {
+    float t = static_cast<float>(glfwGetTime());
+    float intro = menuIntro * menuIntro * (3.0f - 2.0f * menuIntro);
+    float pulse = 0.5f + 0.5f * std::sin(t * 6.5f);
+    float panelWidth = std::min(static_cast<float>(width) * 0.72f, 640.0f);
+    float panelHeight = std::min(static_cast<float>(height) * 0.78f, 540.0f);
+    float panelX = (static_cast<float>(width) - panelWidth) * 0.5f;
+    float panelY = (static_cast<float>(height) - panelHeight) * 0.5f;
+    panelY += (1.0f - intro) * 28.0f;
+    panelY += std::sin(t * 1.4f) * 3.0f;
+
+    addQuad(panelX, panelY, panelWidth, panelHeight, glm::vec3(0.10f, 0.10f, 0.13f), backgroundTile);
+    addQuad(panelX + 8.0f,
+            panelY + 8.0f,
+            panelWidth - 16.0f,
+            40.0f,
+            glm::vec3(0.16f, 0.19f, 0.24f),
+            backgroundTile);
+    drawText("CUBEOS V0 2 0 BETA", panelX + panelWidth * 0.5f, panelY + 18.0f, 3.0f,
+             glm::vec3(0.91f, 0.94f, 0.98f), true);
+
+    auto drawMenuRow = [&](int index,
+                           int selectedIndex,
+                           float x,
+                           float y,
+                           float w,
+                           float h,
+                           const glm::vec3& baseColor) {
+      glm::vec3 rowColor = baseColor;
+      if (index == selectedIndex) {
+        float focus = 0.35f + pulse * 0.25f;
+        rowColor = baseColor + glm::vec3(0.10f, 0.13f, 0.21f) + glm::vec3(focus * 0.2f);
+        addQuad(x - 5.0f,
+                y - 5.0f,
+                w + 10.0f,
+                h + 10.0f,
+                glm::vec3(0.78f, 0.85f, 0.95f),
+                backgroundTile);
+        addQuad(x - 16.0f,
+                y + h * 0.5f - 3.0f,
+                8.0f + pulse * 6.0f,
+                6.0f,
+                glm::vec3(0.84f, 0.90f, 0.98f),
+                backgroundTile);
+      }
+      addQuad(x, y, w, h, rowColor, backgroundTile);
+    };
+
+    if (screenState == ScreenState::kMainMenu) {
+      drawText("MAIN MENU", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
+      float totalH = kMenuButtonHeight * 3.0f + kMenuButtonGap * 2.0f;
+      float bx = panelX + (panelWidth - kMenuButtonWidth) * 0.5f;
+      float by = panelY + 90.0f + (panelHeight - 130.0f - totalH) * 0.5f;
+      static constexpr const char* kMenuLabels[3] = {"START", "SETTINGS", "QUIT"};
+      for (int i = 0; i < 3; ++i) {
+        drawMenuRow(i,
+                    mainMenuSelection,
+                    bx,
+                    by + static_cast<float>(i) * (kMenuButtonHeight + kMenuButtonGap),
+                    kMenuButtonWidth,
+                    kMenuButtonHeight,
+                    glm::vec3(0.22f, 0.24f, 0.29f));
+        drawText(kMenuLabels[i],
+                 bx + kMenuButtonWidth * 0.5f,
+                 by + static_cast<float>(i) * (kMenuButtonHeight + kMenuButtonGap) + 12.0f,
+                 3.1f,
+                 glm::vec3(0.94f, 0.95f, 0.98f),
+                 true);
+      }
+    } else if (screenState == ScreenState::kSettings) {
+      drawText("SETTINGS", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
+      float rowW = panelWidth - 120.0f;
+      float rowX = panelX + (panelWidth - rowW) * 0.5f;
+      float rowH = 40.0f;
+      float rowGap = 14.0f;
+      float rowY = panelY + 92.0f;
+      for (int i = 0; i < 6; ++i) {
+        drawMenuRow(i,
+                    settingsSelection,
+                    rowX,
+                    rowY + static_cast<float>(i) * (rowH + rowGap),
+                    rowW,
+                    rowH,
+                    glm::vec3(0.21f, 0.23f, 0.28f));
+      }
+
+      std::string graphicsValue = "MEDIUM";
+      if (pendingSettings.graphicsQuality == 0) {
+        graphicsValue = "LOW";
+      } else if (pendingSettings.graphicsQuality == 2) {
+        graphicsValue = "HIGH";
+      }
+
+      std::ostringstream sens;
+      sens.setf(std::ios::fixed);
+      sens.precision(2);
+      sens << pendingSettings.sensitivity;
+
+      std::string dirtyMark = settingsDirty ? " UNSAVED" : " SAVED";
+      std::string line0 = "GRAPHICS " + graphicsValue;
+      std::string line1 = "SENSITIVITY " + sens.str();
+      std::string line2 = "AUDIO " + std::to_string(pendingSettings.audioVolume);
+      std::string line3 = "SAVE AND APPLY";
+      std::string line4 = "RESET DEFAULTS";
+      std::string line5 = "BACK TO MENU" + dirtyMark;
+
+      std::array<std::string, 6> lines = {line0, line1, line2, line3, line4, line5};
+      for (int i = 0; i < 6; ++i) {
+        drawText(lines[static_cast<size_t>(i)],
+                 rowX + 16.0f,
+                 rowY + static_cast<float>(i) * (rowH + rowGap) + 12.0f,
+                 2.6f,
+                 glm::vec3(0.92f, 0.94f, 0.98f),
+                 false);
+      }
+    } else if (screenState == ScreenState::kCreateWorld) {
+      drawText("CREATE WORLD", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
+      constexpr int kRowCount = 9;
+      float rowW = panelWidth - 120.0f;
+      float rowX = panelX + (panelWidth - rowW) * 0.5f;
+      float rowH = 36.0f;
+      float rowGap = 12.0f;
+      float rowsH = static_cast<float>(kRowCount) * rowH + static_cast<float>(kRowCount - 1) * rowGap;
+      float rowY = panelY + 72.0f + std::max(0.0f, (panelHeight - 92.0f - rowsH) * 0.5f);
+
+      for (int i = 0; i < kRowCount; ++i) {
+        glm::vec3 rowColor = glm::vec3(0.20f, 0.23f, 0.29f);
+        if (i == 7) {
+          rowColor = glm::vec3(0.20f, 0.36f, 0.22f);
+        } else if (i == 8) {
+          rowColor = glm::vec3(0.36f, 0.22f, 0.22f);
+        }
+        drawMenuRow(i,
+                    createWorldSelection,
+                    rowX,
+                    rowY + static_cast<float>(i) * (rowH + rowGap),
+                    rowW,
+                    rowH,
+                    rowColor);
+      }
+
+      float presetY = rowY + 2.0f * (rowH + rowGap);
+      float optionW = 120.0f;
+      float optionH = rowH - 12.0f;
+      float optionY = presetY + 6.0f;
+      float leftOptionX = rowX + rowW - optionW * 2.0f - 18.0f;
+      float rightOptionX = rowX + rowW - optionW - 10.0f;
+      bool minecraftPreset = pendingWorldSettings.preset == WorldPreset::kMinecraftStyle;
+      addQuad(leftOptionX,
+              optionY,
+              optionW,
+              optionH,
+              minecraftPreset ? glm::vec3(0.30f, 0.36f, 0.45f) : glm::vec3(0.20f, 0.23f, 0.28f),
+              backgroundTile);
+      addQuad(rightOptionX,
+              optionY,
+              optionW,
+              optionH,
+              minecraftPreset ? glm::vec3(0.20f, 0.23f, 0.28f) : glm::vec3(0.40f, 0.34f, 0.22f),
+              backgroundTile);
+
+      auto drawSlider = [&](float y, float value) {
+        float t = (value - 0.25f) / (2.5f - 0.25f);
+        t = std::clamp(t, 0.0f, 1.0f);
+        float trackW = 240.0f;
+        float trackH = 12.0f;
+        float tx = rowX + rowW - trackW - 16.0f;
+        float ty = y + (rowH - trackH) * 0.5f;
+        addQuad(tx, ty, trackW, trackH, glm::vec3(0.16f, 0.17f, 0.20f), backgroundTile);
+        addQuad(tx + 1.0f,
+                ty + 1.0f,
+                (trackW - 2.0f) * t,
+                trackH - 2.0f,
+                glm::vec3(0.44f, 0.63f, 0.92f),
+                backgroundTile);
+      };
+
+      drawSlider(rowY + 3.0f * (rowH + rowGap), pendingWorldSettings.caveDensity);
+      drawSlider(rowY + 4.0f * (rowH + rowGap), pendingWorldSettings.ravineFrequency);
+
+      float toggleW = 90.0f;
+      float toggleH = rowH - 12.0f;
+      float toggleX = rowX + rowW - toggleW - 16.0f;
+      float structuresY = rowY + 5.0f * (rowH + rowGap) + 6.0f;
+      addQuad(toggleX,
+              structuresY,
+              toggleW,
+              toggleH,
+              pendingWorldSettings.generateStructures
+                ? glm::vec3(0.28f, 0.56f, 0.30f)
+                : glm::vec3(0.30f, 0.30f, 0.33f),
+              backgroundTile);
+
+      float modeY = rowY + 6.0f * (rowH + rowGap) + 6.0f;
+      addQuad(toggleX,
+              modeY,
+              toggleW,
+              toggleH,
+              pendingWorldSettings.startInventoryMode == 0
+                ? glm::vec3(0.24f, 0.40f, 0.24f)
+                : glm::vec3(0.40f, 0.28f, 0.22f),
+              backgroundTile);
+
+      std::string nameText = pendingWorldName.empty() ? "WORLD" : pendingWorldName;
+      std::string seedText = pendingSeedText.empty() ? "RANDOM" : pendingSeedText;
+      std::string presetText = pendingWorldSettings.preset == WorldPreset::kClassicFlat
+        ? "CLASSIC FLAT"
+        : "MINECRAFT STYLE";
+      std::ostringstream caveText;
+      caveText.setf(std::ios::fixed);
+      caveText.precision(2);
+      caveText << pendingWorldSettings.caveDensity;
+      std::ostringstream ravineText;
+      ravineText.setf(std::ios::fixed);
+      ravineText.precision(2);
+      ravineText << pendingWorldSettings.ravineFrequency;
+      std::string structuresText = pendingWorldSettings.generateStructures ? "ON" : "OFF";
+      std::string invText = pendingWorldSettings.startInventoryMode == 0 ? "EMPTY" : "CREATIVE TEST";
+
+      std::array<std::string, 9> labels = {
+        "WORLD NAME " + nameText,
+        "SEED " + seedText,
+        "PRESET " + presetText,
+        "CAVE DENSITY " + caveText.str(),
+        "RAVINE FREQ " + ravineText.str(),
+        "STRUCTURES " + structuresText,
+        "START INVENTORY " + invText,
+        "CREATE WORLD",
+        "CANCEL"
+      };
+
+      for (int i = 0; i < kRowCount; ++i) {
+        float px = (i >= 7) ? 2.9f : 2.45f;
+        drawText(labels[static_cast<size_t>(i)],
+                 rowX + 14.0f,
+                 rowY + static_cast<float>(i) * (rowH + rowGap) + 11.0f,
+                 px,
+                 glm::vec3(0.94f, 0.95f, 0.98f),
+                 false);
+      }
+    }
+
+    return;
+  }
 
   auto drawDigit = [&](int digit, float x, float y, float pixel,
                        const glm::vec3& color, int tile) {
@@ -834,7 +1863,7 @@ void App::rebuildUiMesh() {
     for (int row = 0; row < kDigitHeight; ++row) {
       uint8_t mask = kDigitMap[digit][row];
       for (int col = 0; col < kDigitWidth; ++col) {
-        int bit = kDigitWidth - 1 - col;
+        int bit = col;
         if (mask & (1u << bit)) {
           addQuad(x + static_cast<float>(col) * pixel,
                   y + static_cast<float>(row) * pixel,
@@ -862,7 +1891,7 @@ void App::rebuildUiMesh() {
     float startY = bottom - digitH;
 
     for (size_t i = 0; i < text.size(); ++i) {
-      int digit = text[i] - '0';
+      int digit = text[text.size() - 1 - i] - '0';
       drawDigit(digit,
                 startX + static_cast<float>(i) * (digitW + spacing),
                 startY,
@@ -1428,7 +2457,10 @@ App::RaycastHit App::raycast(const glm::vec3& origin,
 }
 
 void App::cleanup() {
-  world.save("world.bin");
+  if (!currentWorldPath.empty()) {
+    world.save(currentWorldPath);
+  }
+  saveSettings();
   vk.cleanup();
 
   if (window) {
@@ -1461,6 +2493,13 @@ void App::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
     return;
   }
 
+  if (app->screenState != ScreenState::kPlaying) {
+    app->lastMouseX = static_cast<float>(xpos);
+    app->lastMouseY = static_cast<float>(ypos);
+    app->firstMouse = true;
+    return;
+  }
+
   if (app->inventoryOpen) {
     glm::vec2 fb = app->cursorToFramebuffer(xpos, ypos);
     app->cursorFbX = fb.x;
@@ -1484,9 +2523,8 @@ void App::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
   app->lastMouseX = static_cast<float>(xpos);
   app->lastMouseY = static_cast<float>(ypos);
 
-  const float sensitivity = 0.1f;
-  xoffset *= sensitivity;
-  yoffset *= sensitivity;
+  xoffset *= app->appliedSettings.sensitivity;
+  yoffset *= app->appliedSettings.sensitivity;
 
   app->yaw += xoffset;
   app->pitch += yoffset;
@@ -1497,4 +2535,12 @@ void App::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
   if (app->pitch < -89.0f) {
     app->pitch = -89.0f;
   }
+}
+
+void App::charCallback(GLFWwindow* window, unsigned int codepoint) {
+  auto* app = reinterpret_cast<App*>(glfwGetWindowUserPointer(window));
+  if (!app) {
+    return;
+  }
+  app->onCharInput(codepoint);
 }

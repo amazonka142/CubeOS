@@ -46,6 +46,13 @@ float fbm(vec2 p) {
 }
 
 void main() {
+  if (vColor.g < -0.5 && vColor.r >= 0.0) {
+    // Texture-free UI primitive path (text glyphs/markers).
+    float green = clamp(-vColor.g - 1.0, 0.0, 1.0);
+    outColor = vec4(clamp(vColor.r, 0.0, 1.0), green, clamp(vColor.b, 0.0, 1.0), 1.0);
+    return;
+  }
+
   if (vColor.r < -0.5) {
     if (ubo.cameraData.w > 0.5) {
       outColor = vec4(0.0);

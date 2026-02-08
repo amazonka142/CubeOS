@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <glm/glm.hpp>
 #include <array>
+#include <string>
 #include <vector>
 
 struct GLFWwindow;
@@ -20,10 +21,33 @@ public:
   void run();
 
 private:
+  struct UserSettings {
+    int graphicsQuality = 1;   // 0=Low, 1=Medium, 2=High
+    float sensitivity = 0.10f; // mouse look sensitivity
+    int audioVolume = 80;      // placeholder value, reserved for audio system
+  };
+
+  enum class ScreenState : uint8_t {
+    kMainMenu = 0,
+    kSettings = 1,
+    kCreateWorld = 2,
+    kPlaying = 3
+  };
+
   void refreshSelectedBlock();
   bool addToInventory(uint8_t type, uint16_t count);
   void initWindow();
   void initVulkan();
+  void setupGameplaySession();
+  void setScreenState(ScreenState state);
+  void processMenuInput(float deltaTime);
+  void beginCreateWorldFlow();
+  void createWorldFromMenu();
+  void updateWindowTitle();
+  void onCharInput(unsigned int codepoint);
+  void loadSettings();
+  bool saveSettings() const;
+  void applySettings(bool refreshWorldStreaming);
   void mainLoop();
   void processInput(float deltaTime);
   void updatePlayer(float deltaTime);
@@ -49,6 +73,7 @@ private:
   void cleanup();
   static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
   static void mouseCallback(GLFWwindow* window, double xpos, double ypos);
+  static void charCallback(GLFWwindow* window, unsigned int codepoint);
 
   GLFWwindow* window = nullptr;
   int width = 1280;
@@ -69,6 +94,7 @@ private:
   uint32_t skyIndexCount = 0;
   uint32_t worldIndexCount = 0;
   uint32_t uiIndexCount = 0;
+  bool vkReady = false;
 
   glm::vec3 playerPos{8.0f, 30.0f, 8.0f};
   glm::vec3 playerVel{0.0f};
@@ -95,6 +121,26 @@ private:
   bool uiDirty = true;
   float waterSimAccumulator = 0.0f;
   float waterSimBoostTimer = 0.0f;
+  ScreenState screenState = ScreenState::kMainMenu;
+  int mainMenuSelection = 0;
+  int settingsSelection = 0;
+  int createWorldSelection = 0;
+  std::string pendingWorldName = "World";
+  std::string pendingSeedText{};
+  std::string currentWorldPath = "world.bin";
+  WorldGenSettings pendingWorldSettings{};
+  bool menuUpDown = false;
+  bool menuDownDown = false;
+  bool menuLeftDown = false;
+  bool menuRightDown = false;
+  bool menuEnterDown = false;
+  bool menuBackspaceDown = false;
+  bool menuEscDown = false;
+  UserSettings appliedSettings{};
+  UserSettings pendingSettings{};
+  bool settingsDirty = false;
+  int activeChunkViewRadius = 6;
+  float menuIntro = 1.0f;
 
   float yaw = -90.0f;
   float pitch = 0.0f;

@@ -126,11 +126,11 @@ if (APPLE)
   target_compile_definitions(cubeos_voxel PRIVATE VK_USE_PLATFORM_MACOS_MVK)
   set_target_properties(cubeos_voxel PROPERTIES
     MACOSX_BUNDLE TRUE
-    OUTPUT_NAME "CubeOS v0.1.2 Beta"
-    MACOSX_BUNDLE_BUNDLE_NAME "CubeOS v0.1.2 Beta"
+    OUTPUT_NAME "CubeOS v0.2.0 Beta"
+    MACOSX_BUNDLE_BUNDLE_NAME "CubeOS v0.2.0 Beta"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.cubeos.beta"
-    MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.2"
-    MACOSX_BUNDLE_BUNDLE_VERSION "0.1.2"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "0.2.0"
+    MACOSX_BUNDLE_BUNDLE_VERSION "0.2.0"
   )
 
   set(CUBEOS_MACOS_VULKAN_LIB "/usr/local/lib/libvulkan.1.dylib" CACHE FILEPATH
@@ -178,9 +178,9 @@ if (APPLE)
 
   set(CPACK_PACKAGE_NAME "CubeOS")
   set(CPACK_PACKAGE_VENDOR "CubeOS")
-  set(CPACK_PACKAGE_VERSION "0.1.2")
-  set(CPACK_PACKAGE_FILE_NAME "CubeOS-v0.1.2-Beta-macOS")
+  set(CPACK_PACKAGE_VERSION "0.2.0")
+  set(CPACK_PACKAGE_FILE_NAME "CubeOS-v0.2.0-Beta-macOS")
   set(CPACK_GENERATOR "DragNDrop")
-  set(CPACK_DMG_VOLUME_NAME "CubeOS v0.1.2 Beta")
+  set(CPACK_DMG_VOLUME_NAME "CubeOS v0.2.0 Beta")
   include(CPack)
 endif()

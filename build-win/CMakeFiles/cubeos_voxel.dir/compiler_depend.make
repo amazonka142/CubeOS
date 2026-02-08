@@ -195,6 +195,8 @@ CMakeFiles/cubeos_voxel.dir/src/app.cpp.obj: /Users/macuser/Documents/CubeOS/src
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/char_traits.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/charconv.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/chrono.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/chrono_io.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/codecvt.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/concept_check.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/cpp_type_traits.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/cxxabi_forced.h \
@@ -205,6 +207,12 @@ CMakeFiles/cubeos_voxel.dir/src/app.cpp.obj: /Users/macuser/Documents/CubeOS/src
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/exception.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/exception_defines.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/exception_ptr.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/formatfwd.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fs_dir.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fs_fwd.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fs_ops.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fs_path.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fstream.tcc \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/functexcept.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/functional_hash.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/hash_bytes.h \
@@ -212,25 +220,32 @@ CMakeFiles/cubeos_voxel.dir/src/app.cpp.obj: /Users/macuser/Documents/CubeOS/src
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/hashtable_policy.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/invoke.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ios_base.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/istream.tcc \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/iterator_concepts.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/locale_classes.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/locale_classes.tcc \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/locale_conv.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/locale_facets.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/locale_facets.tcc \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/locale_facets_nonio.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/locale_facets_nonio.tcc \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/localefwd.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/max_size_type.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/memory_resource.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/memoryfwd.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/monostate.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/move.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/nested_exception.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/new_allocator.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/node_handle.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ostream.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ostream.tcc \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ostream_insert.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/parse_numbers.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/postypes.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/predefined_ops.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ptr_traits.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/quoted_string.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/range_access.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ranges_algo.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ranges_algobase.h \
@@ -243,6 +258,7 @@ CMakeFiles/cubeos_voxel.dir/src/app.cpp.obj: /Users/macuser/Documents/CubeOS/src
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/shared_ptr.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/shared_ptr_base.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/specfun.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/sstream.tcc \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/std_abs.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/std_mutex.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/std_thread.h \
@@ -266,6 +282,8 @@ CMakeFiles/cubeos_voxel.dir/src/app.cpp.obj: /Users/macuser/Documents/CubeOS/src
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/string_view.tcc \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/stringfwd.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/this_thread_sleep.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/unicode-data.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/unicode.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/uniform_int_dist.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/unique_lock.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/unique_ptr.h \
@@ -279,9 +297,12 @@ CMakeFiles/cubeos_voxel.dir/src/app.cpp.obj: /Users/macuser/Documents/CubeOS/src
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/cctype \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/cerrno \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/cfloat \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/charconv \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/chrono \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/climits \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/clocale \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/cmath \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/codecvt \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/compare \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/concepts \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/condition_variable \
@@ -303,20 +324,29 @@ CMakeFiles/cubeos_voxel.dir/src/app.cpp.obj: /Users/macuser/Documents/CubeOS/src
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ext/numeric_traits.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ext/string_conversions.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ext/type_traits.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/filesystem \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/format \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/fstream \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/initializer_list \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/iomanip \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ios \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/iosfwd \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/istream \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/limits \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/locale \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/mutex \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/new \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/numbers \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/optional \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ostream \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/pstl/execution_defs.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/pstl/glue_algorithm_defs.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/pstl/pstl_config.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/queue \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ratio \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/semaphore \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/span \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/sstream \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/stdexcept \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/stdlib.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/stop_token \
@@ -343,8 +373,10 @@ CMakeFiles/cubeos_voxel.dir/src/app.cpp.obj: /Users/macuser/Documents/CubeOS/src
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/unordered_map \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/vector \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/atomic_word.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/basic_file.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++allocator.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++config.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++io.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++locale.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/cpu_defines.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/ctype_base.h \
@@ -352,7 +384,9 @@ CMakeFiles/cubeos_voxel.dir/src/app.cpp.obj: /Users/macuser/Documents/CubeOS/src
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/error_constants.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/gthr-default.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/gthr.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/messages_members.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/os_defines.h \
+  /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/time_members.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/corecrt.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/corecrt_startup.h \
   /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/corecrt_stdio_config.h \
@@ -1928,47 +1962,13 @@ _deps/glm-src/glm/detail/_noise.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/concurrencysal.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++io.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/basic_file.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/sstream:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/span:
-
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/set:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/locale:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/iomanip:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/format:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/unicode-data.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/datetimeapi.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/stl_tree.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/stl_set.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/sstream.tcc:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/monostate.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/locale_facets_nonio.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fstream.tcc:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/formatfwd.h:
-
-_deps/glm-src/glm/gtc/noise.inl:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/codecvt.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/threadpoolapiset.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/chrono_io.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/basetsd.h:
 
@@ -1983,10 +1983,6 @@ _deps/glm-src/glm/gtc/noise.inl:
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xsaveoptintrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xsaveintrin.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/fstream:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xsavecintrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xopintrin.h:
 
@@ -2046,8 +2042,6 @@ _deps/glm-src/glm/gtc/noise.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/lwpintrin.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/keylockerintrin.h:
-
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/ia32intrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/hresetintrin.h:
@@ -2077,10 +2071,6 @@ _deps/glm-src/glm/gtc/noise.inl:
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avxifmaintrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avx512vp2intersectvlintrin.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/messages_members.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avx512vnnivlintrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avx512vnniintrin.h:
 
@@ -2150,17 +2140,7 @@ _deps/glm-src/glm/gtc/noise.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/ammintrin.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/time_members.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/adxintrin.h:
-
 /Users/macuser/Documents/CubeOS/src/vk_context.cpp:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/istream:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ostream.tcc:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/istream.tcc:
 
 /Users/macuser/Documents/CubeOS/src/main.cpp:
 
@@ -2170,19 +2150,31 @@ _deps/glm-src/glm/gtc/noise.inl:
 
 /usr/local/include/vulkan/vulkan.h:
 
+/usr/local/include/vulkan/vk_platform.h:
+
+/usr/local/include/vk_video/vulkan_video_codecs_common.h:
+
 /usr/local/include/vk_video/vulkan_video_codec_vp9std_decode.h:
+
+/usr/local/include/vk_video/vulkan_video_codec_h265std_encode.h:
 
 /usr/local/include/vk_video/vulkan_video_codec_h265std_decode.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/streambuf.tcc:
-
-/usr/local/include/vk_video/vulkan_video_codec_h264std_encode.h:
+/usr/local/include/vk_video/vulkan_video_codec_h265std.h:
 
 /usr/local/include/vk_video/vulkan_video_codec_h264std_decode.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/hashtable_policy.h:
+/usr/local/include/vk_video/vulkan_video_codec_h264std.h:
 
-/usr/local/include/vk_video/vulkan_video_codec_av1std_decode.h:
+/usr/local/include/vk_video/vulkan_video_codec_av1std.h:
+
+_deps/glm-src/glm/gtc/noise.hpp:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/wctype.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/wchar.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/vadefs.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/pshpack8.h:
 
@@ -2190,35 +2182,27 @@ _deps/glm-src/glm/gtc/noise.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sys/types.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/_mingw_mac.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sys/timeb.h:
-
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/mwaitxintrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/swprintf.inl:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avx512vpopcntdqintrin.h:
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/stdio.h:
 
-_deps/glm-src/glm/ext/vector_uint3_sized.hpp:
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/stdint.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/stdlib.h:
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/signal.h:
 
-_deps/glm-src/glm/detail/type_half.hpp:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/stddef.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/shared_ptr_base.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ranges_base.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/semaphore.h:
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sec_api/wchar_s.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/tmmintrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/clwbintrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sec_api/sys/timeb_s.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sec_api/stdlib_s.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sec_api/stdio_s.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h:
 
@@ -2256,6 +2240,10 @@ _deps/glm-src/glm/detail/func_integer.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/corecrt.h:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/adxintrin.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/time_members.h:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/error_constants.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/ctype_inline.h:
@@ -2264,6 +2252,8 @@ _deps/glm-src/glm/simd/platform.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++locale.h:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++io.h:
+
 _deps/glm-src/glm/detail/type_vec1.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/c++allocator.h:
@@ -2271,8 +2261,6 @@ _deps/glm-src/glm/detail/type_vec1.inl:
 _deps/glm-src/glm/ext/vector_uint2_sized.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/atomic_word.h:
-
-/usr/local/include/vulkan/vk_platform.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/vector:
 
@@ -2332,7 +2320,9 @@ _deps/glm-src/glm/ext/vector_int2_sized.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/pstl/glue_algorithm_defs.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/stdio.h:
+_deps/glm-src/glm/ext/scalar_constants.hpp:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ostream:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/threadpoollegacyapiset.h:
 
@@ -2348,19 +2338,19 @@ _deps/glm-src/glm/detail/type_vec3.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/numbers:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/locale:
+
 _deps/glm-src/glm/detail/type_vec1.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/pthread.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/iosfwd:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/iomanip:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ext/type_traits.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/virtdisk.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/minwinbase.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ext/string_conversions.h:
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/format:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ext/concurrence.h:
 
@@ -2368,19 +2358,11 @@ _deps/glm-src/glm/ext/matrix_double4x4.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ext/alloc_traits.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/charconv:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/malloc.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/exception:
-
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/cstdlib:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/cstdint:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/concepts:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sec_api/stdlib_s.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/compare:
 
@@ -2391,6 +2373,12 @@ _deps/glm-src/glm/ext/matrix_double4x4.hpp:
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/assert.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/climits:
+
+_deps/glm-src/glm/detail/type_mat2x3.hpp:
+
+_deps/glm-src/glm/detail/type_vec2.hpp:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/chrono:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/deque:
 
@@ -2410,6 +2398,8 @@ _deps/glm-src/glm/ext/matrix_double4x4.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/uniform_int_dist.h:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/unicode-data.h:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/this_thread_sleep.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avx10_2minmaxintrin.h:
@@ -2417,6 +2407,10 @@ _deps/glm-src/glm/ext/matrix_double4x4.hpp:
 _deps/glm-src/glm/ext/matrix_float2x2.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/stringfwd.h:
+
+/usr/local/include/vk_video/vulkan_video_codec_h264std_encode.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/streambuf.tcc:
 
 _deps/glm-src/glm/gtc/constants.inl:
 
@@ -2427,10 +2421,6 @@ _deps/glm-src/glm/gtc/constants.inl:
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/corecrt_stdio_config.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/stl_iterator_base_types.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/new:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/time.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/wnnc.h:
 
@@ -2447,6 +2437,8 @@ _deps/glm-src/glm/ext/matrix_projection.hpp:
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/stl_iterator_base_funcs.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/stl_bvector.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/filesystem:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/stl_algo.h:
 
@@ -2468,6 +2460,10 @@ _deps/glm-src/glm/detail/type_vec3.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ranges_algo.h:
 
+_deps/glm-src/glm/packing.hpp:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/quoted_string.h:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/x86intrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/deque.tcc:
@@ -2482,13 +2478,21 @@ _deps/glm-src/glm/ext/matrix_transform.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/postypes.h:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xsavecintrin.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/fstream:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/parse_numbers.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/malloc.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/exception:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/charconv:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/fxsrintrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ostream_insert.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ostream.h:
 
 _deps/glm-src/glm/detail/qualifier.hpp:
 
@@ -2504,7 +2508,17 @@ _deps/glm-src/glm/detail/qualifier.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/max_size_type.h:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ostream.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/locale_facets_nonio.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/istream.tcc:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/invoke.h:
+
+/usr/local/include/vk_video/vulkan_video_codec_av1std_decode.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/hashtable_policy.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/range_access.h:
 
@@ -2515,6 +2529,30 @@ _deps/glm-src/glm/detail/type_mat3x3.hpp:
 _deps/glm-src/glm/ext/vector_float4.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/hash_bytes.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/sha512intrin.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/_mingw.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/functexcept.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/virtdisk.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/minwinbase.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ext/string_conversions.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fstream.tcc:
+
+_deps/glm-src/glm/detail/type_vec4.hpp:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fs_ops.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/semaphore:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fs_dir.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/formatfwd.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/process.h:
 
@@ -2528,9 +2566,17 @@ _deps/glm-src/glm/ext/vector_float4_precision.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ios:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/stddef.h:
+
+_deps/glm-src/glm/detail/type_half.hpp:
+
 _deps/glm-src/glm/ext/vector_double2.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/enable_special_members.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/threadpoolapiset.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/chrono_io.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/atomic_lockfree_defines.h:
 
@@ -2572,6 +2618,10 @@ _deps/glm-src/glm/ext/matrix_double3x2_precision.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/allocated_ptr.h:
 
+_deps/glm-src/glm/ext/matrix_double3x3.hpp:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fs_path.h:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/alloc_traits.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/stop_token:
@@ -2604,7 +2654,13 @@ _deps/glm-src/glm/ext/vector_float2.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/localefwd.h:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sys/timeb.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/_mingw_mac.h:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/atomic:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/sstream:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avx10_2copyintrin.h:
 
@@ -2626,14 +2682,6 @@ _deps/glm-src/glm/ext/vector_float2.hpp:
 
 _deps/glm-src/glm/detail/type_mat4x2.hpp:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/sha512intrin.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/functexcept.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/_mingw.h:
-
-/usr/local/include/vk_video/vulkan_video_codec_h264std.h:
-
 _deps/glm-src/glm/glm.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/syslimits.h:
@@ -2641,8 +2689,6 @@ _deps/glm-src/glm/glm.hpp:
 _deps/glm-src/glm/ext/scalar_uint_sized.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stddef.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sec_api/stdio_s.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/mm_malloc.h:
 
@@ -2653,6 +2699,8 @@ _deps/glm-src/glm/ext/scalar_uint_sized.hpp:
 /Users/macuser/Documents/CubeOS/src/vk_context.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/debug/assertions.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ostream.tcc:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/vpclmulqdqintrin.h:
 
@@ -2670,6 +2718,10 @@ _deps/glm-src/glm/vec3.hpp:
 
 _deps/glm-src/glm/vec2.hpp:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avx512vnnivlintrin.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/messages_members.h:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/requires_hosted.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/cstddef:
@@ -2686,8 +2738,6 @@ _deps/glm-src/glm/ext/vector_uint4_sized.hpp:
 
 _deps/volk-src/volk.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sec_api/wchar_s.h:
-
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ext/atomicity.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/version.h:
@@ -2700,13 +2750,11 @@ _deps/glm-src/glm/gtc/constants.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/limits:
 
+_deps/glm-src/glm/gtc/noise.inl:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/codecvt.h:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/stl_construct.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ostream:
-
-_deps/glm-src/glm/ext/scalar_constants.hpp:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/stdint.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/cxxabi_init_exception.h:
 
@@ -2717,6 +2765,12 @@ _deps/glm-src/glm/ext/vector_uint4.hpp:
 _deps/glm-src/glm/detail/type_mat2x3.inl:
 
 _deps/glm-src/glm/ext/matrix_float4x2_precision.hpp:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avx512vpopcntdqintrin.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/stdlib.h:
+
+_deps/glm-src/glm/ext/vector_uint3_sized.hpp:
 
 _deps/glm-src/glm/ext/matrix_float3x3.hpp:
 
@@ -2735,6 +2789,8 @@ _deps/glm-src/glm/ext/vector_uint3.hpp:
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/atomic_wait.h:
 
 _deps/glm-src/glm/ext/vector_uint2.hpp:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/x86_64-w64-mingw32/bits/basic_file.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/optional:
 
@@ -2757,6 +2813,12 @@ _deps/glm-src/glm/ext/vector_double4.hpp:
 _deps/glm-src/glm/ext/vector_int2.hpp:
 
 _deps/glm-src/glm/ext/vector_float2_precision.hpp:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/semaphore.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/shared_ptr_base.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/ranges_base.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/amxfp16intrin.h:
 
@@ -2792,6 +2854,8 @@ _deps/glm-src/glm/ext/vector_int3.hpp:
 
 _deps/glm-src/glm/ext/vector_double3_precision.hpp:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/monostate.h:
+
 _deps/glm-src/glm/ext/matrix_transform.inl:
 
 _deps/glm-src/glm/ext/vector_bool4_precision.hpp:
@@ -2810,11 +2874,11 @@ _deps/glm-src/glm/detail/func_trigonometric.inl:
 
 _deps/glm-src/glm/ext/matrix_double2x2.hpp:
 
-_deps/glm-src/glm/detail/type_vec4.hpp:
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/time.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/new:
 
 _deps/glm-src/glm/ext/vector_float3_precision.hpp:
-
-/usr/local/include/vk_video/vulkan_video_codec_h265std_encode.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/concept_check.h:
 
@@ -2823,12 +2887,6 @@ _deps/glm-src/glm/ext/vector_float3_precision.hpp:
 _deps/glm-src/glm/detail/type_mat4x3.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/cwctype:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/chrono:
-
-_deps/glm-src/glm/detail/type_mat2x3.hpp:
-
-_deps/glm-src/glm/detail/type_vec2.hpp:
 
 _deps/glm-src/glm/detail/type_mat2x2.hpp:
 
@@ -2855,6 +2913,10 @@ _deps/glfw-src/include/GLFW/glfw3.h:
 _deps/glm-src/glm/mat2x4.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bit:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/keylockerintrin.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/fs_fwd.h:
 
 /Users/macuser/Documents/CubeOS/src/mesh.hpp:
 
@@ -2892,15 +2954,11 @@ _deps/glm-src/glm/ext/vector_bool4.hpp:
 
 _deps/glm-src/glm/ext/vector_bool3.hpp:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/semaphore:
-
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/basic_string.tcc:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/basic_ios.h:
 
 _deps/glm-src/glm/mat4x2.hpp:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/wchar.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/sal.h:
 
@@ -2909,6 +2967,8 @@ _deps/glm-src/glm/mat4x2.hpp:
 _deps/glm-src/glm/mat2x3.hpp:
 
 _deps/glm-src/glm/detail/func_matrix.inl:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/istream:
 
 _deps/glm-src/glm/detail/func_vector_relational.inl:
 
@@ -2922,15 +2982,7 @@ _deps/glm-src/glm/detail/func_vector_relational.inl:
 
 _deps/glm-src/glm/exponential.hpp:
 
-_deps/glm-src/glm/ext/matrix_float2x3.hpp:
-
-/usr/local/include/vk_video/vulkan_video_codec_vp9std.h:
-
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/ext/aligned_buffer.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/quoted_string.h:
-
-_deps/glm-src/glm/packing.hpp:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/amxtileintrin.h:
 
@@ -2961,14 +3013,6 @@ _deps/glm-src/glm/ext/vector_double2_precision.hpp:
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/crtdefs.h:
 
 _deps/glm-src/glm/ext/matrix_float4x2.hpp:
-
-_deps/glm-src/glm/gtc/noise.hpp:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/wctype.h:
-
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/securitybaseapi.h:
-
-_deps/glm-src/glm/detail/type_mat3x4.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/uses_allocator_args.h:
 
@@ -3002,8 +3046,6 @@ _deps/glm-src/glm/detail/compute_common.hpp:
 
 _deps/glm-src/glm/ext/matrix_float2x4.hpp:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/vadefs.h:
-
 /Users/macuser/Documents/CubeOS/src/app.cpp:
 
 _deps/glm-src/glm/ext/matrix_double3x4.hpp:
@@ -3036,8 +3078,6 @@ _deps/glm-src/glm/detail/type_mat3x2.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/stl_algobase.h:
 
-_deps/glm-src/glm/ext/matrix_double3x3.hpp:
-
 _deps/glm-src/glm/detail/func_packing.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/clzerointrin.h:
@@ -3052,13 +3092,9 @@ _deps/glm-src/glm/ext/matrix_double4x3.hpp:
 
 _deps/glm-src/glm/ext/matrix_float4x4_precision.hpp:
 
-/usr/local/include/vk_video/vulkan_video_codec_h265std.h:
-
 _deps/glm-src/glm/ext/matrix_double3x4_precision.hpp:
 
 _deps/glm-src/glm/ext/vector_bool3_precision.hpp:
-
-/usr/local/include/vk_video/vulkan_video_codecs_common.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/debug/debug.h:
 
@@ -3066,7 +3102,9 @@ _deps/glm-src/glm/detail/func_common.inl:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/pthread_compat.h:
 
-/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/signal.h:
+/usr/local/include/vk_video/vulkan_video_codec_vp9std.h:
+
+_deps/glm-src/glm/ext/matrix_float2x3.hpp:
 
 _deps/glm-src/glm/integer.hpp:
 
@@ -3092,6 +3130,12 @@ _deps/glm-src/glm/ext/matrix_double2x2_precision.hpp:
 
 _deps/glm-src/glm/detail/type_mat3x3.inl:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/securitybaseapi.h:
+
+_deps/glm-src/glm/detail/type_mat3x4.inl:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/sstream.tcc:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/limits.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/bits/unordered_map.h:
@@ -3100,15 +3144,17 @@ _deps/glm-src/glm/detail/type_mat3x3.inl:
 
 _deps/glm-src/glm/detail/type_mat4x4.inl:
 
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/codecvt:
+
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/bemapiset.h:
 
 _deps/glm-src/glm/detail/type_mat2x4.inl:
 
-/usr/local/include/vk_video/vulkan_video_codec_av1std.h:
-
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/prfchiintrin.h:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/locale.h:
+
+/opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/x86_64-w64-mingw32/include/c++/15.2.0/span:
 
 /opt/homebrew/Cellar/mingw-w64/13.0.0_2/toolchain-x86_64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/vaesintrin.h:
 

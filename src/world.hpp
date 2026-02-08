@@ -14,6 +14,19 @@
 constexpr int kChunkSize = 16;
 constexpr int kChunkHeight = 128;
 
+enum class WorldPreset : uint8_t {
+  kMinecraftStyle = 0,
+  kClassicFlat = 1
+};
+
+struct WorldGenSettings {
+  WorldPreset preset = WorldPreset::kMinecraftStyle;
+  bool generateStructures = false;
+  float caveDensity = 1.0f;
+  float ravineFrequency = 1.0f;
+  uint8_t startInventoryMode = 0; // 0=Empty, 1=CreativeTest (reserved for v0.2.1+)
+};
+
 enum BlockType : uint8_t {
   kAir = 0,
   kGrass = 1,
@@ -83,6 +96,10 @@ public:
   bool inBounds(int x, int y, int z) const;
   uint8_t getBlock(int x, int y, int z) const;
   void setBlock(int x, int y, int z, uint8_t type);
+  void setSeed(int newSeed) { seed = newSeed; }
+  int getSeed() const { return seed; }
+  void setGenerationSettings(const WorldGenSettings& settings) { genSettings = settings; }
+  const WorldGenSettings& getGenerationSettings() const { return genSettings; }
 
   int height() const { return kChunkHeight; }
   int chunkCount() const { return static_cast<int>(chunks.size()); }
@@ -108,6 +125,7 @@ private:
     int cx = 0;
     int cz = 0;
     int seed = 1337;
+    WorldGenSettings settings{};
     uint32_t epoch = 0;
     uint64_t key = 0;
   };
@@ -140,6 +158,7 @@ private:
   int initialChunksZ;
   int initialRadius = 1;
   int seed = 1337;
+  WorldGenSettings genSettings{};
   bool meshDirty = true;
   BreakOverlay breakOverlay{};
   std::unordered_map<uint64_t, Chunk> chunks;
