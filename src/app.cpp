@@ -1439,7 +1439,8 @@ void App::rebuildUiMesh() {
 
   auto toNdc = [&](float px, float py) -> glm::vec2 {
     float x = (px / static_cast<float>(width)) * 2.0f - 1.0f;
-    float y = 1.0f - (py / static_cast<float>(height)) * 2.0f;
+    // Vulkan NDC maps +Y toward the bottom with a positive viewport height.
+    float y = (py / static_cast<float>(height)) * 2.0f - 1.0f;
     return {x, y};
   };
 
