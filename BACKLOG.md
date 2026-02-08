@@ -67,43 +67,51 @@
   - Scope: title screen with `Start`, `Settings`, `Quit` and input focus handling.
   - Depends on: none.
   - Acceptance: game opens to menu and can exit via menu.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-221` Create world flow.
   - Scope: world creation screen with world name + seed + confirm/cancel.
   - Depends on: `CUBE-220`.
   - Acceptance: player can create and enter a new world from UI.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-222` World preset support.
   - Scope: support at least `Classic Flat` and `Minecraft-style` presets.
   - Depends on: `CUBE-221`.
   - Acceptance: selected preset changes generated terrain profile.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-223` Persist world settings metadata.
   - Scope: save/load world creation options (preset + generation settings).
   - Depends on: `CUBE-221`, `CUBE-222`.
   - Acceptance: reopening world keeps selected settings.
+  - Status: `Done` (implemented in current build).
 
 ### P2
 - `CUBE-224` World settings panel v1.
   - Scope: cave density slider, ravine frequency slider, structures toggle.
   - Depends on: `CUBE-222`.
   - Acceptance: settings affect new world generation.
+  - Status: `Partial` (cave density and ravine frequency affect generation; structures toggle is UI + persistence only for now).
 
 - `CUBE-225` Main menu settings screen.
   - Scope: graphics quality, sensitivity, audio placeholders, save/apply/reset.
   - Depends on: `CUBE-220`.
   - Acceptance: settings UI works and values persist.
+  - Status: `Done` (implemented in current build).
 
 - `CUBE-226` Start inventory mode option.
   - Scope: `Empty` vs `Creative test` start mode in world creation.
   - Depends on: `CUBE-221`.
   - Acceptance: spawn inventory matches selected mode.
+  - Status: `Done` (implemented in current build).
 
 ### P3
 - `CUBE-227` Menu polish and transitions.
   - Scope: subtle animations, hover/focus feedback, keyboard/controller navigation prep.
   - Depends on: `CUBE-220`, `CUBE-225`.
   - Acceptance: menu interaction is responsive and visually consistent.
+  - Status: `Partial` (animations and focus feedback are present; controller navigation prep remains open).
 
 ## v0.2.3 Issues (Coins + Upgrades)
 
