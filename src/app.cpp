@@ -653,12 +653,12 @@ void App::processMenuInput(float deltaTime) {
 
   if (screenState == ScreenState::kMainMenu) {
     if (upPressed && !menuUpDown) {
-      mainMenuSelection = (mainMenuSelection + 2) % 3;
+      mainMenuSelection = std::max(0, mainMenuSelection - 1);
       updateWindowTitle();
       uiDirty = true;
     }
     if (downPressed && !menuDownDown) {
-      mainMenuSelection = (mainMenuSelection + 1) % 3;
+      mainMenuSelection = std::min(2, mainMenuSelection + 1);
       updateWindowTitle();
       uiDirty = true;
     }
@@ -680,11 +680,11 @@ void App::processMenuInput(float deltaTime) {
   } else if (screenState == ScreenState::kSettings) {
     constexpr int kSettingsFieldCount = 6;
     if (upPressed && !menuUpDown) {
-      settingsSelection = (settingsSelection + (kSettingsFieldCount - 1)) % kSettingsFieldCount;
+      settingsSelection = std::max(0, settingsSelection - 1);
       uiDirty = true;
     }
     if (downPressed && !menuDownDown) {
-      settingsSelection = (settingsSelection + 1) % kSettingsFieldCount;
+      settingsSelection = std::min(kSettingsFieldCount - 1, settingsSelection + 1);
       uiDirty = true;
     }
     if ((leftPressed && !menuLeftDown) || (rightPressed && !menuRightDown)) {
@@ -715,12 +715,12 @@ void App::processMenuInput(float deltaTime) {
     constexpr int kCreateFieldCount = 9;
 
     if (upPressed && !menuUpDown) {
-      createWorldSelection = (createWorldSelection + (kCreateFieldCount - 1)) % kCreateFieldCount;
+      createWorldSelection = std::max(0, createWorldSelection - 1);
       updateWindowTitle();
       uiDirty = true;
     }
     if (downPressed && !menuDownDown) {
-      createWorldSelection = (createWorldSelection + 1) % kCreateFieldCount;
+      createWorldSelection = std::min(kCreateFieldCount - 1, createWorldSelection + 1);
       updateWindowTitle();
       uiDirty = true;
     }
@@ -1552,8 +1552,7 @@ void App::rebuildUiMesh() {
       x -= measureTextWidth(text, pixel) * 0.5f;
     }
 
-    for (auto it = text.rbegin(); it != text.rend(); ++it) {
-      char raw = *it;
+    for (char raw : text) {
       char c = static_cast<char>(std::toupper(static_cast<unsigned char>(raw)));
       if (c == ' ') {
         x += pixel * 2.0f;
@@ -1594,7 +1593,7 @@ void App::rebuildUiMesh() {
       for (int row = 0; row < kGlyphHeight; ++row) {
         uint8_t bits = glyph[row];
         for (int col = 0; col < kGlyphWidth; ++col) {
-          int bit = col;
+          int bit = kGlyphWidth - 1 - col;
           if ((bits & (1u << bit)) == 0) {
             continue;
           }
@@ -1863,7 +1862,7 @@ void App::rebuildUiMesh() {
     for (int row = 0; row < kDigitHeight; ++row) {
       uint8_t mask = kDigitMap[digit][row];
       for (int col = 0; col < kDigitWidth; ++col) {
-        int bit = col;
+        int bit = kDigitWidth - 1 - col;
         if (mask & (1u << bit)) {
           addQuad(x + static_cast<float>(col) * pixel,
                   y + static_cast<float>(row) * pixel,
@@ -1891,7 +1890,7 @@ void App::rebuildUiMesh() {
     float startY = bottom - digitH;
 
     for (size_t i = 0; i < text.size(); ++i) {
-      int digit = text[text.size() - 1 - i] - '0';
+      int digit = text[i] - '0';
       drawDigit(digit,
                 startX + static_cast<float>(i) * (digitW + spacing),
                 startY,
