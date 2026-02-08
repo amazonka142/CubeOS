@@ -311,20 +311,27 @@ void App::mainLoop() {
       updatePlayer(deltaTime);
     }
     updateStreaming();
+    waterSimBoostTimer = std::max(0.0f, waterSimBoostTimer - deltaTime);
     waterSimAccumulator += deltaTime;
-    if (waterSimAccumulator > 0.5f) {
-      waterSimAccumulator = 0.5f;
+    if (waterSimAccumulator > 0.6f) {
+      waterSimAccumulator = 0.6f;
     }
-    while (waterSimAccumulator >= 0.16f) {
+    while (waterSimAccumulator >= 0.24f) {
       int px = static_cast<int>(std::floor(playerPos.x));
       int pz = static_cast<int>(std::floor(playerPos.z));
       bool nearWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.65f, 0.0f));
-      int simRadius = nearWater ? 30 : 42;
-      int waterUpdates = nearWater ? 72 : 120;
-      int fallingUpdates = nearWater ? 56 : 96;
-      world.simulateWater(px, pz, simRadius, waterUpdates);
-      world.simulateFallingBlocks(px, pz, simRadius, fallingUpdates);
-      waterSimAccumulator -= 0.16f;
+      bool highActivity = waterSimBoostTimer > 0.0f;
+
+      // Keep background water work very small to avoid frame drops in ocean areas.
+      if (highActivity || nearWater) {
+        int simRadius = highActivity ? 20 : 12;
+        int waterUpdates = highActivity ? 52 : 8;
+        int fallingUpdates = highActivity ? 44 : 10;
+        world.simulateWater(px, pz, simRadius, waterUpdates);
+        world.simulateFallingBlocks(px, pz, simRadius, fallingUpdates);
+      }
+
+      waterSimAccumulator -= 0.24f;
     }
 
     bool worldChanged = world.consumeMeshDirty();
@@ -506,6 +513,7 @@ void App::processInput(float deltaTime) {
           uint8_t removed = world.getBlock(blockPos.x, blockPos.y, blockPos.z);
           if (removed != kAir && !isWaterBlock(removed)) {
             world.setBlock(blockPos.x, blockPos.y, blockPos.z, kAir);
+            waterSimBoostTimer = std::max(waterSimBoostTimer, 2.0f);
             addToInventory(removed, 1);
             refreshSelectedBlock();
             uiDirty = true;
@@ -640,6 +648,7 @@ void App::processInput(float deltaTime) {
         ItemStack& stack = hotbar[static_cast<size_t>(selectedSlot)];
         if (stack.count > 0 && stack.type != kAir) {
           world.setBlock(target.x, target.y, target.z, stack.type);
+          waterSimBoostTimer = std::max(waterSimBoostTimer, 2.0f);
           stack.count -= 1;
           if (stack.count == 0) {
             stack.type = kAir;

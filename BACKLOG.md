@@ -60,6 +60,96 @@
   - Depends on: `CUBE-203`..`CUBE-208`.
   - Acceptance: no extreme barren or overfilled worlds in smoke tests.
 
+## v0.2.0-v0.2.2 Issues (Main Menu + World Creation)
+
+### P1
+- `CUBE-220` Main menu shell.
+  - Scope: title screen with `Start`, `Settings`, `Quit` and input focus handling.
+  - Depends on: none.
+  - Acceptance: game opens to menu and can exit via menu.
+
+- `CUBE-221` Create world flow.
+  - Scope: world creation screen with world name + seed + confirm/cancel.
+  - Depends on: `CUBE-220`.
+  - Acceptance: player can create and enter a new world from UI.
+
+- `CUBE-222` World preset support.
+  - Scope: support at least `Classic Flat` and `Minecraft-style` presets.
+  - Depends on: `CUBE-221`.
+  - Acceptance: selected preset changes generated terrain profile.
+
+- `CUBE-223` Persist world settings metadata.
+  - Scope: save/load world creation options (preset + generation settings).
+  - Depends on: `CUBE-221`, `CUBE-222`.
+  - Acceptance: reopening world keeps selected settings.
+
+### P2
+- `CUBE-224` World settings panel v1.
+  - Scope: cave density slider, ravine frequency slider, structures toggle.
+  - Depends on: `CUBE-222`.
+  - Acceptance: settings affect new world generation.
+
+- `CUBE-225` Main menu settings screen.
+  - Scope: graphics quality, sensitivity, audio placeholders, save/apply/reset.
+  - Depends on: `CUBE-220`.
+  - Acceptance: settings UI works and values persist.
+
+- `CUBE-226` Start inventory mode option.
+  - Scope: `Empty` vs `Creative test` start mode in world creation.
+  - Depends on: `CUBE-221`.
+  - Acceptance: spawn inventory matches selected mode.
+
+### P3
+- `CUBE-227` Menu polish and transitions.
+  - Scope: subtle animations, hover/focus feedback, keyboard/controller navigation prep.
+  - Depends on: `CUBE-220`, `CUBE-225`.
+  - Acceptance: menu interaction is responsive and visually consistent.
+
+## v0.2.3 Issues (Coins + Upgrades)
+
+### P1
+- `CUBE-230` Coin entity + pickup.
+  - Scope: add world coin objects, collision pickup, and HUD coin counter.
+  - Depends on: `CUBE-220`.
+  - Acceptance: coins can be collected and counter increases in session.
+
+- `CUBE-231` Persistent coin balance.
+  - Scope: save/load coin balance with world/profile data.
+  - Depends on: `CUBE-230`.
+  - Acceptance: coin balance persists after restart.
+
+- `CUBE-232` Main menu upgrades screen.
+  - Scope: add `Upgrades` button and upgrade list UI in main menu flow.
+  - Depends on: `CUBE-220`.
+  - Acceptance: player can open upgrades menu from title screen.
+
+- `CUBE-233` Underwater duration upgrade.
+  - Scope: implement level-based upgrade that increases underwater time.
+  - Depends on: `CUBE-231`, `CUBE-232`.
+  - Acceptance: purchased upgrade clearly extends underwater survivability.
+
+### P2
+- `CUBE-234` Upgrade economy rules.
+  - Scope: price curve, max levels, and insufficient-funds handling.
+  - Depends on: `CUBE-232`.
+  - Acceptance: buying logic blocks invalid purchases and updates UI state.
+
+- `CUBE-235` Coin spawn distribution.
+  - Scope: scatter coins in traversable world regions with anti-farm cooldown.
+  - Depends on: `CUBE-230`.
+  - Acceptance: coins are discoverable but not infinitely farmable at spawn.
+
+- `CUBE-236` Upgrade persistence model.
+  - Scope: persist purchased upgrade levels and apply on world load.
+  - Depends on: `CUBE-233`, `CUBE-234`.
+  - Acceptance: upgrades remain purchased and active after relaunch.
+
+### P3
+- `CUBE-237` Progression balance pass.
+  - Scope: tune coin rates and upgrade costs for first 30-60 minutes.
+  - Depends on: `CUBE-230`..`CUBE-236`.
+  - Acceptance: progression is neither grindy nor trivial in playtests.
+
 ## v0.3 Issues
 
 ### P1
@@ -129,4 +219,3 @@
   - Scope: create repeatable smoke tests for worldgen + inventory + mining loop.
   - Depends on: v0.2-v0.4 core issues.
   - Acceptance: checklist runs clean before each release.
-

@@ -19,6 +19,50 @@ Definition of done:
 - New world visibly includes mountains, caves, canyons, trees, water and ores.
 - New game starts with empty inventory and empty hotbar.
 
+## v0.2.0-v0.2.2 - Main Menu & World Setup
+- Main menu:
+  - Add title screen with `Start`, `Settings`, `Quit`.
+  - Add background scene and basic UI transitions.
+- Start flow:
+  - Add `Create World` screen before entering game.
+  - World name input and seed input.
+- World presets:
+  - `Classic Flat` (current flat-style preset).
+  - `Minecraft-style` (varied terrain with mountains/valleys/ravines).
+- World settings (v0.2 scope):
+  - Preset selection.
+  - Generate structures toggle (prepared for future).
+  - Cave density slider.
+  - Ravine frequency slider.
+  - Starting inventory mode (`Empty` / `Creative test`).
+- Save settings:
+  - Store selected preset and generation settings in world metadata.
+  - Use settings when generating new chunks for that world.
+
+Definition of done:
+- Player enters the game only through main menu/create-world flow.
+- Player can create worlds with at least `Classic Flat` and `Minecraft-style` presets.
+- Chosen settings are saved and restored per world.
+
+## v0.2.3 - Coins & Upgrade Progression
+- Coin gameplay loop:
+  - Spawn collectible coins across generated world areas.
+  - Add pickup feedback (sound/UI counter) and persistent coin balance.
+  - Prevent immediate respawn farming around player spawn.
+- Main menu upgrades:
+  - Add `Upgrades` screen in main menu.
+  - Spend coins on character upgrades.
+  - First upgrade set: underwater hold-breath duration.
+- Upgrade system:
+  - Define upgrade levels, price curve, and max level caps.
+  - Save/load purchased upgrades per world profile.
+- Balance pass:
+  - Tune coin spawn density and upgrade prices for early progression.
+
+Definition of done:
+- Player can collect coins in world and keep balance between sessions.
+- Player can buy at least one upgrade in main menu and feel effect in gameplay.
+
 ## v0.3 - Tools & Mining Loop
 - Add tools:
   - Wooden, stone and iron pickaxe.

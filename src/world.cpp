@@ -87,32 +87,70 @@ std::vector<uint8_t> generateChunkBlocks(int cx, int cz, int seed) {
   std::vector<uint8_t> blocks(static_cast<size_t>(kChunkSize * kChunkSize * kChunkHeight), kAir);
   int baseX = cx * kChunkSize;
   int baseZ = cz * kChunkSize;
-  constexpr int kSeaLevel = 36;
+  constexpr int kSeaLevel = 32;
 
   for (int lz = 0; lz < kChunkSize; ++lz) {
     for (int lx = 0; lx < kChunkSize; ++lx) {
       int worldX = baseX + lx;
       int worldZ = baseZ + lz;
 
-      float rollingHills = glm::perlin(glm::vec2(
-        static_cast<float>(worldX + seed * 11) * 0.0032f,
-        static_cast<float>(worldZ - seed * 13) * 0.0032f));
-      float detailNoise = fbmNoise(static_cast<float>(worldX), static_cast<float>(worldZ), seed);
-      float baseHeight = 34.0f + rollingHills * 10.0f + detailNoise * 8.0f;
+      // Domain-warped coordinates break up repetitive flat noise patterns.
+      float warpX = glm::perlin(glm::vec2(
+        static_cast<float>(worldX + seed * 101) * 0.0016f,
+        static_cast<float>(worldZ - seed * 89) * 0.0016f));
+      float warpZ = glm::perlin(glm::vec2(
+        static_cast<float>(worldX - seed * 37) * 0.0016f,
+        static_cast<float>(worldZ + seed * 53) * 0.0016f));
+      float wx = static_cast<float>(worldX) + warpX * 24.0f;
+      float wz = static_cast<float>(worldZ) + warpZ * 24.0f;
 
-      float ridgeNoise = 1.0f - std::abs(glm::perlin(glm::vec2(
-        static_cast<float>(worldX - seed * 5) * 0.0010f,
-        static_cast<float>(worldZ + seed * 3) * 0.0010f)));
-      float mountainMask = smooth01((ridgeNoise - 0.70f) / 0.30f);
-      float mountainHeight = mountainMask * (12.0f + 34.0f * mountainMask);
+      float continentalness = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx + static_cast<float>(seed) * 11.0f) * 0.00045f,
+        (wz - static_cast<float>(seed) * 13.0f) * 0.00045f));
+      float macroRelief = glm::perlin(glm::vec2(
+        (wx - static_cast<float>(seed) * 3.0f) * 0.0013f,
+        (wz + static_cast<float>(seed) * 7.0f) * 0.0013f));
+      float detailNoise = fbmNoise(wx, wz, seed);
+      float foothills = glm::perlin(glm::vec2(
+        (wx + static_cast<float>(seed) * 29.0f) * 0.0035f,
+        (wz - static_cast<float>(seed) * 31.0f) * 0.0035f));
+      float baseHeight = 30.0f +
+                         continentalness * 23.0f +
+                         macroRelief * 8.0f +
+                         detailNoise * 6.0f +
+                         foothills * 2.5f;
 
-      float erosionSignal = 1.0f - std::abs(glm::perlin(glm::vec2(
-        static_cast<float>(worldX + seed * 17) * 0.0016f,
-        static_cast<float>(worldZ - seed * 11) * 0.0016f)));
-      float erosionMask = smooth01((erosionSignal - 0.97f) / 0.03f);
-      float erosionDepth = erosionMask * (2.0f + 4.0f * erosionMask);
+      float ruggedField = 1.0f - std::abs(glm::perlin(glm::vec2(
+        (wx - static_cast<float>(seed) * 5.0f) * 0.0011f,
+        (wz + static_cast<float>(seed) * 3.0f) * 0.0011f)));
+      float ruggedMask = smooth01((ruggedField - 0.52f) / 0.48f);
 
-      float heightF = baseHeight + mountainHeight - erosionDepth;
+      float peakLineA = 1.0f - std::abs(glm::perlin(glm::vec2(
+        (wx + static_cast<float>(seed) * 17.0f) * 0.0019f,
+        (wz - static_cast<float>(seed) * 23.0f) * 0.0019f)));
+      float peakLineB = 1.0f - std::abs(glm::perlin(glm::vec2(
+        (wx - static_cast<float>(seed) * 41.0f) * 0.0036f,
+        (wz + static_cast<float>(seed) * 19.0f) * 0.0036f)));
+      float mountainLine = 0.68f * peakLineA + 0.32f * peakLineB;
+      float mountainMask = smooth01((mountainLine - 0.61f) / 0.39f) *
+                           ruggedMask *
+                           smooth01((continentalness - 0.43f) / 0.57f);
+      float mountainHeight = mountainMask * (18.0f + 52.0f * mountainMask);
+
+      float erosionSignal = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx + static_cast<float>(seed) * 17.0f) * 0.0016f,
+        (wz - static_cast<float>(seed) * 11.0f) * 0.0016f));
+      float erosionMask = smooth01((erosionSignal - 0.86f) / 0.14f);
+      float erosionDepth = erosionMask * (2.0f + 5.0f * erosionMask);
+
+      float valleyLine = 1.0f - std::abs(glm::perlin(glm::vec2(
+        (wx - static_cast<float>(seed) * 67.0f) * 0.0014f,
+        (wz + static_cast<float>(seed) * 71.0f) * 0.0014f)));
+      float valleyMask = smooth01((valleyLine - 0.94f) / 0.06f) *
+                         (1.0f - smooth01((continentalness - 0.70f) / 0.30f));
+      float valleyDepth = valleyMask * (2.0f + 10.0f * valleyMask);
+
+      float heightF = baseHeight + mountainHeight - erosionDepth - valleyDepth;
       int height = static_cast<int>(std::round(heightF));
       height = std::clamp(height, 8, kChunkHeight - 2);
 
