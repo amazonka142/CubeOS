@@ -117,7 +117,7 @@ struct V02WorldTuning {
   float mountainScale = 1.0f;
   float caveDensity = 1.0f;
   float ravineFrequency = 1.0f;
-  float treeSpawnThreshold = 0.982f;
+  float treeSpawnThreshold = 0.968f;
   int oreAttemptsCoal = 20;
   int oreAttemptsIron = 20;
   int oreAttemptsGold = 2;
@@ -143,7 +143,7 @@ V02WorldTuning tuningForV02(const WorldGenSettings& settings) {
   // v0.2 smoke tuning targets a balanced baseline for terrain density.
   if (settings.preset == WorldPreset::kClassicFlat) {
     tuning.mountainScale = 0.0f;
-    tuning.treeSpawnThreshold = 0.991f;
+    tuning.treeSpawnThreshold = 0.985f;
     tuning.oreAttemptsCoal = 18;
     tuning.oreAttemptsIron = 18;
     tuning.oreAttemptsGold = 2;
@@ -241,10 +241,7 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
       float heightF = baseHeight + mountainHeight - erosionDepth - valleyDepth;
       int height = static_cast<int>(std::round(heightF));
       height = std::clamp(height, 8, kChunkHeight - 2);
-      constexpr int kBeachBandMinY = kSeaLevel - 1;
-      constexpr int kBeachBandMaxY = kSeaLevel + 1;
-      bool isBeachBand = height >= kBeachBandMinY && height <= kBeachBandMaxY;
-      int surfaceCoverDepth = isBeachBand ? 3 : 4;
+      int surfaceCoverDepth = 4;
 
       for (int y = 0; y < height; ++y) {
         uint8_t type = kStone;
@@ -252,17 +249,9 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
         bool isSubsurface = (y >= height - surfaceCoverDepth);
 
         if (isSurface) {
-          if (isBeachBand) {
-            type = kSand;
-          } else {
-            type = kGrass;
-          }
+          type = kGrass;
         } else if (isSubsurface) {
-          if (isBeachBand) {
-            type = kSand;
-          } else {
-            type = kDirt;
-          }
+          type = kDirt;
         }
 
         blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
@@ -510,6 +499,65 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
     }
   }
 
+  // Keep beaches narrow by painting sand only very close to coastlines.
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      size_t index = static_cast<size_t>(lx + lz * kChunkSize);
+      int surfaceY = surfaceHeights[index];
+      if (surfaceY < kSeaLevel - 1 || surfaceY > kSeaLevel + 3) {
+        continue;
+      }
+
+      uint8_t surfaceType = getLocalBlock(lx, surfaceY, lz);
+      if (surfaceType != kGrass && surfaceType != kDirt && surfaceType != kSand) {
+        continue;
+      }
+
+      int nearestWaterDistance = 4;
+      for (int oz = -3; oz <= 3; ++oz) {
+        for (int ox = -3; ox <= 3; ++ox) {
+          int distance = std::max(std::abs(ox), std::abs(oz));
+          if (distance == 0 || distance > 3) {
+            continue;
+          }
+
+          int nx = lx + ox;
+          int nz = lz + oz;
+          if (nx < 0 || nx >= kChunkSize || nz < 0 || nz >= kChunkSize) {
+            continue;
+          }
+
+          int neighborTop = surfaceHeights[static_cast<size_t>(nx + nz * kChunkSize)];
+          uint8_t seaBlock = getLocalBlock(nx, kSeaLevel - 1, nz);
+          if (neighborTop < kSeaLevel && isWaterBlock(seaBlock)) {
+            nearestWaterDistance = std::min(nearestWaterDistance, distance);
+          }
+        }
+      }
+
+      if (nearestWaterDistance > 3) {
+        continue;
+      }
+
+      int sandDepth = std::clamp(4 - nearestWaterDistance, 1, 3);
+      for (int depth = 0; depth < sandDepth; ++depth) {
+        int y = surfaceY - depth;
+        if (y < 1) {
+          break;
+        }
+
+        uint8_t current = getLocalBlock(lx, y, lz);
+        if (current == kAir || isWaterBlock(current) || current == kLeaves || current == kWood) {
+          break;
+        }
+        if (current == kGrass || current == kDirt || current == kSand ||
+            current == kGravel || current == kStone) {
+          setLocalBlock(lx, y, lz, kSand);
+        }
+      }
+    }
+  }
+
   std::array<uint8_t, kChunkSize * kChunkSize> treePlaced{};
   treePlaced.fill(0);
   constexpr std::array<std::pair<int, int>, 4> kNeighborOffsets = {{
@@ -644,169 +692,217 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
     }
   }
 
-  if (settings.generateStructures) {
-    uint32_t structureRng = static_cast<uint32_t>(hashChunkSeed(seed, cx, cz, 0x5EEDu));
-    int structureAttempts = (settings.preset == WorldPreset::kClassicFlat) ? 1 : 2;
-    float structureChance = (settings.preset == WorldPreset::kClassicFlat) ? 0.12f : 0.24f;
+  uint32_t structureRng = static_cast<uint32_t>(hashChunkSeed(seed, cx, cz, 0x5EEDu));
+  int structureAttempts = 1;
+  float structureChance = (settings.preset == WorldPreset::kClassicFlat) ? 0.005f : 0.013f;
 
-    for (int attempt = 0; attempt < structureAttempts; ++attempt) {
-      if (rand01(structureRng) > structureChance) {
-        continue;
-      }
+  for (int attempt = 0; attempt < structureAttempts; ++attempt) {
+    if (rand01(structureRng) > structureChance) {
+      continue;
+    }
 
-      int centerX = randIntInclusive(structureRng, 3, kChunkSize - 4);
-      int centerZ = randIntInclusive(structureRng, 3, kChunkSize - 4);
-      size_t centerIndex = static_cast<size_t>(centerX + centerZ * kChunkSize);
-      int surfaceY = surfaceHeights[centerIndex];
-      if (surfaceY < 4 || surfaceY >= kChunkHeight - 8) {
-        continue;
-      }
-      if (surfaceY <= kSeaLevel + 1) {
-        continue;
-      }
+    int centerX = randIntInclusive(structureRng, 4, kChunkSize - 5);
+    int centerZ = randIntInclusive(structureRng, 4, kChunkSize - 5);
+    size_t centerIndex = static_cast<size_t>(centerX + centerZ * kChunkSize);
+    int surfaceY = surfaceHeights[centerIndex];
+    if (surfaceY < 6 || surfaceY >= kChunkHeight - 10) {
+      continue;
+    }
+    if (surfaceY <= kSeaLevel + 2) {
+      continue;
+    }
 
-      uint8_t centerGround = getLocalBlock(centerX, surfaceY, centerZ);
-      if (centerGround != kGrass && centerGround != kDirt && centerGround != kSand) {
-        continue;
-      }
+    uint8_t centerGround = getLocalBlock(centerX, surfaceY, centerZ);
+    if (centerGround != kGrass && centerGround != kDirt && centerGround != kSand) {
+      continue;
+    }
 
-      bool validSite = true;
-      int minTop = surfaceY;
-      int maxTop = surfaceY;
-      for (int oz = -2; oz <= 2 && validSite; ++oz) {
-        for (int ox = -2; ox <= 2; ++ox) {
-          int sx = centerX + ox;
-          int sz = centerZ + oz;
-          if (sx < 0 || sx >= kChunkSize || sz < 0 || sz >= kChunkSize) {
-            validSite = false;
-            break;
-          }
-
-          int topY = surfaceHeights[static_cast<size_t>(sx + sz * kChunkSize)];
-          if (topY < 1) {
-            validSite = false;
-            break;
-          }
-
-          minTop = std::min(minTop, topY);
-          maxTop = std::max(maxTop, topY);
-
-          uint8_t topType = getLocalBlock(sx, topY, sz);
-          if (isWaterBlock(topType)) {
-            validSite = false;
-            break;
-          }
-
-          for (int y = surfaceY + 1; y <= surfaceY + 4; ++y) {
-            uint8_t type = getLocalBlock(sx, y, sz);
-            if (type != kAir && !isWaterBlock(type) && type != kLeaves) {
-              validSite = false;
-              break;
-            }
-          }
-          if (!validSite) {
-            break;
-          }
-        }
-      }
-      if (!validSite || (maxTop - minTop) > 2) {
-        continue;
-      }
-
-      for (int oz = -2; oz <= 2; ++oz) {
-        for (int ox = -2; ox <= 2; ++ox) {
-          int sx = centerX + ox;
-          int sz = centerZ + oz;
-          int topY = surfaceHeights[static_cast<size_t>(sx + sz * kChunkSize)];
-          uint8_t topType = getLocalBlock(sx, topY, sz);
-          uint8_t fillType = (topType == kSand) ? kSand : kDirt;
-
-          if (topY < surfaceY) {
-            for (int y = topY + 1; y <= surfaceY; ++y) {
-              setLocalBlock(sx, y, sz, fillType);
-            }
-          } else if (topY > surfaceY) {
-            for (int y = surfaceY + 1; y <= topY; ++y) {
-              setLocalBlock(sx, y, sz, kAir);
-            }
-          }
-
-          setLocalBlock(sx, surfaceY, sz, fillType);
-        }
-      }
-
-      for (int oz = -2; oz <= 2; ++oz) {
-        for (int ox = -2; ox <= 2; ++ox) {
-          int sx = centerX + ox;
-          int sz = centerZ + oz;
-          bool edge = std::abs(ox) == 2 || std::abs(oz) == 2;
-          if (!edge) {
-            if (rand01(structureRng) < 0.60f) {
-              setLocalBlock(sx, surfaceY + 1, sz, kGravel);
-            }
-            continue;
-          }
-
-          bool corner = std::abs(ox) == 2 && std::abs(oz) == 2;
-          int wallHeight = corner ? 3 : 2;
-          if (!corner && rand01(structureRng) < 0.25f) {
-            wallHeight = 1;
-          }
-
-          for (int y = 1; y <= wallHeight; ++y) {
-            uint8_t blockType = (rand01(structureRng) < 0.28f) ? kGravel : kStone;
-            setLocalBlock(sx, surfaceY + y, sz, blockType);
-          }
-        }
-      }
-
-      int doorwaySide = randIntInclusive(structureRng, 0, 3);
-      for (int offset = -1; offset <= 1; ++offset) {
-        int doorX = centerX;
-        int doorZ = centerZ;
-        if (doorwaySide == 0) {
-          doorX += offset;
-          doorZ -= 2;
-        } else if (doorwaySide == 1) {
-          doorX += offset;
-          doorZ += 2;
-        } else if (doorwaySide == 2) {
-          doorX -= 2;
-          doorZ += offset;
-        } else {
-          doorX += 2;
-          doorZ += offset;
-        }
-
-        setLocalBlock(doorX, surfaceY + 1, doorZ, kAir);
-        setLocalBlock(doorX, surfaceY + 2, doorZ, kAir);
-      }
-
-      if (rand01(structureRng) < 0.40f) {
-        int pillarHeight = randIntInclusive(structureRng, 2, 4);
-        for (int y = 1; y <= pillarHeight; ++y) {
-          setLocalBlock(centerX, surfaceY + y, centerZ, kWood);
-        }
-      }
-
-      int rubbleCount = randIntInclusive(structureRng, 3, 7);
-      for (int i = 0; i < rubbleCount; ++i) {
-        int rx = randIntInclusive(structureRng, -2, 2);
-        int rz = randIntInclusive(structureRng, -2, 2);
-        if (std::abs(rx) <= 1 && std::abs(rz) <= 1) {
-          continue;
-        }
-
-        int sx = centerX + rx;
-        int sz = centerZ + rz;
+    bool validSite = true;
+    int minTop = surfaceY;
+    int maxTop = surfaceY;
+    for (int oz = -3; oz <= 3 && validSite; ++oz) {
+      for (int ox = -3; ox <= 3; ++ox) {
+        int sx = centerX + ox;
+        int sz = centerZ + oz;
         if (sx < 0 || sx >= kChunkSize || sz < 0 || sz >= kChunkSize) {
+          validSite = false;
+          break;
+        }
+
+        int topY = surfaceHeights[static_cast<size_t>(sx + sz * kChunkSize)];
+        if (topY < 1) {
+          validSite = false;
+          break;
+        }
+
+        minTop = std::min(minTop, topY);
+        maxTop = std::max(maxTop, topY);
+
+        uint8_t topType = getLocalBlock(sx, topY, sz);
+        if (isWaterBlock(topType)) {
+          validSite = false;
+          break;
+        }
+
+        for (int y = surfaceY + 1; y <= surfaceY + 6; ++y) {
+          uint8_t type = getLocalBlock(sx, y, sz);
+          if (type != kAir && !isWaterBlock(type) && type != kLeaves) {
+            validSite = false;
+            break;
+          }
+        }
+        if (!validSite) {
+          break;
+        }
+      }
+    }
+    if (!validSite || (maxTop - minTop) > 2) {
+      continue;
+    }
+
+    for (int oz = -3; oz <= 3; ++oz) {
+      for (int ox = -3; ox <= 3; ++ox) {
+        int sx = centerX + ox;
+        int sz = centerZ + oz;
+        int topY = surfaceHeights[static_cast<size_t>(sx + sz * kChunkSize)];
+        uint8_t topType = getLocalBlock(sx, topY, sz);
+        uint8_t fillType = (topType == kSand) ? kSand : kDirt;
+
+        if (topY < surfaceY) {
+          for (int y = topY + 1; y <= surfaceY; ++y) {
+            setLocalBlock(sx, y, sz, fillType);
+          }
+        } else if (topY > surfaceY) {
+          for (int y = surfaceY + 1; y <= topY; ++y) {
+            setLocalBlock(sx, y, sz, kAir);
+          }
+        }
+
+        int worldX = baseX + sx;
+        int worldZ = baseZ + sz;
+        float crack = hashedNoise01(worldX, surfaceY, worldZ, seed, 0x5151u);
+        uint8_t floorType = crack > 0.78f ? kGravel : kStone;
+        if (crack < 0.08f && (std::abs(ox) + std::abs(oz) <= 3)) {
+          floorType = fillType;
+        }
+        setLocalBlock(sx, surfaceY, sz, floorType);
+      }
+    }
+
+    int doorwaySide = randIntInclusive(structureRng, 0, 3);
+    auto isDoorOpening = [&](int ox, int oz) {
+      if (doorwaySide == 0) {
+        return oz == -3 && std::abs(ox) <= 1;
+      }
+      if (doorwaySide == 1) {
+        return oz == 3 && std::abs(ox) <= 1;
+      }
+      if (doorwaySide == 2) {
+        return ox == -3 && std::abs(oz) <= 1;
+      }
+      return ox == 3 && std::abs(oz) <= 1;
+    };
+
+    for (int oz = -3; oz <= 3; ++oz) {
+      for (int ox = -3; ox <= 3; ++ox) {
+        bool edge = std::abs(ox) == 3 || std::abs(oz) == 3;
+        if (!edge || isDoorOpening(ox, oz)) {
           continue;
         }
 
-        uint8_t existing = getLocalBlock(sx, surfaceY + 1, sz);
-        if (existing == kAir || isWaterBlock(existing) || existing == kLeaves) {
-          setLocalBlock(sx, surfaceY + 1, sz, kGravel);
+        int sx = centerX + ox;
+        int sz = centerZ + oz;
+        int wallHeight = (rand01(structureRng) < 0.58f) ? 2 : 1;
+        if (rand01(structureRng) < 0.25f) {
+          wallHeight = 0;
         }
+        for (int y = 1; y <= wallHeight; ++y) {
+          uint8_t blockType = (rand01(structureRng) < 0.35f) ? kGravel : kStone;
+          setLocalBlock(sx, surfaceY + y, sz, blockType);
+        }
+      }
+    }
+
+    constexpr std::array<std::pair<int, int>, 4> kCornerOffsets = {{
+      {-2, -2},
+      {2, -2},
+      {-2, 2},
+      {2, 2}
+    }};
+    for (const auto& [ox, oz] : kCornerOffsets) {
+      int sx = centerX + ox;
+      int sz = centerZ + oz;
+      int pillarHeight = randIntInclusive(structureRng, 4, 6);
+      int brokenTop = rand01(structureRng) < 0.55f ? randIntInclusive(structureRng, 0, 2) : 0;
+      for (int y = 1; y <= pillarHeight - brokenTop; ++y) {
+        uint8_t blockType = (rand01(structureRng) < 0.18f) ? kGravel : kStone;
+        setLocalBlock(sx, surfaceY + y, sz, blockType);
+      }
+    }
+
+    auto placeArch = [&](int ox, int oz, bool enabled) {
+      if (!enabled) {
+        return;
+      }
+      int sx = centerX + ox;
+      int sz = centerZ + oz;
+      for (int y = 3; y <= 4; ++y) {
+        uint8_t current = getLocalBlock(sx, surfaceY + y, sz);
+        if (current == kAir || isWaterBlock(current) || current == kLeaves) {
+          uint8_t archType = (rand01(structureRng) < 0.30f) ? kGravel : kStone;
+          setLocalBlock(sx, surfaceY + y, sz, archType);
+        }
+      }
+    };
+
+    bool openNorth = doorwaySide == 0;
+    bool openSouth = doorwaySide == 1;
+    bool openWest = doorwaySide == 2;
+    bool openEast = doorwaySide == 3;
+
+    for (int t = -1; t <= 1; ++t) {
+      placeArch(t, -2, !openNorth && rand01(structureRng) < 0.78f);
+      placeArch(t, 2, !openSouth && rand01(structureRng) < 0.78f);
+      placeArch(-2, t, !openWest && rand01(structureRng) < 0.78f);
+      placeArch(2, t, !openEast && rand01(structureRng) < 0.78f);
+    }
+
+    int altarHeight = randIntInclusive(structureRng, 1, 2);
+    for (int oz = -1; oz <= 1; ++oz) {
+      for (int ox = -1; ox <= 1; ++ox) {
+        setLocalBlock(centerX + ox, surfaceY + 1, centerZ + oz, kStone);
+      }
+    }
+    for (int y = 2; y <= 1 + altarHeight; ++y) {
+      setLocalBlock(centerX, surfaceY + y, centerZ, kStone);
+    }
+    if (rand01(structureRng) < 0.35f) {
+      setLocalBlock(centerX, surfaceY + 2 + altarHeight, centerZ, kWood);
+    }
+
+    int rubbleCount = randIntInclusive(structureRng, 8, 14);
+    for (int i = 0; i < rubbleCount; ++i) {
+      int rx = randIntInclusive(structureRng, -4, 4);
+      int rz = randIntInclusive(structureRng, -4, 4);
+      if (std::abs(rx) <= 2 && std::abs(rz) <= 2) {
+        continue;
+      }
+
+      int sx = centerX + rx;
+      int sz = centerZ + rz;
+      if (sx < 0 || sx >= kChunkSize || sz < 0 || sz >= kChunkSize) {
+        continue;
+      }
+
+      int topY = surfaceHeights[static_cast<size_t>(sx + sz * kChunkSize)];
+      if (topY < 1 || topY >= kChunkHeight - 2) {
+        continue;
+      }
+
+      uint8_t existing = getLocalBlock(sx, topY + 1, sz);
+      if (existing == kAir || isWaterBlock(existing) || existing == kLeaves) {
+        uint8_t rubbleType = (rand01(structureRng) < 0.55f) ? kGravel : kStone;
+        setLocalBlock(sx, topY + 1, sz, rubbleType);
       }
     }
   }
@@ -2040,7 +2136,8 @@ bool World::load(const std::string& path) {
     presetValue = static_cast<uint8_t>(WorldPreset::kMinecraftStyle);
   }
   genSettings.preset = static_cast<WorldPreset>(presetValue);
-  genSettings.generateStructures = (structuresValue != 0);
+  (void)structuresValue;
+  genSettings.generateStructures = true;
   genSettings.caveDensity = std::clamp(caveDensityValue, 0.25f, 2.5f);
   genSettings.ravineFrequency = std::clamp(ravineFrequencyValue, 0.25f, 2.5f);
   genSettings.startInventoryMode = startInventoryModeValue;

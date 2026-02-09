@@ -21,7 +21,7 @@ enum class WorldPreset : uint8_t {
 
 struct WorldGenSettings {
   WorldPreset preset = WorldPreset::kMinecraftStyle;
-  bool generateStructures = false;
+  bool generateStructures = true;
   float caveDensity = 1.0f;
   float ravineFrequency = 1.0f;
   uint8_t startInventoryMode = 0; // 0=Empty, 1=CreativeTest (reserved for v0.2.1+)

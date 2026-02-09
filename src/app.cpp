@@ -175,6 +175,30 @@ std::string sanitizeWorldNameForFile(const std::string& value) {
   return out;
 }
 
+std::string worldMetaPathForWorld(const std::filesystem::path& worldPath) {
+  std::filesystem::path metaPath = worldPath;
+  metaPath.replace_extension(".meta");
+  return metaPath.string();
+}
+
+bool saveWorldDisplayNameMeta(const std::string& worldPath, const std::string& displayName) {
+  if (worldPath.empty()) {
+    return false;
+  }
+
+  std::string trimmed = trimAscii(displayName);
+  if (trimmed.empty()) {
+    return false;
+  }
+
+  std::ofstream out(worldMetaPathForWorld(std::filesystem::path(worldPath)), std::ios::trunc);
+  if (!out.is_open()) {
+    return false;
+  }
+  out << trimmed << "\n";
+  return true;
+}
+
 std::string worldDisplayNameFromPath(const std::filesystem::path& worldPath) {
   std::string name = worldPath.stem().string();
   if (name.empty()) {
@@ -204,22 +228,109 @@ std::string uniqueWorldPathForName(const std::string& worldName, std::string* ou
 
   std::string base = sanitizeWorldNameForFile(worldName);
   std::string candidate = base;
+  int suffixIndex = 1;
   int suffix = 2;
   while (std::filesystem::exists(savesDir / (candidate + ".bin"), ec)) {
     candidate = base + "_" + std::to_string(suffix);
+    suffixIndex = suffix;
     ++suffix;
   }
 
   if (outDisplayName) {
-    std::string displayName = candidate;
-    for (char& c : displayName) {
-      if (c == '_') {
-        c = ' ';
-      }
+    std::string displayName = trimAscii(worldName);
+    if (displayName.empty()) {
+      displayName = "World";
+    }
+    if (suffixIndex > 1) {
+      displayName += " " + std::to_string(suffixIndex);
     }
     *outDisplayName = displayName;
   }
   return (savesDir / (candidate + ".bin")).string();
+}
+
+std::string loadWorldDisplayNameMeta(const std::filesystem::path& worldPath) {
+  std::ifstream in(worldMetaPathForWorld(worldPath));
+  if (in.is_open()) {
+    std::string line;
+    if (std::getline(in, line)) {
+      line = trimAscii(line);
+      if (!line.empty()) {
+        return line;
+      }
+    }
+  }
+  return worldDisplayNameFromPath(worldPath);
+}
+
+bool isAllowedWorldNameCodepoint(unsigned int codepoint) {
+  if (codepoint < 32 || codepoint == 127 || codepoint > 0x10FFFFu) {
+    return false;
+  }
+  if (codepoint >= 0xD800u && codepoint <= 0xDFFFu) {
+    return false;
+  }
+  if (codepoint < 128u) {
+    char c = static_cast<char>(codepoint);
+    switch (c) {
+      case '/':
+      case '\\':
+      case ':':
+      case '*':
+      case '?':
+      case '"':
+      case '<':
+      case '>':
+      case '|':
+        return false;
+      default:
+        break;
+    }
+  }
+  return true;
+}
+
+void appendUtf8(std::string& out, unsigned int codepoint) {
+  if (codepoint <= 0x7Fu) {
+    out.push_back(static_cast<char>(codepoint));
+  } else if (codepoint <= 0x7FFu) {
+    out.push_back(static_cast<char>(0xC0u | ((codepoint >> 6) & 0x1Fu)));
+    out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
+  } else if (codepoint <= 0xFFFFu) {
+    out.push_back(static_cast<char>(0xE0u | ((codepoint >> 12) & 0x0Fu)));
+    out.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3Fu)));
+    out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
+  } else {
+    out.push_back(static_cast<char>(0xF0u | ((codepoint >> 18) & 0x07u)));
+    out.push_back(static_cast<char>(0x80u | ((codepoint >> 12) & 0x3Fu)));
+    out.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3Fu)));
+    out.push_back(static_cast<char>(0x80u | (codepoint & 0x3Fu)));
+  }
+}
+
+size_t utf8CodepointCount(const std::string& text) {
+  size_t count = 0;
+  for (unsigned char c : text) {
+    if ((c & 0xC0u) != 0x80u) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+void popUtf8Back(std::string& text) {
+  if (text.empty()) {
+    return;
+  }
+  size_t idx = text.size() - 1;
+  while (idx > 0) {
+    unsigned char c = static_cast<unsigned char>(text[idx]);
+    if ((c & 0xC0u) != 0x80u) {
+      break;
+    }
+    --idx;
+  }
+  text.erase(idx);
 }
 
 struct DiskWorldEntry {
@@ -255,7 +366,7 @@ std::vector<DiskWorldEntry> collectWorldSelectEntries() {
 
     WorldFileMeta meta;
     meta.entry.path = p.string();
-    meta.entry.displayName = worldDisplayNameFromPath(p);
+    meta.entry.displayName = loadWorldDisplayNameMeta(p);
     meta.modified = std::filesystem::last_write_time(p, ec);
     if (ec) {
       ec.clear();
@@ -386,7 +497,6 @@ void App::updateWindowTitle() {
                " | Preset: " + presetName +
                " | Cave: " + std::to_string(pendingWorldSettings.caveDensity).substr(0, 4) +
                " | Ravine: " + std::to_string(pendingWorldSettings.ravineFrequency).substr(0, 4) +
-               " | Structures: " + std::string(pendingWorldSettings.generateStructures ? "On" : "Off") +
                " | Start: " + invMode;
       break;
     }
@@ -483,6 +593,8 @@ void App::loadWorldFromSelection(int entryIndex) {
 
   pendingWorldName = entry.displayName;
   pendingWorldSettings = world.getGenerationSettings();
+  pendingWorldSettings.generateStructures = true;
+  world.setGenerationSettings(pendingWorldSettings);
   pendingSeedText = std::to_string(world.getSeed());
   hasPendingPlayerResume = loadPlayerStateForWorld(currentWorldPath,
                                                    pendingResumePlayerPos,
@@ -520,6 +632,7 @@ void App::beginCreateWorldFlow() {
   pendingWorldName = "World";
   pendingWorldSettings = world.getGenerationSettings();
   pendingWorldSettings.preset = WorldPreset::kMinecraftStyle;
+  pendingWorldSettings.generateStructures = true;
   pendingWorldSettings.caveDensity = std::clamp(pendingWorldSettings.caveDensity, 0.25f, 2.5f);
   pendingWorldSettings.ravineFrequency = std::clamp(pendingWorldSettings.ravineFrequency, 0.25f, 2.5f);
   pendingSeedText.clear();
@@ -550,12 +663,14 @@ void App::createWorldFromMenu() {
   }
 
   WorldGenSettings settings = pendingWorldSettings;
+  settings.generateStructures = true;
   settings.caveDensity = std::clamp(settings.caveDensity, 0.25f, 2.5f);
   settings.ravineFrequency = std::clamp(settings.ravineFrequency, 0.25f, 2.5f);
 
   std::string createdDisplayName;
   currentWorldPath = uniqueWorldPathForName(pendingWorldName, &createdDisplayName);
   pendingWorldName = createdDisplayName;
+  saveWorldDisplayNameMeta(currentWorldPath, pendingWorldName);
   hasPendingPlayerResume = false;
 
   world.setSeed(seedValue);
@@ -781,16 +896,22 @@ void App::setupGameplaySession() {
           }
         }
 
-        int platformY = std::clamp(bestWater->y, 2, world.height() - 4);
-        for (int oz = -1; oz <= 1; ++oz) {
-          for (int ox = -1; ox <= 1; ++ox) {
+        int platformTopY = std::clamp(bestWater->y + 1, 3, world.height() - 4);
+        for (int oz = -2; oz <= 2; ++oz) {
+          for (int ox = -2; ox <= 2; ++ox) {
             int x = bestWater->x + ox;
             int z = bestWater->z + oz;
-            uint8_t floorBlock = world.getBlock(x, platformY, z);
-            if (floorBlock == kAir || isWaterBlock(floorBlock) || floorBlock == kLeaves) {
-              world.setBlock(x, platformY, z, kSand);
+            uint8_t below = world.getBlock(x, platformTopY - 1, z);
+            if (below == kAir || isWaterBlock(below) || below == kLeaves) {
+              world.setBlock(x, platformTopY - 1, z, kStone);
             }
-            for (int y = platformY + 1; y <= platformY + 2; ++y) {
+
+            uint8_t floorBlock = world.getBlock(x, platformTopY, z);
+            if (floorBlock == kAir || isWaterBlock(floorBlock) || floorBlock == kLeaves) {
+              world.setBlock(x, platformTopY, z, kDirt);
+            }
+
+            for (int y = platformTopY + 1; y <= platformTopY + 3; ++y) {
               uint8_t headBlock = world.getBlock(x, y, z);
               if (isWaterBlock(headBlock) || headBlock == kLeaves) {
                 world.setBlock(x, y, z, kAir);
@@ -800,7 +921,7 @@ void App::setupGameplaySession() {
         }
 
         return {static_cast<float>(bestWater->x) + 0.5f,
-                static_cast<float>(platformY) + 2.35f,
+                static_cast<float>(platformTopY) + 2.35f,
                 static_cast<float>(bestWater->z) + 0.5f};
       }
 
@@ -980,11 +1101,6 @@ void App::processMenuInput(float deltaTime) {
         break;
       }
       case 5: {
-        pendingWorldSettings.generateStructures = !pendingWorldSettings.generateStructures;
-        changed = true;
-        break;
-      }
-      case 6: {
         pendingWorldSettings.startInventoryMode =
           pendingWorldSettings.startInventoryMode == 0 ? 1 : 0;
         changed = true;
@@ -1135,7 +1251,7 @@ void App::processMenuInput(float deltaTime) {
       setScreenState(ScreenState::kMainMenu);
     }
   } else if (screenState == ScreenState::kCreateWorld) {
-    constexpr int kCreateFieldCount = 9;
+    constexpr int kCreateFieldCount = 8;
 
     if (upPressed && !menuUpDown) {
       createWorldSelection = std::max(0, createWorldSelection - 1);
@@ -1152,7 +1268,7 @@ void App::processMenuInput(float deltaTime) {
     }
     if (backspacePressed && !menuBackspaceDown) {
       if (createWorldSelection == 0 && !pendingWorldName.empty()) {
-        pendingWorldName.pop_back();
+        popUtf8Back(pendingWorldName);
         updateWindowTitle();
       } else if (createWorldSelection == 1 && !pendingSeedText.empty()) {
         pendingSeedText.pop_back();
@@ -1161,11 +1277,11 @@ void App::processMenuInput(float deltaTime) {
       uiDirty = true;
     }
     if (enterPressed && !menuEnterDown) {
-      if (createWorldSelection >= 2 && createWorldSelection <= 6) {
+      if (createWorldSelection >= 2 && createWorldSelection <= 5) {
         adjustCreateSetting(true);
-      } else if (createWorldSelection == 7) {
+      } else if (createWorldSelection == 6) {
         createWorldFromMenu();
-      } else if (createWorldSelection == 8) {
+      } else if (createWorldSelection == 7) {
         refreshWorldSelectEntries();
         setScreenState(ScreenState::kWorldSelect);
       }
@@ -1191,17 +1307,11 @@ void App::onCharInput(unsigned int codepoint) {
   }
 
   if (createWorldSelection == 0) {
-    if (codepoint >= 32 && codepoint <= 126 && pendingWorldName.size() < 24) {
-      char ch = static_cast<char>(codepoint);
-      unsigned char uch = static_cast<unsigned char>(ch);
-      bool allowed = std::isalnum(uch) != 0 || ch == ' ' || ch == '-' || ch == '_';
-      if (!allowed) {
-        return;
-      }
+    if (isAllowedWorldNameCodepoint(codepoint) && utf8CodepointCount(pendingWorldName) < 24) {
       if (pendingWorldName == "World") {
         pendingWorldName.clear();
       }
-      pendingWorldName.push_back(ch);
+      appendUtf8(pendingWorldName, codepoint);
       uiDirty = true;
       updateWindowTitle();
     }
@@ -1332,7 +1442,7 @@ void App::initWindow() {
 void App::initVulkan() {
   WorldGenSettings startupSettings{};
   startupSettings.preset = WorldPreset::kMinecraftStyle;
-  startupSettings.generateStructures = false;
+  startupSettings.generateStructures = true;
   startupSettings.caveDensity = 1.0f;
   startupSettings.ravineFrequency = 1.0f;
   startupSettings.startInventoryMode = 0;
@@ -2010,8 +2120,13 @@ void App::rebuildUiMesh() {
             glyph = fallback;
             break;
           default:
-            x += pixel * static_cast<float>(kGlyphWidth + 1);
-            continue;
+            fallback[0] = 0b111;
+            fallback[1] = 0b001;
+            fallback[2] = 0b010;
+            fallback[3] = 0b000;
+            fallback[4] = 0b010;
+            glyph = fallback;
+            break;
         }
       }
 
@@ -2219,7 +2334,7 @@ void App::rebuildUiMesh() {
       }
     } else if (screenState == ScreenState::kCreateWorld) {
       drawText("CREATE WORLD", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
-      constexpr int kRowCount = 9;
+      constexpr int kRowCount = 8;
       float rowW = panelWidth - 120.0f;
       float rowX = panelX + (panelWidth - rowW) * 0.5f;
       float rowH = 36.0f;
@@ -2229,9 +2344,9 @@ void App::rebuildUiMesh() {
 
       for (int i = 0; i < kRowCount; ++i) {
         glm::vec3 rowColor = glm::vec3(0.20f, 0.23f, 0.29f);
-        if (i == 7) {
+        if (i == 6) {
           rowColor = glm::vec3(0.20f, 0.36f, 0.22f);
-        } else if (i == 8) {
+        } else if (i == 7) {
           rowColor = glm::vec3(0.36f, 0.22f, 0.22f);
         }
         drawMenuRow(i,
@@ -2285,17 +2400,7 @@ void App::rebuildUiMesh() {
       float toggleW = 90.0f;
       float toggleH = rowH - 12.0f;
       float toggleX = rowX + rowW - toggleW - 16.0f;
-      float structuresY = rowY + 5.0f * (rowH + rowGap) + 6.0f;
-      addQuad(toggleX,
-              structuresY,
-              toggleW,
-              toggleH,
-              pendingWorldSettings.generateStructures
-                ? glm::vec3(0.28f, 0.56f, 0.30f)
-                : glm::vec3(0.30f, 0.30f, 0.33f),
-              backgroundTile);
-
-      float modeY = rowY + 6.0f * (rowH + rowGap) + 6.0f;
+      float modeY = rowY + 5.0f * (rowH + rowGap) + 6.0f;
       addQuad(toggleX,
               modeY,
               toggleW,
@@ -2318,23 +2423,21 @@ void App::rebuildUiMesh() {
       ravineText.setf(std::ios::fixed);
       ravineText.precision(2);
       ravineText << pendingWorldSettings.ravineFrequency;
-      std::string structuresText = pendingWorldSettings.generateStructures ? "ON" : "OFF";
       std::string invText = pendingWorldSettings.startInventoryMode == 0 ? "EMPTY" : "CREATIVE TEST";
 
-      std::array<std::string, 9> labels = {
+      std::array<std::string, 8> labels = {
         "WORLD NAME " + nameText,
         "SEED " + seedText,
         "PRESET " + presetText,
         "CAVE DENSITY " + caveText.str(),
         "RAVINE FREQ " + ravineText.str(),
-        "STRUCTURES " + structuresText,
         "START INVENTORY " + invText,
         "CREATE WORLD",
         "CANCEL"
       };
 
       for (int i = 0; i < kRowCount; ++i) {
-        float px = (i >= 7) ? 2.9f : 2.45f;
+        float px = (i >= 6) ? 2.9f : 2.45f;
         drawText(labels[static_cast<size_t>(i)],
                  rowX + 14.0f,
                  rowY + static_cast<float>(i) * (rowH + rowGap) + 11.0f,
