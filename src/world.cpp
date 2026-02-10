@@ -117,7 +117,7 @@ struct V02WorldTuning {
   float mountainScale = 1.0f;
   float caveDensity = 1.0f;
   float ravineFrequency = 1.0f;
-  float treeSpawnThreshold = 0.968f;
+  float treeSpawnThreshold = 0.84f;
   int oreAttemptsCoal = 20;
   int oreAttemptsIron = 20;
   int oreAttemptsGold = 2;
@@ -143,7 +143,7 @@ V02WorldTuning tuningForV02(const WorldGenSettings& settings) {
   // v0.2 smoke tuning targets a balanced baseline for terrain density.
   if (settings.preset == WorldPreset::kClassicFlat) {
     tuning.mountainScale = 0.0f;
-    tuning.treeSpawnThreshold = 0.985f;
+    tuning.treeSpawnThreshold = 0.90f;
     tuning.oreAttemptsCoal = 18;
     tuning.oreAttemptsIron = 18;
     tuning.oreAttemptsGold = 2;
@@ -160,29 +160,55 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
   int baseX = cx * kChunkSize;
   int baseZ = cz * kChunkSize;
   constexpr int kSeaLevel = 32;
+  constexpr int kFlatSurfaceY = 40;
   const V02WorldTuning tuning = tuningForV02(settings);
   const float seedF = static_cast<float>(seed);
 
+  enum class BiomeType : uint8_t {
+    kOcean = 0,
+    kBeach = 1,
+    kPlains = 2,
+    kForest = 3,
+    kDesert = 4,
+    kMountains = 5
+  };
+
+  std::array<BiomeType, kChunkSize * kChunkSize> columnBiomes{};
+  columnBiomes.fill(BiomeType::kPlains);
+  std::array<float, kChunkSize * kChunkSize> columnContinentalness{};
+  columnContinentalness.fill(0.55f);
+  std::array<float, kChunkSize * kChunkSize> columnTemperature{};
+  columnTemperature.fill(0.55f);
+  std::array<float, kChunkSize * kChunkSize> columnHumidity{};
+  columnHumidity.fill(0.50f);
+  std::array<int, kChunkSize * kChunkSize> columnTargetHeights{};
+  columnTargetHeights.fill(kSeaLevel + 8);
+
+  auto columnIndex = [](int lx, int lz) {
+    return static_cast<size_t>(lx + lz * kChunkSize);
+  };
+
+  // Stage 1: climate + biome classification + 3D density terrain.
   for (int lz = 0; lz < kChunkSize; ++lz) {
     for (int lx = 0; lx < kChunkSize; ++lx) {
       int worldX = baseX + lx;
       int worldZ = baseZ + lz;
+      size_t idx2d = columnIndex(lx, lz);
 
       if (settings.preset == WorldPreset::kClassicFlat) {
-        constexpr int kFlatSurfaceY = 40;
+        columnBiomes[idx2d] = BiomeType::kPlains;
+        columnContinentalness[idx2d] = 0.62f;
+        columnTemperature[idx2d] = 0.58f;
+        columnHumidity[idx2d] = 0.52f;
+        columnTargetHeights[idx2d] = kFlatSurfaceY;
+
         for (int y = 0; y <= kFlatSurfaceY; ++y) {
-          uint8_t type = kStone;
-          if (y == kFlatSurfaceY) {
-            type = kGrass;
-          } else if (y >= kFlatSurfaceY - 3) {
-            type = kDirt;
-          }
-          blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+          blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = kStone;
         }
         continue;
       }
 
-      // Domain-warped coordinates break up repetitive flat noise patterns.
+      // Domain warp to reduce obvious grid-like biome seams.
       float warpX = glm::perlin(glm::vec2(
         (static_cast<float>(worldX) + seedF * 101.0f) * 0.0016f,
         (static_cast<float>(worldZ) - seedF * 89.0f) * 0.0016f));
@@ -192,147 +218,196 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
       float wx = static_cast<float>(worldX) + warpX * 24.0f;
       float wz = static_cast<float>(worldZ) + warpZ * 24.0f;
 
+      // Climate parameter noises (temperature/humidity/continentalness/erosion/weirdness).
+      float temperature = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx + seedF * 17.0f) * 0.00095f,
+        (wz - seedF * 11.0f) * 0.00095f));
+      float humidity = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx - seedF * 7.0f) * 0.00105f,
+        (wz + seedF * 13.0f) * 0.00105f));
       float continentalness = 0.5f + 0.5f * glm::perlin(glm::vec2(
         (wx + static_cast<float>(seed) * 11.0f) * 0.00045f,
         (wz - static_cast<float>(seed) * 13.0f) * 0.00045f));
+      float dxFromOrigin = static_cast<float>(worldX);
+      float dzFromOrigin = static_cast<float>(worldZ);
+      float distFromOrigin = std::sqrt(dxFromOrigin * dxFromOrigin + dzFromOrigin * dzFromOrigin);
+      float spawnLandBias = smooth01(1.0f - distFromOrigin / 640.0f) * 0.20f;
+      continentalness = std::clamp(continentalness + 0.08f + spawnLandBias, 0.0f, 1.0f);
+      float erosion = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx - seedF * 37.0f) * 0.00120f,
+        (wz + seedF * 23.0f) * 0.00120f));
+      float weirdness = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx + seedF * 61.0f) * 0.00185f,
+        (wz - seedF * 53.0f) * 0.00185f));
       float macroRelief = glm::perlin(glm::vec2(
         (wx - static_cast<float>(seed) * 3.0f) * 0.0013f,
         (wz + static_cast<float>(seed) * 7.0f) * 0.0013f));
       float detailNoise = fbmNoise(wx, wz, seed);
-      float foothills = glm::perlin(glm::vec2(
-        (wx + static_cast<float>(seed) * 29.0f) * 0.0035f,
-        (wz - static_cast<float>(seed) * 31.0f) * 0.0035f));
-      float baseHeight = 30.0f +
-                         continentalness * 23.0f +
-                         macroRelief * 8.0f +
-                         detailNoise * 6.0f +
-                         foothills * 2.5f;
-
-      float ruggedField = 1.0f - std::abs(glm::perlin(glm::vec2(
-        (wx - static_cast<float>(seed) * 5.0f) * 0.0011f,
-        (wz + static_cast<float>(seed) * 3.0f) * 0.0011f)));
-      float ruggedMask = smooth01((ruggedField - 0.52f) / 0.48f);
-
-      float peakLineA = 1.0f - std::abs(glm::perlin(glm::vec2(
-        (wx + static_cast<float>(seed) * 17.0f) * 0.0019f,
-        (wz - static_cast<float>(seed) * 23.0f) * 0.0019f)));
-      float peakLineB = 1.0f - std::abs(glm::perlin(glm::vec2(
-        (wx - static_cast<float>(seed) * 41.0f) * 0.0036f,
-        (wz + static_cast<float>(seed) * 19.0f) * 0.0036f)));
-      float mountainLine = 0.68f * peakLineA + 0.32f * peakLineB;
-      float mountainMask = smooth01((mountainLine - 0.61f) / 0.39f) *
-                           ruggedMask *
-                           smooth01((continentalness - 0.43f) / 0.57f);
-      float mountainHeight = mountainMask * (18.0f + 52.0f * mountainMask) * tuning.mountainScale;
-
-      float erosionSignal = 0.5f + 0.5f * glm::perlin(glm::vec2(
-        (wx + static_cast<float>(seed) * 17.0f) * 0.0016f,
-        (wz - static_cast<float>(seed) * 11.0f) * 0.0016f));
-      float erosionMask = smooth01((erosionSignal - 0.86f) / 0.14f);
-      float erosionDepth = erosionMask * (2.0f + 5.0f * erosionMask);
-
-      float valleyLine = 1.0f - std::abs(glm::perlin(glm::vec2(
-        (wx - static_cast<float>(seed) * 67.0f) * 0.0014f,
-        (wz + static_cast<float>(seed) * 71.0f) * 0.0014f)));
-      float valleyMask = smooth01((valleyLine - 0.94f) / 0.06f) *
-                         (1.0f - smooth01((continentalness - 0.70f) / 0.30f));
-      float valleyDepth = valleyMask * (2.0f + 10.0f * valleyMask);
-
-      float heightF = baseHeight + mountainHeight - erosionDepth - valleyDepth;
-      int height = static_cast<int>(std::round(heightF));
-      height = std::clamp(height, 8, kChunkHeight - 2);
-      int surfaceCoverDepth = 4;
-
-      for (int y = 0; y < height; ++y) {
-        uint8_t type = kStone;
-        bool isSurface = (y == height - 1);
-        bool isSubsurface = (y >= height - surfaceCoverDepth);
-
-        if (isSurface) {
-          type = kGrass;
-        } else if (isSubsurface) {
-          type = kDirt;
-        }
-
-        blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+      BiomeType biome = BiomeType::kPlains;
+      if (continentalness < 0.25f) {
+        biome = BiomeType::kOcean;
+      } else if (continentalness < 0.31f) {
+        biome = BiomeType::kBeach;
+      } else if (temperature > 0.72f && humidity < 0.34f) {
+        biome = BiomeType::kDesert;
+      } else if (weirdness > 0.67f && continentalness > 0.56f) {
+        biome = BiomeType::kMountains;
+      } else if (humidity > 0.58f) {
+        biome = BiomeType::kForest;
       }
 
-      float caveDensity = tuning.caveDensity;
-      float caveRegion = glm::perlin(glm::vec2(
-        (static_cast<float>(worldX) + seedF * 41.0f) * 0.0022f,
-        (static_cast<float>(worldZ) - seedF * 37.0f) * 0.0022f));
-      float caveRegionThreshold = std::clamp(0.62f - 0.10f * (caveDensity - 1.0f), 0.42f, 0.78f);
-      bool allowCavesHere = caveRegion > caveRegionThreshold;
+      columnBiomes[idx2d] = biome;
+      columnContinentalness[idx2d] = continentalness;
+      columnTemperature[idx2d] = temperature;
+      columnHumidity[idx2d] = humidity;
 
-      for (int y = 10; y < height - 10; ++y) {
-        size_t idx = static_cast<size_t>(chunkLocalIndex(lx, y, lz));
-        if (blocks[idx] == kAir) {
-          continue;
+      float biomeBase = static_cast<float>(kSeaLevel) - 6.0f +
+                        continentalness * 34.0f +
+                        macroRelief * 7.0f +
+                        detailNoise * 4.5f -
+                        (1.0f - erosion) * 5.5f;
+
+      if (biome == BiomeType::kOcean) {
+        biomeBase = static_cast<float>(kSeaLevel) - 3.0f + macroRelief * 2.5f;
+      } else if (biome == BiomeType::kBeach) {
+        biomeBase = static_cast<float>(kSeaLevel) + 1.2f + macroRelief * 1.8f;
+      } else if (biome == BiomeType::kDesert) {
+        biomeBase += 2.2f + detailNoise * 2.0f;
+      } else if (biome == BiomeType::kForest) {
+        biomeBase += 2.0f + detailNoise * 1.2f;
+      } else if (biome == BiomeType::kMountains) {
+        float mountainBoost = (12.0f + 46.0f * weirdness * weirdness) * tuning.mountainScale;
+        biomeBase += mountainBoost;
+      }
+
+      int targetHeight = std::clamp(static_cast<int>(std::round(biomeBase)), 6, kChunkHeight - 6);
+      columnTargetHeights[idx2d] = targetHeight;
+
+      blocks[static_cast<size_t>(chunkLocalIndex(lx, 0, lz))] = kStone;
+      for (int y = 1; y < kChunkHeight - 1; ++y) {
+        float densityBase = (static_cast<float>(targetHeight) - static_cast<float>(y)) * 0.096f;
+        float bodyNoise = glm::perlin(glm::vec3(
+          (wx + seedF * 5.0f) * 0.043f,
+          (static_cast<float>(y) - seedF * 3.0f) * 0.058f,
+          (wz - seedF * 7.0f) * 0.043f));
+        float detail3d = glm::perlin(glm::vec3(
+          (wx - seedF * 31.0f) * 0.089f,
+          (static_cast<float>(y) + seedF * 11.0f) * 0.103f,
+          (wz + seedF * 29.0f) * 0.089f));
+        float ridge = 1.0f - std::abs(glm::perlin(glm::vec3(
+          (wx + seedF * 13.0f) * 0.021f,
+          static_cast<float>(y) * 0.027f,
+          (wz - seedF * 17.0f) * 0.021f)));
+        float ridgeBoost = (biome == BiomeType::kMountains) ? ridge * 0.52f : ridge * 0.18f;
+        float density = densityBase + bodyNoise * 0.82f + detail3d * 0.36f + ridgeBoost;
+        if (y < 4) {
+          density += 1.3f;
         }
+        if (density > 0.0f) {
+          blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = kStone;
+        }
+      }
+    }
+  }
 
-        if (allowCavesHere) {
+  // Stage 2: cave and canyon carvers.
+  if (settings.preset != WorldPreset::kClassicFlat) {
+    for (int lz = 0; lz < kChunkSize; ++lz) {
+      for (int lx = 0; lx < kChunkSize; ++lx) {
+        int worldX = baseX + lx;
+        int worldZ = baseZ + lz;
+        size_t idx2d = columnIndex(lx, lz);
+        int targetHeight = columnTargetHeights[idx2d];
+
+        float caveDensity = tuning.caveDensity;
+        float caveRegion = glm::perlin(glm::vec2(
+          (static_cast<float>(worldX) + seedF * 41.0f) * 0.0022f,
+          (static_cast<float>(worldZ) - seedF * 37.0f) * 0.0022f));
+        float caveRegionThreshold = std::clamp(0.60f - 0.11f * (caveDensity - 1.0f), 0.40f, 0.78f);
+        bool allowCavesHere = caveRegion > caveRegionThreshold;
+
+        int caveTop = std::clamp(targetHeight + 18, 18, kChunkHeight - 8);
+        for (int y = 6; y < caveTop; ++y) {
+          size_t idx = static_cast<size_t>(chunkLocalIndex(lx, y, lz));
+          if (blocks[idx] == kAir || isWaterBlock(blocks[idx])) {
+            continue;
+          }
+          if (!allowCavesHere) {
+            continue;
+          }
+
           float caveA = glm::perlin(glm::vec3(
             (static_cast<float>(worldX) + seedF * 31.0f) * 0.062f,
             (static_cast<float>(y) - seedF * 13.0f) * 0.070f,
             (static_cast<float>(worldZ) - seedF * 29.0f) * 0.062f));
           float caveB = glm::perlin(glm::vec3(
-            (static_cast<float>(worldX) - seedF * 7.0f) * 0.125f,
-            (static_cast<float>(y) + seedF * 19.0f) * 0.125f,
-            (static_cast<float>(worldZ) + seedF * 23.0f) * 0.125f));
-          float tubeShape = std::abs(caveA) + 0.62f * std::abs(caveB);
-          float depthT = saturate(static_cast<float>(height - y - 10) / 48.0f);
-          float caveThreshold = (0.038f + 0.014f * depthT) *
+            (static_cast<float>(worldX) - seedF * 7.0f) * 0.122f,
+            (static_cast<float>(y) + seedF * 19.0f) * 0.122f,
+            (static_cast<float>(worldZ) + seedF * 23.0f) * 0.122f));
+          float tubeShape = std::abs(caveA) + 0.60f * std::abs(caveB);
+          float depthT = saturate(static_cast<float>(targetHeight - y) / 54.0f);
+          float caveThreshold = (0.050f + 0.018f * depthT) *
                                 std::clamp(caveDensity, 0.45f, 1.85f);
           if (tubeShape < caveThreshold) {
             blocks[idx] = kAir;
-            continue;
           }
         }
 
-      }
+        float ravineRegion = 0.5f + 0.5f * glm::perlin(glm::vec2(
+          (static_cast<float>(worldX) - seedF * 47.0f) * 0.00085f,
+          (static_cast<float>(worldZ) + seedF * 53.0f) * 0.00085f));
+        float ravineLineA = 1.0f - std::abs(glm::perlin(glm::vec2(
+          (static_cast<float>(worldX) + seedF * 61.0f) * 0.0017f,
+          (static_cast<float>(worldZ) - seedF * 59.0f) * 0.0017f)));
+        float ravineLineB = 1.0f - std::abs(glm::perlin(glm::vec2(
+          (static_cast<float>(worldX) - seedF * 23.0f) * 0.0031f,
+          (static_cast<float>(worldZ) + seedF * 19.0f) * 0.0031f)));
+        float ravineLine = 0.72f * ravineLineA + 0.28f * ravineLineB;
+        float ravineCore = smooth01((ravineLine - 0.962f) / 0.038f);
+        float ravineChance = smooth01((ravineRegion - 0.72f) / 0.28f);
+        float ravineFrequency = tuning.ravineFrequency;
+        float ravineMask = std::clamp(ravineCore * ravineChance * ravineFrequency, 0.0f, 1.0f);
+        float ravineMaskThreshold = std::clamp(0.18f - 0.07f * (ravineFrequency - 1.0f), 0.08f, 0.30f);
 
-      float ravineRegion = 0.5f + 0.5f * glm::perlin(glm::vec2(
-        (static_cast<float>(worldX) - seedF * 47.0f) * 0.00085f,
-        (static_cast<float>(worldZ) + seedF * 53.0f) * 0.00085f));
-      float ravineLineA = 1.0f - std::abs(glm::perlin(glm::vec2(
-        (static_cast<float>(worldX) + seedF * 61.0f) * 0.0017f,
-        (static_cast<float>(worldZ) - seedF * 59.0f) * 0.0017f)));
-      float ravineLineB = 1.0f - std::abs(glm::perlin(glm::vec2(
-        (static_cast<float>(worldX) - seedF * 23.0f) * 0.0031f,
-        (static_cast<float>(worldZ) + seedF * 19.0f) * 0.0031f)));
-      float ravineLine = 0.72f * ravineLineA + 0.28f * ravineLineB;
-      float ravineCore = smooth01((ravineLine - 0.962f) / 0.038f);
-      float ravineChance = smooth01((ravineRegion - 0.72f) / 0.28f);
-      float ravineFrequency = tuning.ravineFrequency;
-      float ravineMask = std::clamp(ravineCore * ravineChance * ravineFrequency, 0.0f, 1.0f);
-      float ravineMaskThreshold = std::clamp(0.20f - 0.08f * (ravineFrequency - 1.0f), 0.08f, 0.30f);
+        if (ravineMask > ravineMaskThreshold && targetHeight > 24) {
+          float depthNoise = 0.5f + 0.5f * glm::perlin(glm::vec2(
+            (static_cast<float>(worldX) - seedF * 13.0f) * 0.0062f,
+            (static_cast<float>(worldZ) + seedF * 7.0f) * 0.0062f));
+          int ravineDepth = static_cast<int>(14.0f + ravineMask * 36.0f + depthNoise * 12.0f);
+          ravineDepth = std::clamp(ravineDepth, 14, 62);
+          int bottomY = std::max(4, targetHeight - ravineDepth);
+          int topY = std::min(kChunkHeight - 2, targetHeight + 3);
 
-      if (ravineMask > ravineMaskThreshold && height > 24) {
-        float depthNoise = 0.5f + 0.5f * glm::perlin(glm::vec2(
-          (static_cast<float>(worldX) - seedF * 13.0f) * 0.0062f,
-          (static_cast<float>(worldZ) + seedF * 7.0f) * 0.0062f));
-        int ravineDepth = static_cast<int>(12.0f + ravineMask * 34.0f + depthNoise * 10.0f);
-        ravineDepth = std::clamp(ravineDepth, 12, 56);
-        int bottomY = std::max(4, height - ravineDepth);
+          for (int y = topY; y >= bottomY; --y) {
+            size_t idx = static_cast<size_t>(chunkLocalIndex(lx, y, lz));
+            if (blocks[idx] == kAir || isWaterBlock(blocks[idx])) {
+              continue;
+            }
 
-        for (int y = height - 1; y >= bottomY; --y) {
-          float depthT = static_cast<float>((height - 1) - y) /
-                         static_cast<float>(std::max(1, ravineDepth - 1));
-          float wallThreshold = 0.14f + depthT * 0.60f;
-          float wallRough = glm::perlin(glm::vec3(
-            (static_cast<float>(worldX) + seedF * 3.0f) * 0.085f,
-            (static_cast<float>(y) - seedF * 7.0f) * 0.11f,
-            (static_cast<float>(worldZ) - seedF * 5.0f) * 0.085f));
-          float carveStrength = ravineMask + wallRough * 0.09f;
-          if (carveStrength > wallThreshold) {
-            blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = kAir;
+            float depthT = static_cast<float>(topY - y) /
+                           static_cast<float>(std::max(1, topY - bottomY));
+            float wallThreshold = 0.13f + depthT * 0.62f;
+            float wallRough = glm::perlin(glm::vec3(
+              (static_cast<float>(worldX) + seedF * 3.0f) * 0.085f,
+              (static_cast<float>(y) - seedF * 7.0f) * 0.11f,
+              (static_cast<float>(worldZ) - seedF * 5.0f) * 0.085f));
+            float carveStrength = ravineMask + wallRough * 0.09f;
+            if (carveStrength > wallThreshold) {
+              blocks[idx] = kAir;
+            }
           }
         }
       }
+    }
+  }
 
-      if (height < kSeaLevel) {
-        for (int y = height; y < kSeaLevel; ++y) {
-          blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = kWater;
+  // Stage 3: flood fill up to sea level.
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      for (int y = 1; y < kSeaLevel; ++y) {
+        size_t idx = static_cast<size_t>(chunkLocalIndex(lx, y, lz));
+        if (blocks[idx] == kAir) {
+          blocks[idx] = kWater;
         }
       }
     }
@@ -499,6 +574,64 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
     }
   }
 
+  // Stage 4: biome surface layers (grass/sand/gravel etc.).
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      size_t index = static_cast<size_t>(lx + lz * kChunkSize);
+      int surfaceY = surfaceHeights[index];
+      if (surfaceY < 1 || surfaceY >= kChunkHeight - 2) {
+        continue;
+      }
+
+      BiomeType biome = columnBiomes[index];
+      uint8_t topBlock = kGrass;
+      uint8_t fillerBlock = kDirt;
+      int fillerDepth = 4;
+
+      if (biome == BiomeType::kOcean || biome == BiomeType::kBeach || biome == BiomeType::kDesert) {
+        topBlock = kSand;
+        fillerBlock = kSand;
+        fillerDepth = 4;
+      } else if (biome == BiomeType::kMountains) {
+        if (surfaceY > kSeaLevel + 26) {
+          topBlock = kStone;
+          fillerBlock = kStone;
+          fillerDepth = 2;
+        } else if (surfaceY > kSeaLevel + 18) {
+          topBlock = kGrass;
+          fillerBlock = kGravel;
+          fillerDepth = 3;
+        } else {
+          topBlock = kGrass;
+          fillerBlock = kDirt;
+          fillerDepth = 3;
+        }
+      }
+
+      if (surfaceY <= kSeaLevel + 1) {
+        topBlock = kSand;
+        fillerBlock = kSand;
+        fillerDepth = std::max(fillerDepth, 3);
+      }
+
+      setLocalBlock(lx, surfaceY, lz, topBlock);
+      for (int depth = 1; depth < fillerDepth; ++depth) {
+        int y = surfaceY - depth;
+        if (y < 1) {
+          break;
+        }
+        uint8_t current = getLocalBlock(lx, y, lz);
+        if (current == kAir || isWaterBlock(current) || current == kLeaves || current == kWood) {
+          break;
+        }
+        if (current == kStone || current == kDirt || current == kGrass ||
+            current == kSand || current == kGravel) {
+          setLocalBlock(lx, y, lz, fillerBlock);
+        }
+      }
+    }
+  }
+
   // Keep beaches narrow by painting sand only very close to coastlines.
   for (int lz = 0; lz < kChunkSize; ++lz) {
     for (int lx = 0; lx < kChunkSize; ++lx) {
@@ -575,6 +708,14 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
         continue;
       }
 
+      BiomeType biome = columnBiomes[surfaceIndex];
+      if (biome == BiomeType::kOcean || biome == BiomeType::kBeach || biome == BiomeType::kDesert) {
+        continue;
+      }
+      if (biome == BiomeType::kMountains && surfaceY > kSeaLevel + 24) {
+        continue;
+      }
+
       uint8_t ground = getLocalBlock(lx, surfaceY, lz);
       if (ground != kGrass && ground != kDirt) {
         continue;
@@ -600,8 +741,8 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
       }
 
       bool tooCloseToTree = false;
-      for (int oz = -2; oz <= 2 && !tooCloseToTree; ++oz) {
-        for (int ox = -2; ox <= 2; ++ox) {
+      for (int oz = -1; oz <= 1 && !tooCloseToTree; ++oz) {
+        for (int ox = -1; ox <= 1; ++ox) {
           int nx = lx + ox;
           int nz = lz + oz;
           if (nx < 0 || nx >= kChunkSize || nz < 0 || nz >= kChunkSize) {
@@ -624,7 +765,21 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
         (static_cast<float>(worldZ) - seedF * 19.0f) * 0.028f));
       float spawnNoise = hashedNoise01(worldX, surfaceY, worldZ, seed, 0x7AEEu);
       float spawnScore = spawnNoise * (0.64f + 0.36f * biomeCluster);
-      if (spawnScore < tuning.treeSpawnThreshold) {
+
+      float treeThreshold = tuning.treeSpawnThreshold;
+      if (biome == BiomeType::kForest) {
+        treeThreshold -= 0.24f;
+      } else if (biome == BiomeType::kPlains) {
+        treeThreshold += 0.04f;
+      } else if (biome == BiomeType::kMountains) {
+        treeThreshold += 0.16f;
+      }
+      float aridity = columnTemperature[surfaceIndex] - columnHumidity[surfaceIndex];
+      treeThreshold += std::max(0.0f, aridity) * 0.06f;
+      treeThreshold -= std::max(0.0f, columnContinentalness[surfaceIndex] - 0.58f) * 0.05f;
+      treeThreshold -= (columnHumidity[surfaceIndex] - 0.5f) * 0.10f;
+      treeThreshold = std::clamp(treeThreshold, 0.45f, 0.96f);
+      if (spawnScore < treeThreshold) {
         continue;
       }
 
@@ -1237,8 +1392,13 @@ void World::updateActiveChunks(int centerChunkX, int centerChunkZ, int radius) {
     return;
   }
 
-  for (int cz = centerChunkZ - radius; cz <= centerChunkZ + radius; ++cz) {
-    for (int cx = centerChunkX - radius; cx <= centerChunkX + radius; ++cx) {
+  // Keep a small hysteresis ring to avoid visible world cutoffs while new chunks
+  // are still generating near the view boundary.
+  const int loadRadius = radius + 1;
+  const int unloadRadius = radius + 2;
+
+  for (int cz = centerChunkZ - loadRadius; cz <= centerChunkZ + loadRadius; ++cz) {
+    for (int cx = centerChunkX - loadRadius; cx <= centerChunkX + loadRadius; ++cx) {
       (void)ensureChunk(cx, cz);
     }
   }
@@ -1247,7 +1407,7 @@ void World::updateActiveChunks(int centerChunkX, int centerChunkZ, int radius) {
     int cx = it->second.cx;
     int cz = it->second.cz;
     int dist = std::max(std::abs(cx - centerChunkX), std::abs(cz - centerChunkZ));
-    if (dist > radius) {
+    if (dist > unloadRadius) {
       if (it->second.modified) {
         savedChunks[it->first] = it->second.blocks;
       }

@@ -160,7 +160,7 @@ private:
   UserSettings appliedSettings{};
   UserSettings pendingSettings{};
   bool settingsDirty = false;
-  int activeChunkViewRadius = 6;
+  int activeChunkViewRadius = 8;
   float menuIntro = 1.0f;
 
   float yaw = -90.0f;

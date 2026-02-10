@@ -715,9 +715,9 @@ void App::setupGameplaySession() {
 
   int initialCx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int initialCz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
-  constexpr int kSpawnChunkRadius = 8;
-  world.updateActiveChunks(initialCx, initialCz, kSpawnChunkRadius);
-  bool fullSpawnRegionReady = world.waitForChunkRegion(initialCx, initialCz, kSpawnChunkRadius, 3000);
+  int spawnChunkRadius = std::max(8, activeChunkViewRadius + 1);
+  world.updateActiveChunks(initialCx, initialCz, spawnChunkRadius);
+  bool fullSpawnRegionReady = world.waitForChunkRegion(initialCx, initialCz, spawnChunkRadius, 3000);
   if (!fullSpawnRegionReady) {
     // If the full radius isn't ready yet, ensure at least the core area is generated
     // so surface probing does not fall back to high-altitude emergency spawn.
@@ -739,7 +739,7 @@ void App::setupGameplaySession() {
   auto findSurfaceSpawn = [&]() -> glm::vec3 {
     int baseX = static_cast<int>(std::floor(playerPos.x));
     int baseZ = static_cast<int>(std::floor(playerPos.z));
-    constexpr int kSpawnSearchRadius = kSpawnChunkRadius * kChunkSize - 2;
+    int spawnSearchRadius = spawnChunkRadius * kChunkSize - 2;
     constexpr int kSeaLevel = 32;
 
     struct SpawnCandidate {
@@ -792,10 +792,10 @@ void App::setupGameplaySession() {
     };
 
     std::vector<SpawnCandidate> candidates;
-    candidates.reserve(static_cast<size_t>((kSpawnSearchRadius * 2 + 1) * (kSpawnSearchRadius * 2 + 1)));
+    candidates.reserve(static_cast<size_t>((spawnSearchRadius * 2 + 1) * (spawnSearchRadius * 2 + 1)));
 
     int maxSurfaceY = std::numeric_limits<int>::min();
-    for (int radius = 0; radius <= kSpawnSearchRadius; ++radius) {
+    for (int radius = 0; radius <= spawnSearchRadius; ++radius) {
       for (int dz = -radius; dz <= radius; ++dz) {
         for (int dx = -radius; dx <= radius; ++dx) {
           if (std::max(std::abs(dx), std::abs(dz)) != radius) {
@@ -866,9 +866,9 @@ void App::setupGameplaySession() {
 
     if (candidates.empty()) {
       std::vector<SpawnCandidate> waterCandidates;
-      waterCandidates.reserve(static_cast<size_t>((kSpawnSearchRadius * 2 + 1) * (kSpawnSearchRadius * 2 + 1)));
+      waterCandidates.reserve(static_cast<size_t>((spawnSearchRadius * 2 + 1) * (spawnSearchRadius * 2 + 1)));
 
-      for (int radius = 0; radius <= kSpawnSearchRadius; ++radius) {
+      for (int radius = 0; radius <= spawnSearchRadius; ++radius) {
         for (int dz = -radius; dz <= radius; ++dz) {
           for (int dx = -radius; dx <= radius; ++dx) {
             if (std::max(std::abs(dx), std::abs(dz)) != radius) {
@@ -1394,7 +1394,7 @@ void App::applySettings(bool refreshWorldStreaming) {
   pendingSettings = appliedSettings;
   settingsDirty = false;
 
-  static constexpr int kQualityToRadius[3] = {4, 6, 8};
+  static constexpr int kQualityToRadius[3] = {6, 8, 10};
   activeChunkViewRadius = kQualityToRadius[appliedSettings.graphicsQuality];
 
   if (refreshWorldStreaming && screenState == ScreenState::kPlaying) {
