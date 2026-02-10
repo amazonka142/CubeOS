@@ -458,7 +458,9 @@ void App::setScreenState(ScreenState state) {
   }
 
   screenState = state;
-  if (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused) {
+  if (screenState == ScreenState::kPlaying ||
+      screenState == ScreenState::kPaused ||
+      screenState == ScreenState::kLoadingWorld) {
     menuIntro = 1.0f;
   } else {
     menuIntro = 0.0f;
@@ -527,6 +529,9 @@ void App::updateWindowTitle() {
       title += " | Paused: " + mark(pauseMenuSelection, 0, "Continue") + "  "
             + mark(pauseMenuSelection, 1, "Settings") + "  "
             + mark(pauseMenuSelection, 2, "Main Menu");
+      break;
+    case ScreenState::kLoadingWorld:
+      title += " | Loading World";
       break;
     case ScreenState::kCreateWorld: {
       std::string presetName = pendingWorldSettings.preset == WorldPreset::kClassicFlat
@@ -626,15 +631,19 @@ void App::loadWorldFromSelection(int entryIndex) {
     return;
   }
 
+  setScreenState(ScreenState::kLoadingWorld);
+  renderLoadingFrame(0.05f, "Reading world data");
+
   const WorldSelectEntry& entry = worldSelectEntries[static_cast<size_t>(entryIndex)];
   currentWorldPath = entry.path;
   if (!world.load(currentWorldPath)) {
     currentWorldPath.clear();
     refreshWorldSelectEntries();
-    updateWindowTitle();
-    uiDirty = true;
+    setScreenState(ScreenState::kWorldSelect);
     return;
   }
+
+  renderLoadingFrame(0.18f, "Preparing settings");
 
   pendingWorldName = entry.displayName;
   pendingWorldSettings = world.getGenerationSettings();
@@ -668,8 +677,8 @@ void App::loadWorldFromSelection(int entryIndex) {
     }
   }
 
+  renderLoadingFrame(0.24f, "Preparing spawn");
   setupGameplaySession();
-  setScreenState(ScreenState::kPlaying);
 }
 
 void App::beginCreateWorldFlow() {
@@ -718,9 +727,13 @@ void App::createWorldFromMenu() {
   saveWorldDisplayNameMeta(currentWorldPath, pendingWorldName);
   hasPendingPlayerResume = false;
 
+  setScreenState(ScreenState::kLoadingWorld);
+  renderLoadingFrame(0.05f, "Creating world");
+
   world.setSeed(seedValue);
   world.setGenerationSettings(settings);
   world.generate();
+  renderLoadingFrame(0.20f, "Generating terrain");
 
   for (ItemStack& slot : hotbar) {
     slot.type = kAir;
@@ -744,11 +757,15 @@ void App::createWorldFromMenu() {
     }
   }
 
+  renderLoadingFrame(0.25f, "Preparing spawn");
   setupGameplaySession();
-  setScreenState(ScreenState::kPlaying);
 }
 
 void App::setupGameplaySession() {
+  if (screenState != ScreenState::kLoadingWorld) {
+    setScreenState(ScreenState::kLoadingWorld);
+  }
+
   playerPos = glm::vec3(8.0f, static_cast<float>(world.height() - 6), 8.0f);
   playerVel = glm::vec3(0.0f);
   onGround = false;
@@ -762,12 +779,43 @@ void App::setupGameplaySession() {
   int initialCz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
   int spawnChunkRadius = std::max(8, activeChunkViewRadius + 1);
   world.updateActiveChunks(initialCx, initialCz, spawnChunkRadius);
-  bool fullSpawnRegionReady = world.waitForChunkRegion(initialCx, initialCz, spawnChunkRadius, 3000);
+  renderLoadingFrame(0.32f, "Generating chunks");
+
+  auto waitForRadiusWithLoading = [&](int radius,
+                                      int maxWaitMs,
+                                      float progressStart,
+                                      float progressEnd,
+                                      const std::string& message) {
+    using clock = std::chrono::steady_clock;
+    auto start = clock::now();
+    auto deadline = start + std::chrono::milliseconds(std::max(1, maxWaitMs));
+    while (clock::now() < deadline) {
+      if (world.waitForChunkRegion(initialCx, initialCz, radius, 18)) {
+        renderLoadingFrame(progressEnd, message);
+        return true;
+      }
+
+      auto now = clock::now();
+      float t = std::chrono::duration<float>(now - start).count() /
+                std::max(0.001f, static_cast<float>(maxWaitMs) / 1000.0f);
+      float progress = progressStart + (progressEnd - progressStart) * std::clamp(t, 0.0f, 1.0f);
+      renderLoadingFrame(progress, message);
+
+      if (window && glfwWindowShouldClose(window)) {
+        return false;
+      }
+    }
+    return world.waitForChunkRegion(initialCx, initialCz, radius, 1);
+  };
+
+  bool fullSpawnRegionReady =
+    waitForRadiusWithLoading(spawnChunkRadius, 3000, 0.32f, 0.68f, "Generating chunks");
   if (!fullSpawnRegionReady) {
     // If the full radius isn't ready yet, ensure at least the core area is generated
     // so surface probing does not fall back to high-altitude emergency spawn.
-    world.waitForChunkRegion(initialCx, initialCz, 2, 7000);
+    waitForRadiusWithLoading(2, 7000, 0.68f, 0.82f, "Preparing spawn area");
   }
+  renderLoadingFrame(0.84f, "Searching spawn");
 
   auto isSpawnGround = [](uint8_t block) {
     return block != kAir && !isWaterBlock(block) && block != kLeaves && block != kGravel;
@@ -1051,6 +1099,8 @@ void App::setupGameplaySession() {
   currentChunkX = cx;
   currentChunkZ = cz;
   chunkCenterValid = true;
+
+  renderLoadingFrame(0.92f, "Building world mesh");
   world.buildMesh(worldVertices, worldIndices);
   rebuildUiMesh();
   composeMeshData();
@@ -1061,6 +1111,9 @@ void App::setupGameplaySession() {
   }
   uiDirty = false;
   refreshSelectedBlock();
+
+  renderLoadingFrame(1.0f, "Done");
+  setScreenState(ScreenState::kPlaying);
 
   world.save(currentWorldPath);
 }
@@ -1080,6 +1133,15 @@ void App::processMenuInput(float deltaTime) {
                       glfwGetKey(window, GLFW_KEY_KP_ENTER) == GLFW_PRESS;
   bool backspacePressed = glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
   bool escPressed = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+
+  double mouseX = 0.0;
+  double mouseY = 0.0;
+  glfwGetCursorPos(window, &mouseX, &mouseY);
+  glm::vec2 menuMouseFb = cursorToFramebuffer(mouseX, mouseY);
+  bool mouseLeftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+  bool mouseRightPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+  bool mouseLeftClicked = mouseLeftPressed && !mouseLeftDown;
+  bool mouseRightClicked = mouseRightPressed && !mouseRightDown;
 
   GLFWgamepadstate gamepadState{};
   bool hasMenuGamepad = false;
@@ -1265,6 +1327,91 @@ void App::processMenuInput(float deltaTime) {
       worldSelectScroll = std::clamp(worldSelectScroll, 0, maxScroll);
     };
 
+    auto activateWorldSelectRow = [&](int row) {
+      if (row < 0 || row >= rowCount) {
+        return;
+      }
+      if (row == 0) {
+        beginCreateWorldFlow();
+      } else if (row == rowCount - 1) {
+        setScreenState(ScreenState::kMainMenu);
+      } else {
+        loadWorldFromSelection(row - 1);
+      }
+    };
+
+    auto deleteWorldSelectRow = [&](int row) {
+      if (row <= 0 || row >= rowCount - 1) {
+        return;
+      }
+
+      const std::string worldPath = worldSelectEntries[static_cast<size_t>(row - 1)].path;
+      std::error_code ec;
+      std::filesystem::remove(std::filesystem::path(worldPath), ec);
+
+      std::string metaPath = worldMetaPathForWorld(std::filesystem::path(worldPath));
+      if (!metaPath.empty()) {
+        ec.clear();
+        std::filesystem::remove(std::filesystem::path(metaPath), ec);
+      }
+
+      std::string statePath = playerStatePathForWorld(worldPath);
+      if (!statePath.empty()) {
+        ec.clear();
+        std::filesystem::remove(std::filesystem::path(statePath), ec);
+      }
+
+      if (currentWorldPath == worldPath) {
+        currentWorldPath.clear();
+      }
+
+      refreshWorldSelectEntries();
+      rowCount = static_cast<int>(worldSelectEntries.size()) + 2;
+      worldSelectSelection = std::clamp(worldSelectSelection, 0, std::max(0, rowCount - 1));
+      syncWorldSelectScroll();
+      updateWindowTitle();
+      uiDirty = true;
+    };
+
+    auto worldSelectRowAtMouse = [&]() -> int {
+      float t = static_cast<float>(glfwGetTime());
+      float intro = menuIntro * menuIntro * (3.0f - 2.0f * menuIntro);
+      float panelWidth = std::min(static_cast<float>(width) * 0.72f, 640.0f);
+      float panelHeight = std::min(static_cast<float>(height) * 0.78f, 540.0f);
+      float panelX = (static_cast<float>(width) - panelWidth) * 0.5f;
+      float panelY = (static_cast<float>(height) - panelHeight) * 0.5f;
+      panelY += (1.0f - intro) * 28.0f;
+      panelY += std::sin(t * 1.4f) * 3.0f;
+
+      int startRow = 0;
+      if (rowCount > kVisibleRows) {
+        startRow = std::clamp(worldSelectScroll, 0, rowCount - kVisibleRows);
+      }
+      int endRow = std::min(rowCount, startRow + kVisibleRows);
+      int visibleRows = endRow - startRow;
+
+      float rowW = panelWidth - 120.0f;
+      float rowX = panelX + (panelWidth - rowW) * 0.5f;
+      float rowH = 40.0f;
+      float rowGap = 10.0f;
+      float rowsH = static_cast<float>(visibleRows) * rowH +
+                    static_cast<float>(std::max(0, visibleRows - 1)) * rowGap;
+      float rowY = panelY + 84.0f + std::max(0.0f, (panelHeight - 116.0f - rowsH) * 0.5f);
+
+      if (menuMouseFb.x < rowX || menuMouseFb.x > rowX + rowW) {
+        return -1;
+      }
+
+      for (int row = startRow; row < endRow; ++row) {
+        int drawIndex = row - startRow;
+        float y = rowY + static_cast<float>(drawIndex) * (rowH + rowGap);
+        if (menuMouseFb.y >= y && menuMouseFb.y <= y + rowH) {
+          return row;
+        }
+      }
+      return -1;
+    };
+
     if (upPressed && !menuUpDown) {
       worldSelectSelection = std::max(0, worldSelectSelection - 1);
       syncWorldSelectScroll();
@@ -1278,17 +1425,28 @@ void App::processMenuInput(float deltaTime) {
       uiDirty = true;
     }
     if (enterPressed && !menuEnterDown) {
-      if (worldSelectSelection == 0) {
-        beginCreateWorldFlow();
-      } else if (worldSelectSelection == rowCount - 1) {
-        setScreenState(ScreenState::kMainMenu);
-      } else {
-        loadWorldFromSelection(worldSelectSelection - 1);
+      activateWorldSelectRow(worldSelectSelection);
+    }
+    if (mouseLeftClicked || mouseRightClicked) {
+      int hoveredRow = worldSelectRowAtMouse();
+      if (hoveredRow >= 0) {
+        worldSelectSelection = hoveredRow;
+        syncWorldSelectScroll();
+        updateWindowTitle();
+        uiDirty = true;
+
+        if (mouseRightClicked) {
+          deleteWorldSelectRow(hoveredRow);
+        } else {
+          activateWorldSelectRow(hoveredRow);
+        }
       }
     }
     if (escPressed && !menuEscDown) {
       setScreenState(ScreenState::kMainMenu);
     }
+  } else if (screenState == ScreenState::kLoadingWorld) {
+    // Loading is driven by synchronous world setup functions.
   } else if (screenState == ScreenState::kSettings) {
     constexpr int kSettingsFieldCount = 6;
     if (upPressed && !menuUpDown) {
@@ -2326,6 +2484,44 @@ void App::rebuildUiMesh() {
                  glm::vec3(0.94f, 0.95f, 0.98f),
                  true);
       }
+    } else if (screenState == ScreenState::kLoadingWorld) {
+      drawText("LOADING WORLD", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f,
+               glm::vec3(0.90f), true);
+
+      float barW = panelWidth - 140.0f;
+      float barH = 24.0f;
+      float barX = panelX + (panelWidth - barW) * 0.5f;
+      float barY = panelY + panelHeight * 0.5f - barH * 0.5f;
+      addQuad(barX, barY, barW, barH, glm::vec3(0.20f, 0.23f, 0.29f), backgroundTile);
+
+      float fillW = (barW - 4.0f) * std::clamp(loadingWorldProgress, 0.0f, 1.0f);
+      addQuad(barX + 2.0f, barY + 2.0f, fillW, barH - 4.0f, glm::vec3(0.32f, 0.62f, 0.92f), backgroundTile);
+
+      float stripeX = std::fmod(static_cast<float>(glfwGetTime()) * 80.0f, 18.0f);
+      for (float sx = barX - stripeX; sx < barX + fillW; sx += 18.0f) {
+        float x0 = std::max(sx, barX + 2.0f);
+        float w = std::min(8.0f, barX + 2.0f + fillW - x0);
+        if (w > 0.0f) {
+          addQuad(x0, barY + 2.0f, w, barH - 4.0f, glm::vec3(0.48f, 0.78f, 0.98f), backgroundTile);
+        }
+      }
+
+      int percent = static_cast<int>(std::round(std::clamp(loadingWorldProgress, 0.0f, 1.0f) * 100.0f));
+      std::string pctText = std::to_string(percent) + " PCT";
+      drawText(pctText,
+               panelX + panelWidth * 0.5f,
+               barY + barH + 16.0f,
+               2.4f,
+               glm::vec3(0.88f, 0.92f, 0.98f),
+               true);
+
+      std::string message = loadingWorldMessage.empty() ? "LOADING" : loadingWorldMessage;
+      drawText(message,
+               panelX + panelWidth * 0.5f,
+               barY - 24.0f,
+               2.5f,
+               glm::vec3(0.84f, 0.88f, 0.95f),
+               true);
     } else if (screenState == ScreenState::kWorldSelect) {
       drawText("SELECT WORLD", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
 
@@ -2751,6 +2947,37 @@ void App::showSelectedItemToast() {
   selectedItemToastText = displayNameForBlock(selectedBlock);
   selectedItemToastTimer = 2.0f;
   uiDirty = true;
+}
+
+void App::renderLoadingFrame(float progress, const std::string& message) {
+  loadingWorldProgress = std::clamp(progress, 0.0f, 1.0f);
+  loadingWorldMessage = message;
+  uiDirty = true;
+
+  if (!vkReady || !window) {
+    return;
+  }
+
+  glfwPollEvents();
+
+  if (uiDirty) {
+    rebuildUiMesh();
+  }
+  composeMeshData();
+  vk.updateMesh(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
+  uiDirty = false;
+
+  glm::vec3 eye = glm::vec3(6.0f, 62.0f, -18.0f);
+  glm::vec3 front = glm::normalize(glm::vec3(0.2f, -0.16f, 1.0f));
+  glm::mat4 view = glm::lookAt(eye, eye + front, glm::vec3(0.0f, 1.0f, 0.0f));
+  glm::mat4 proj = glm::perspective(glm::radians(70.0f),
+                                    width / static_cast<float>(height),
+                                    0.1f,
+                                    200.0f);
+  proj[1][1] *= -1.0f;
+  vk.setCameraWorldState(eye, false);
+  vk.setCameraMatrices(view, proj);
+  vk.drawFrame();
 }
 
 bool App::addToInventory(uint8_t type, uint16_t count, uint16_t* outRemaining) {
@@ -3199,7 +3426,10 @@ App::RaycastHit App::raycast(const glm::vec3& origin,
 }
 
 void App::cleanup() {
-  if (screenState == ScreenState::kPlaying && !currentWorldPath.empty()) {
+  if ((screenState == ScreenState::kPlaying ||
+       screenState == ScreenState::kPaused ||
+       screenState == ScreenState::kLoadingWorld) &&
+      !currentWorldPath.empty()) {
     saveCurrentPlayerState();
     world.save(currentWorldPath);
   }

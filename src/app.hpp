@@ -33,7 +33,8 @@ private:
     kSettings = 2,
     kCreateWorld = 3,
     kPlaying = 4,
-    kPaused = 5
+    kPaused = 5,
+    kLoadingWorld = 6
   };
 
   struct WorldSelectEntry {
@@ -43,6 +44,7 @@ private:
 
   void refreshSelectedBlock();
   void showSelectedItemToast();
+  void renderLoadingFrame(float progress, const std::string& message);
   bool addToInventory(uint8_t type, uint16_t count, uint16_t* outRemaining = nullptr);
   void initWindow();
   void initVulkan();
@@ -168,6 +170,8 @@ private:
   float menuIntro = 1.0f;
   std::string selectedItemToastText{};
   float selectedItemToastTimer = 0.0f;
+  float loadingWorldProgress = 0.0f;
+  std::string loadingWorldMessage{};
 
   float yaw = -90.0f;
   float pitch = 0.0f;
