@@ -123,6 +123,73 @@
   - Acceptance: menu interaction is responsive and visually consistent.
   - Status: `Done` (animations/focus feedback present; controller menu navigation input wired).
 
+## v0.2.1 Issues (Minecraft-Style Worldgen Expansion + In-Game UX)
+
+### P1
+- `CUBE-228` Multi-noise climate sampler parity pass.
+  - Scope: move biome selection to full climate vector workflow (temperature/humidity/continentalness/erosion/depth/weirdness) with stable parameter ranges.
+  - Depends on: `CUBE-223`, `CUBE-224`.
+  - Acceptance: biome transitions are coherent and deterministic across chunk borders.
+
+- `CUBE-229` Density-router terrain shaping.
+  - Scope: replace simplified height blending with router-style density composition (continents, peaks/valleys, erosion, detail).
+  - Depends on: `CUBE-228`.
+  - Acceptance: terrain produces recognizable plains, plateaus, ridges, and mountain chains without water-world bias.
+
+- `CUBE-240` Aquifer and underground fluid rewrite.
+  - Scope: local water table model and deep fluid thresholds tuned to avoid surface flooding while preserving cave lakes.
+  - Depends on: `CUBE-229`.
+  - Acceptance: caves contain aquifer water pockets; surface remains predominantly land where climate suggests land.
+
+- `CUBE-241` Region-anchored structure starts/references.
+  - Scope: region-based deterministic structure placement (village/mineshaft/temple scaffolding) with chunk intersection placement.
+  - Depends on: `CUBE-228`.
+  - Acceptance: structures spawn predictably per seed and stitch correctly across chunk boundaries.
+
+- `CUBE-242` In-game pause menu flow.
+  - Scope: `Esc` opens pause menu with `Continue`, `Settings`, `Main Menu` instead of immediate menu exit.
+  - Depends on: `CUBE-220`.
+  - Acceptance: gameplay pauses reliably and returns to world without state loss.
+  - Status: `Done` (implemented in current build).
+
+- `CUBE-243` Hotbar selection item-name toast.
+  - Scope: show selected item name overlay for a short duration when slot selection changes.
+  - Depends on: `CUBE-220`, `CUBE-226`.
+  - Acceptance: switching hotbar slot displays readable item label for ~2 seconds.
+  - Status: `Done` (implemented in current build).
+
+### P2
+- `CUBE-244` Structure piece sets and assembly rules.
+  - Scope: define piece pools, placement constraints, and biome gating for structure variants.
+  - Depends on: `CUBE-241`.
+  - Acceptance: same structure type can appear in multiple valid layouts.
+
+- `CUBE-245` Carver event model parity.
+  - Scope: deterministic worm/canyon event generation over regions with better continuity and thickness profiles.
+  - Depends on: `CUBE-229`.
+  - Acceptance: carvers travel naturally across multiple chunks without abrupt cutoff.
+
+- `CUBE-246` Surface rule graph.
+  - Scope: configurable layered surface rules (coastline sand/gravel, snowline, mountain stone caps, desert depth rules).
+  - Depends on: `CUBE-228`, `CUBE-229`.
+  - Acceptance: biome-appropriate top/filler composition with less manual branching.
+
+- `CUBE-247` Feature pipeline enrichment.
+  - Scope: per-biome feature sets for trees/vegetation/ores with weighted attempts and height logic closer to vanilla behavior.
+  - Depends on: `CUBE-228`, `CUBE-246`.
+  - Acceptance: each biome feels distinct in decoration and resource profile.
+
+### P3
+- `CUBE-248` Worldgen debug overlays.
+  - Scope: visual overlays for chunk borders, biome IDs, surface height, density slices, and aquifer level.
+  - Depends on: `CUBE-228`..`CUBE-247`.
+  - Acceptance: debugging tools can explain terrain outcomes in problematic seeds.
+
+- `CUBE-249` Seed parity and tuning pass.
+  - Scope: run deterministic seed suite and tune thresholds toward Minecraft-like macro results.
+  - Depends on: `CUBE-228`..`CUBE-248`.
+  - Acceptance: no major regressions in spawn quality, terrain diversity, or structure distribution.
+
 ## v0.2.3 Issues (Coins + Upgrades)
 
 ### P1

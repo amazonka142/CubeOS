@@ -32,7 +32,8 @@ private:
     kWorldSelect = 1,
     kSettings = 2,
     kCreateWorld = 3,
-    kPlaying = 4
+    kPlaying = 4,
+    kPaused = 5
   };
 
   struct WorldSelectEntry {
@@ -41,6 +42,7 @@ private:
   };
 
   void refreshSelectedBlock();
+  void showSelectedItemToast();
   bool addToInventory(uint8_t type, uint16_t count, uint16_t* outRemaining = nullptr);
   void initWindow();
   void initVulkan();
@@ -136,7 +138,9 @@ private:
   float waterSimAccumulator = 0.0f;
   float waterSimBoostTimer = 0.0f;
   ScreenState screenState = ScreenState::kMainMenu;
+  ScreenState settingsReturnState = ScreenState::kMainMenu;
   int mainMenuSelection = 0;
+  int pauseMenuSelection = 0;
   int worldSelectSelection = 0;
   int worldSelectScroll = 0;
   int settingsSelection = 0;
@@ -162,6 +166,8 @@ private:
   bool settingsDirty = false;
   int activeChunkViewRadius = 8;
   float menuIntro = 1.0f;
+  std::string selectedItemToastText{};
+  float selectedItemToastTimer = 0.0f;
 
   float yaw = -90.0f;
   float pitch = 0.0f;

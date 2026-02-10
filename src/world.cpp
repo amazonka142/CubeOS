@@ -1128,6 +1128,11 @@ void computeBiomeClimateMaps(int cx,
       float continentalness = 0.5f + 0.5f * glm::perlin(glm::vec2(
         (wx + static_cast<float>(seed) * 11.0f) * 0.00045f,
         (wz - static_cast<float>(seed) * 13.0f) * 0.00045f));
+      float dxFromOrigin = static_cast<float>(worldX);
+      float dzFromOrigin = static_cast<float>(worldZ);
+      float distFromOrigin = std::sqrt(dxFromOrigin * dxFromOrigin + dzFromOrigin * dzFromOrigin);
+      float spawnLandBias = smooth01(1.0f - distFromOrigin / 768.0f) * 0.24f;
+      continentalness = std::clamp(continentalness + 0.10f + spawnLandBias, 0.0f, 1.0f);
       float erosion = 0.5f + 0.5f * glm::perlin(glm::vec2(
         (wx - seedF * 37.0f) * 0.00120f,
         (wz + seedF * 23.0f) * 0.00120f));
@@ -1139,9 +1144,9 @@ void computeBiomeClimateMaps(int cx,
         (wz + seedF * 31.0f) * 0.00135f));
 
       DebugBiomeId biome = DebugBiomeId::kPlains;
-      if (continentalness < 0.25f) {
+      if (continentalness < 0.18f) {
         biome = DebugBiomeId::kOcean;
-      } else if (continentalness < 0.31f) {
+      } else if (continentalness < 0.24f) {
         biome = DebugBiomeId::kBeach;
       } else if (temperature > 0.72f && humidity < 0.34f) {
         biome = DebugBiomeId::kDesert;
@@ -1244,16 +1249,16 @@ void runNoiseStage(int cx,
         (static_cast<float>(worldZ) - seedF * 19.0f) * 0.0017f));
       float detail = fbmNoise(static_cast<float>(worldX), static_cast<float>(worldZ), seed);
 
-      float targetHeight = static_cast<float>(kStageSeaLevel) - 10.0f +
-                           continentalness * 52.0f +
-                           (1.0f - erosion) * 12.0f +
-                           mountainLift * 42.0f +
-                           broad * 8.0f +
-                           detail * 5.0f;
+      float targetHeight = static_cast<float>(kStageSeaLevel) - 8.0f +
+                           continentalness * 56.0f +
+                           (1.0f - erosion) * 10.0f +
+                           mountainLift * 40.0f +
+                           broad * 7.0f +
+                           detail * 4.0f;
       if (biomeId == static_cast<uint8_t>(DebugBiomeId::kOcean)) {
-        targetHeight -= 8.0f;
+        targetHeight -= 12.0f;
       } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kBeach)) {
-        targetHeight -= 2.5f;
+        targetHeight -= 4.0f;
       } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kDesert)) {
         targetHeight += 2.0f;
       } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
@@ -1289,10 +1294,14 @@ void runNoiseStage(int cx,
           (static_cast<float>(worldZ) + seedF * 17.0f) * 0.023f)));
 
         float caveSignal = std::max(1.0f - cheese * 1.28f, spaghetti * 0.84f);
-        float caveThreshold = std::clamp(0.70f - settings.caveDensity * 0.13f, 0.35f, 0.68f);
-        float caveCut = caveSignal > caveThreshold
+        float caveThreshold = std::clamp(0.78f - settings.caveDensity * 0.10f, 0.48f, 0.78f);
+        float rawCaveCut = caveSignal > caveThreshold
           ? (caveSignal - caveThreshold) * 16.0f
           : 0.0f;
+        float depthFactor = smooth01((static_cast<float>(kStageSeaLevel + 16 - y)) / 56.0f);
+        float belowSurface = targetHeight - static_cast<float>(y);
+        float surfaceFactor = std::clamp(belowSurface / 6.0f, 0.0f, 1.0f);
+        float caveCut = rawCaveCut * depthFactor * surfaceFactor;
 
         float density = vertical + macro3d * 0.86f + micro3d * 0.34f - caveCut;
         if (y < minY + 2) {
@@ -1308,9 +1317,11 @@ void runNoiseStage(int cx,
       float aqNoise = glm::perlin(glm::vec2(
         (static_cast<float>(worldX) + seedF * 61.0f) * 0.0105f,
         (static_cast<float>(worldZ) - seedF * 59.0f) * 0.0105f));
-      int aquiferLevel = kStageSeaLevel + static_cast<int>(std::round(aqNoise * 14.0f));
-      if (continentalness < 0.28f) {
-        aquiferLevel = std::max(aquiferLevel, kStageSeaLevel + 2);
+      int aquiferLevel = kStageSeaLevel - 4 + static_cast<int>(std::round(aqNoise * 8.0f));
+      if (continentalness < 0.24f) {
+        aquiferLevel = std::max(aquiferLevel, kStageSeaLevel);
+      } else {
+        aquiferLevel = std::min(aquiferLevel, kStageSeaLevel - 2);
       }
       int aquiferClampMin = minY + 2;
       int aquiferClampMax = maxY - 2;
@@ -1326,15 +1337,8 @@ void runNoiseStage(int cx,
           continue;
         }
 
-        if (y <= 8) {
-          float lavaChance = hashedNoise01(worldX, y, worldZ, seed, 0xA11Au);
-          if (lavaChance > 0.88f) {
-            setLocalBlock(lx, y, lz, kWater);
-            continue;
-          }
-        }
-
-        if (y <= aquiferLevel) {
+        int fluidFillTopY = std::min(aquiferLevel, kStageSeaLevel);
+        if (y <= fluidFillTopY) {
           setLocalBlock(lx, y, lz, kWater);
         }
       }

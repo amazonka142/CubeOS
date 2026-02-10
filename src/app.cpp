@@ -118,6 +118,39 @@ int tileForBlock(uint8_t type) {
   }
 }
 
+std::string displayNameForBlock(uint8_t type) {
+  if (isWaterBlock(type)) {
+    return "WATER";
+  }
+
+  switch (type) {
+    case kAir:
+      return "EMPTY HAND";
+    case kGrass:
+      return "GRASS BLOCK";
+    case kDirt:
+      return "DIRT";
+    case kStone:
+      return "STONE";
+    case kSand:
+      return "SAND";
+    case kGravel:
+      return "GRAVEL";
+    case kWood:
+      return "WOOD";
+    case kLeaves:
+      return "LEAVES";
+    case kCoalOre:
+      return "COAL ORE";
+    case kIronOre:
+      return "IRON ORE";
+    case kGoldOre:
+      return "GOLD ORE";
+    default:
+      return "BLOCK";
+  }
+}
+
 glm::vec2 uvForTile(int tile, float u, float v) {
   float tileSizeU = 1.0f / static_cast<float>(kAtlasCols);
   float tileSizeV = 1.0f / static_cast<float>(kAtlasRows);
@@ -399,14 +432,21 @@ void App::setScreenState(ScreenState state) {
   }
 
   // Persist current world whenever leaving gameplay.
-  if (screenState == ScreenState::kPlaying &&
-      state != ScreenState::kPlaying &&
+  bool leavingGameplay =
+    (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused) &&
+    (state != ScreenState::kPlaying && state != ScreenState::kPaused);
+  bool pauseToInGameSettings =
+    screenState == ScreenState::kPaused &&
+    state == ScreenState::kSettings &&
+    settingsReturnState == ScreenState::kPaused;
+  if (leavingGameplay &&
+      !pauseToInGameSettings &&
       !currentWorldPath.empty()) {
     saveCurrentPlayerState();
     world.save(currentWorldPath);
   }
 
-  if (state != ScreenState::kPlaying && inventoryOpen) {
+  if (state != ScreenState::kPlaying && state != ScreenState::kPaused && inventoryOpen) {
     setInventoryOpen(false);
   }
 
@@ -418,7 +458,7 @@ void App::setScreenState(ScreenState state) {
   }
 
   screenState = state;
-  if (screenState == ScreenState::kPlaying) {
+  if (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused) {
     menuIntro = 1.0f;
   } else {
     menuIntro = 0.0f;
@@ -482,6 +522,11 @@ void App::updateWindowTitle() {
     }
     case ScreenState::kSettings:
       title += " | Settings | Up/Down Select | Left/Right Adjust | Enter Action";
+      break;
+    case ScreenState::kPaused:
+      title += " | Paused: " + mark(pauseMenuSelection, 0, "Continue") + "  "
+            + mark(pauseMenuSelection, 1, "Settings") + "  "
+            + mark(pauseMenuSelection, 2, "Main Menu");
       break;
     case ScreenState::kCreateWorld: {
       std::string presetName = pendingWorldSettings.preset == WorldPreset::kClassicFlat
@@ -1164,6 +1209,7 @@ void App::processMenuInput(float deltaTime) {
         beginWorldSelectFlow();
       } else if (mainMenuSelection == 1) {
         settingsSelection = 0;
+        settingsReturnState = ScreenState::kMainMenu;
         pendingSettings = appliedSettings;
         settingsDirty = false;
         setScreenState(ScreenState::kSettings);
@@ -1173,6 +1219,33 @@ void App::processMenuInput(float deltaTime) {
     }
     if (escPressed && !menuEscDown) {
       glfwSetWindowShouldClose(window, GLFW_TRUE);
+    }
+  } else if (screenState == ScreenState::kPaused) {
+    if (upPressed && !menuUpDown) {
+      pauseMenuSelection = std::max(0, pauseMenuSelection - 1);
+      updateWindowTitle();
+      uiDirty = true;
+    }
+    if (downPressed && !menuDownDown) {
+      pauseMenuSelection = std::min(2, pauseMenuSelection + 1);
+      updateWindowTitle();
+      uiDirty = true;
+    }
+    if (enterPressed && !menuEnterDown) {
+      if (pauseMenuSelection == 0) {
+        setScreenState(ScreenState::kPlaying);
+      } else if (pauseMenuSelection == 1) {
+        settingsSelection = 0;
+        settingsReturnState = ScreenState::kPaused;
+        pendingSettings = appliedSettings;
+        settingsDirty = false;
+        setScreenState(ScreenState::kSettings);
+      } else {
+        setScreenState(ScreenState::kMainMenu);
+      }
+    }
+    if (escPressed && !menuEscDown) {
+      setScreenState(ScreenState::kPlaying);
     }
   } else if (screenState == ScreenState::kWorldSelect) {
     int rowCount = static_cast<int>(worldSelectEntries.size()) + 2;
@@ -1233,7 +1306,10 @@ void App::processMenuInput(float deltaTime) {
       if (settingsSelection <= 2) {
         adjustSettingsValue(true);
       } else if (settingsSelection == 3) {
-        applySettings(screenState == ScreenState::kPlaying);
+        bool inGameContext =
+          settingsReturnState == ScreenState::kPlaying ||
+          settingsReturnState == ScreenState::kPaused;
+        applySettings(inGameContext);
         saveSettings();
       } else if (settingsSelection == 4) {
         pendingSettings = UserSettings{};
@@ -1242,13 +1318,13 @@ void App::processMenuInput(float deltaTime) {
       } else if (settingsSelection == 5) {
         pendingSettings = appliedSettings;
         settingsDirty = false;
-        setScreenState(ScreenState::kMainMenu);
+        setScreenState(settingsReturnState);
       }
     }
     if (escPressed && !menuEscDown) {
       pendingSettings = appliedSettings;
       settingsDirty = false;
-      setScreenState(ScreenState::kMainMenu);
+      setScreenState(settingsReturnState);
     }
   } else if (screenState == ScreenState::kCreateWorld) {
     constexpr int kCreateFieldCount = 8;
@@ -1478,6 +1554,12 @@ void App::mainLoop() {
 
     glfwPollEvents();
     processInput(deltaTime);
+
+    if (selectedItemToastTimer > 0.0f) {
+      selectedItemToastTimer = std::max(0.0f, selectedItemToastTimer - deltaTime);
+      uiDirty = true;
+    }
+
     if (screenState != ScreenState::kPlaying) {
       if (menuIntro < 1.0f) {
         menuIntro = std::min(1.0f, menuIntro + deltaTime * 3.2f);
@@ -1534,7 +1616,7 @@ void App::mainLoop() {
     glm::vec3 eye;
     glm::vec3 front;
     bool cameraInWater = false;
-    if (screenState == ScreenState::kPlaying) {
+    if (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused) {
       eye = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
       front = cameraFront();
       cameraInWater = isWaterBlock(world.getBlock(static_cast<int>(std::floor(eye.x)),
@@ -1575,8 +1657,9 @@ void App::processInput(float deltaTime) {
     if (inventoryOpen) {
       setInventoryOpen(false);
     } else {
-      setScreenState(ScreenState::kMainMenu);
-      // Consume held Escape so returning to menu does not immediately close app.
+      pauseMenuSelection = 0;
+      setScreenState(ScreenState::kPaused);
+      // Consume held Escape so pause menu does not instantly unpause.
       menuEscDown = true;
     }
     escDown = true;
@@ -1600,7 +1683,7 @@ void App::processInput(float deltaTime) {
   }
   if (selectedSlot != prevSlot) {
     refreshSelectedBlock();
-    uiDirty = true;
+    showSelectedItemToast();
   }
 
   bool leftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
@@ -2218,6 +2301,31 @@ void App::rebuildUiMesh() {
                  glm::vec3(0.94f, 0.95f, 0.98f),
                  true);
       }
+    } else if (screenState == ScreenState::kPaused) {
+      drawText("GAME PAUSED", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
+      float totalH = kMenuButtonHeight * 3.0f + kMenuButtonGap * 2.0f;
+      float bx = panelX + (panelWidth - kMenuButtonWidth) * 0.5f;
+      float by = panelY + 90.0f + (panelHeight - 130.0f - totalH) * 0.5f;
+      static constexpr const char* kPauseLabels[3] = {"CONTINUE", "SETTINGS", "MAIN MENU"};
+      for (int i = 0; i < 3; ++i) {
+        glm::vec3 rowColor = glm::vec3(0.22f, 0.24f, 0.29f);
+        if (i == 2) {
+          rowColor = glm::vec3(0.32f, 0.22f, 0.22f);
+        }
+        drawMenuRow(i,
+                    pauseMenuSelection,
+                    bx,
+                    by + static_cast<float>(i) * (kMenuButtonHeight + kMenuButtonGap),
+                    kMenuButtonWidth,
+                    kMenuButtonHeight,
+                    rowColor);
+        drawText(kPauseLabels[i],
+                 bx + kMenuButtonWidth * 0.5f,
+                 by + static_cast<float>(i) * (kMenuButtonHeight + kMenuButtonGap) + 12.0f,
+                 3.1f,
+                 glm::vec3(0.94f, 0.95f, 0.98f),
+                 true);
+      }
     } else if (screenState == ScreenState::kWorldSelect) {
       drawText("SELECT WORLD", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
 
@@ -2316,12 +2424,14 @@ void App::rebuildUiMesh() {
       sens << pendingSettings.sensitivity;
 
       std::string dirtyMark = settingsDirty ? " UNSAVED" : " SAVED";
+      std::string backText =
+        settingsReturnState == ScreenState::kPaused ? "BACK TO PAUSE" : "BACK TO MENU";
       std::string line0 = "GRAPHICS " + graphicsValue;
       std::string line1 = "SENSITIVITY " + sens.str();
       std::string line2 = "AUDIO " + std::to_string(pendingSettings.audioVolume);
       std::string line3 = "SAVE AND APPLY";
       std::string line4 = "RESET DEFAULTS";
-      std::string line5 = "BACK TO MENU" + dirtyMark;
+      std::string line5 = backText + dirtyMark;
 
       std::array<std::string, 6> lines = {line0, line1, line2, line3, line4, line5};
       for (int i = 0; i < 6; ++i) {
@@ -2569,6 +2679,23 @@ void App::rebuildUiMesh() {
     drawStack(hotbar[i], x, y);
   }
 
+  if (selectedItemToastTimer > 0.0f && !selectedItemToastText.empty()) {
+    float textPixel = 2.4f;
+    float textW = measureTextWidth(selectedItemToastText, textPixel);
+    float boxW = textW + 24.0f;
+    float boxH = textPixel * static_cast<float>(kGlyphHeight) + 14.0f;
+    float boxX = static_cast<float>(width) * 0.5f - boxW * 0.5f;
+    float boxY = startY - boxH - 14.0f;
+
+    addQuad(boxX, boxY, boxW, boxH, glm::vec3(0.12f, 0.13f, 0.17f), backgroundTile);
+    drawText(selectedItemToastText,
+             static_cast<float>(width) * 0.5f,
+             boxY + 7.0f,
+             textPixel,
+             glm::vec3(0.92f, 0.94f, 0.98f),
+             true);
+  }
+
   if (inventoryOpen && cursorStack.count > 0 && cursorStack.type != kAir) {
     float cx = cursorFbX - kSlotSize * 0.5f;
     float cy = cursorFbY - kSlotSize * 0.5f;
@@ -2618,6 +2745,12 @@ void App::refreshSelectedBlock() {
   } else {
     selectedBlock = stack.type;
   }
+}
+
+void App::showSelectedItemToast() {
+  selectedItemToastText = displayNameForBlock(selectedBlock);
+  selectedItemToastTimer = 2.0f;
+  uiDirty = true;
 }
 
 bool App::addToInventory(uint8_t type, uint16_t count, uint16_t* outRemaining) {
@@ -2814,6 +2947,8 @@ bool App::handleInventoryClick(double xpos, double ypos, bool rightClick) {
     if (selectedSlot != index) {
       selectedSlot = index;
       selectionChanged = true;
+      refreshSelectedBlock();
+      showSelectedItemToast();
     }
   }
 
