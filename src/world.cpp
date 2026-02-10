@@ -152,10 +152,10 @@ V02WorldTuning tuningForV02(const WorldGenSettings& settings) {
   return tuning;
 }
 
-std::vector<uint8_t> generateChunkBlocks(int cx,
-                                         int cz,
-                                         int seed,
-                                         const WorldGenSettings& settings) {
+[[maybe_unused]] std::vector<uint8_t> generateChunkBlocks(int cx,
+                                                          int cz,
+                                                          int seed,
+                                                          const WorldGenSettings& settings) {
   std::vector<uint8_t> blocks(static_cast<size_t>(kChunkSize * kChunkSize * kChunkHeight), kAir);
   int baseX = cx * kChunkSize;
   int baseZ = cz * kChunkSize;
@@ -1065,6 +1065,946 @@ std::vector<uint8_t> generateChunkBlocks(int cx,
   return blocks;
 }
 
+enum class DebugBiomeId : uint8_t {
+  kOcean = 0,
+  kBeach = 1,
+  kPlains = 2,
+  kForest = 3,
+  kDesert = 4,
+  kMountains = 5
+};
+
+void computeBiomeClimateMaps(int cx,
+                             int cz,
+                             int seed,
+                             const WorldGenSettings& settings,
+                             std::array<uint8_t, kChunkColumnCount>& outBiomeMap,
+                             std::array<BiomeClimateSample, kChunkColumnCount>& outClimateMap) {
+  outBiomeMap.fill(static_cast<uint8_t>(DebugBiomeId::kPlains));
+  outClimateMap.fill(BiomeClimateSample{});
+
+  int baseX = cx * kChunkSize;
+  int baseZ = cz * kChunkSize;
+  const float seedF = static_cast<float>(seed);
+
+  auto columnIndex = [](int lx, int lz) {
+    return static_cast<size_t>(lx + lz * kChunkSize);
+  };
+
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      int worldX = baseX + lx;
+      int worldZ = baseZ + lz;
+      size_t idx = columnIndex(lx, lz);
+
+      if (settings.preset == WorldPreset::kClassicFlat) {
+        outBiomeMap[idx] = static_cast<uint8_t>(DebugBiomeId::kPlains);
+        outClimateMap[idx] = {
+          0.58f, // temperature
+          0.52f, // humidity
+          0.62f, // continentalness
+          0.50f, // erosion
+          0.50f, // depth
+          0.50f  // weirdness
+        };
+        continue;
+      }
+
+      float warpX = glm::perlin(glm::vec2(
+        (static_cast<float>(worldX) + seedF * 101.0f) * 0.0016f,
+        (static_cast<float>(worldZ) - seedF * 89.0f) * 0.0016f));
+      float warpZ = glm::perlin(glm::vec2(
+        (static_cast<float>(worldX) - seedF * 37.0f) * 0.0016f,
+        (static_cast<float>(worldZ) + seedF * 53.0f) * 0.0016f));
+      float wx = static_cast<float>(worldX) + warpX * 24.0f;
+      float wz = static_cast<float>(worldZ) + warpZ * 24.0f;
+
+      float temperature = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx + seedF * 17.0f) * 0.00095f,
+        (wz - seedF * 11.0f) * 0.00095f));
+      float humidity = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx - seedF * 7.0f) * 0.00105f,
+        (wz + seedF * 13.0f) * 0.00105f));
+      float continentalness = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx + static_cast<float>(seed) * 11.0f) * 0.00045f,
+        (wz - static_cast<float>(seed) * 13.0f) * 0.00045f));
+      float erosion = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx - seedF * 37.0f) * 0.00120f,
+        (wz + seedF * 23.0f) * 0.00120f));
+      float weirdness = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx + seedF * 61.0f) * 0.00185f,
+        (wz - seedF * 53.0f) * 0.00185f));
+      float depth = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (wx - seedF * 29.0f) * 0.00135f,
+        (wz + seedF * 31.0f) * 0.00135f));
+
+      DebugBiomeId biome = DebugBiomeId::kPlains;
+      if (continentalness < 0.25f) {
+        biome = DebugBiomeId::kOcean;
+      } else if (continentalness < 0.31f) {
+        biome = DebugBiomeId::kBeach;
+      } else if (temperature > 0.72f && humidity < 0.34f) {
+        biome = DebugBiomeId::kDesert;
+      } else if (weirdness > 0.67f && continentalness > 0.56f) {
+        biome = DebugBiomeId::kMountains;
+      } else if (humidity > 0.58f) {
+        biome = DebugBiomeId::kForest;
+      }
+
+      outBiomeMap[idx] = static_cast<uint8_t>(biome);
+      outClimateMap[idx] = {
+        temperature,
+        humidity,
+        continentalness,
+        erosion,
+        depth,
+        weirdness
+      };
+    }
+  }
+}
+
+constexpr int kStageSeaLevel = 32;
+constexpr int kCarverRegionSizeChunks = 8;
+constexpr int kStructureRegionSizeChunks = 32;
+
+void applyHeightRangeMask(std::vector<uint8_t>& blocks, int minY, int maxY) {
+  minY = std::clamp(minY, 0, kChunkHeight - 1);
+  maxY = std::clamp(maxY, minY, kChunkHeight - 1);
+  if (minY == 0 && maxY == kChunkHeight - 1) {
+    return;
+  }
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      for (int y = 0; y < minY; ++y) {
+        blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = kAir;
+      }
+      for (int y = maxY + 1; y < kChunkHeight; ++y) {
+        blocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = kAir;
+      }
+    }
+  }
+}
+
+void runNoiseStage(int cx,
+                   int cz,
+                   int seed,
+                   const WorldGenSettings& settings,
+                   const std::array<uint8_t, kChunkColumnCount>& biomeMap,
+                   const std::array<BiomeClimateSample, kChunkColumnCount>& climateMap,
+                   std::vector<uint8_t>& outBlocks) {
+  outBlocks.assign(static_cast<size_t>(kChunkSize * kChunkSize * kChunkHeight), kAir);
+  int baseX = cx * kChunkSize;
+  int baseZ = cz * kChunkSize;
+  const float seedF = static_cast<float>(seed);
+  int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
+  int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+
+  if (settings.preset == WorldPreset::kClassicFlat) {
+    int flatTop = std::clamp(kStageSeaLevel + 8, minY, maxY);
+    for (int lz = 0; lz < kChunkSize; ++lz) {
+      for (int lx = 0; lx < kChunkSize; ++lx) {
+        for (int y = minY; y <= flatTop; ++y) {
+          outBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = kStone;
+        }
+      }
+    }
+    applyHeightRangeMask(outBlocks, minY, maxY);
+    return;
+  }
+
+  auto setLocalBlock = [&](int lx, int y, int lz, uint8_t type) {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return;
+    }
+    outBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+  };
+
+  auto getLocalBlock = [&](int lx, int y, int lz) -> uint8_t {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return kAir;
+    }
+    return outBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))];
+  };
+
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      size_t column = static_cast<size_t>(lx + lz * kChunkSize);
+      int worldX = baseX + lx;
+      int worldZ = baseZ + lz;
+      const BiomeClimateSample& climate = climateMap[column];
+      uint8_t biomeId = biomeMap[column];
+
+      float continentalness = climate.continentalness;
+      float erosion = climate.erosion;
+      float weirdness = climate.weirdness;
+      float mountainLift = std::max(0.0f, weirdness - 0.55f);
+      float broad = glm::perlin(glm::vec2(
+        (static_cast<float>(worldX) + seedF * 23.0f) * 0.0017f,
+        (static_cast<float>(worldZ) - seedF * 19.0f) * 0.0017f));
+      float detail = fbmNoise(static_cast<float>(worldX), static_cast<float>(worldZ), seed);
+
+      float targetHeight = static_cast<float>(kStageSeaLevel) - 10.0f +
+                           continentalness * 52.0f +
+                           (1.0f - erosion) * 12.0f +
+                           mountainLift * 42.0f +
+                           broad * 8.0f +
+                           detail * 5.0f;
+      if (biomeId == static_cast<uint8_t>(DebugBiomeId::kOcean)) {
+        targetHeight -= 8.0f;
+      } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kBeach)) {
+        targetHeight -= 2.5f;
+      } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kDesert)) {
+        targetHeight += 2.0f;
+      } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
+        targetHeight += 12.0f;
+      }
+      int heightClampMin = minY + 4;
+      int heightClampMax = maxY - 4;
+      if (heightClampMax < heightClampMin) {
+        heightClampMin = minY;
+        heightClampMax = maxY;
+      }
+      targetHeight = std::clamp(targetHeight,
+                                static_cast<float>(heightClampMin),
+                                static_cast<float>(heightClampMax));
+
+      for (int y = minY; y <= maxY; ++y) {
+        float vertical = (targetHeight - static_cast<float>(y)) * 0.11f;
+        float macro3d = glm::perlin(glm::vec3(
+          (static_cast<float>(worldX) + seedF * 31.0f) * 0.041f,
+          (static_cast<float>(y) - seedF * 17.0f) * 0.048f,
+          (static_cast<float>(worldZ) - seedF * 29.0f) * 0.041f));
+        float micro3d = glm::perlin(glm::vec3(
+          (static_cast<float>(worldX) - seedF * 7.0f) * 0.089f,
+          (static_cast<float>(y) + seedF * 13.0f) * 0.098f,
+          (static_cast<float>(worldZ) + seedF * 11.0f) * 0.089f));
+        float cheese = std::abs(glm::perlin(glm::vec3(
+          (static_cast<float>(worldX) + seedF * 41.0f) * 0.064f,
+          (static_cast<float>(y) - seedF * 37.0f) * 0.066f,
+          (static_cast<float>(worldZ) - seedF * 43.0f) * 0.064f)));
+        float spaghetti = 1.0f - std::abs(glm::perlin(glm::vec3(
+          (static_cast<float>(worldX) - seedF * 13.0f) * 0.023f,
+          (static_cast<float>(y) + seedF * 29.0f) * 0.031f,
+          (static_cast<float>(worldZ) + seedF * 17.0f) * 0.023f)));
+
+        float caveSignal = std::max(1.0f - cheese * 1.28f, spaghetti * 0.84f);
+        float caveThreshold = std::clamp(0.70f - settings.caveDensity * 0.13f, 0.35f, 0.68f);
+        float caveCut = caveSignal > caveThreshold
+          ? (caveSignal - caveThreshold) * 16.0f
+          : 0.0f;
+
+        float density = vertical + macro3d * 0.86f + micro3d * 0.34f - caveCut;
+        if (y < minY + 2) {
+          density += 2.4f;
+        }
+        if (density > 0.0f) {
+          setLocalBlock(lx, y, lz, kStone);
+        } else {
+          setLocalBlock(lx, y, lz, kAir);
+        }
+      }
+
+      float aqNoise = glm::perlin(glm::vec2(
+        (static_cast<float>(worldX) + seedF * 61.0f) * 0.0105f,
+        (static_cast<float>(worldZ) - seedF * 59.0f) * 0.0105f));
+      int aquiferLevel = kStageSeaLevel + static_cast<int>(std::round(aqNoise * 14.0f));
+      if (continentalness < 0.28f) {
+        aquiferLevel = std::max(aquiferLevel, kStageSeaLevel + 2);
+      }
+      int aquiferClampMin = minY + 2;
+      int aquiferClampMax = maxY - 2;
+      if (aquiferClampMax < aquiferClampMin) {
+        aquiferClampMin = minY;
+        aquiferClampMax = maxY;
+      }
+      aquiferLevel = std::clamp(aquiferLevel, aquiferClampMin, aquiferClampMax);
+
+      for (int y = minY; y <= maxY; ++y) {
+        uint8_t current = getLocalBlock(lx, y, lz);
+        if (current != kAir) {
+          continue;
+        }
+
+        if (y <= 8) {
+          float lavaChance = hashedNoise01(worldX, y, worldZ, seed, 0xA11Au);
+          if (lavaChance > 0.88f) {
+            setLocalBlock(lx, y, lz, kWater);
+            continue;
+          }
+        }
+
+        if (y <= aquiferLevel) {
+          setLocalBlock(lx, y, lz, kWater);
+        }
+      }
+    }
+  }
+
+  applyHeightRangeMask(outBlocks, minY, maxY);
+}
+
+void runSurfaceStage(int cx,
+                     int cz,
+                     int seed,
+                     const WorldGenSettings& settings,
+                     const std::array<uint8_t, kChunkColumnCount>& biomeMap,
+                     const std::array<BiomeClimateSample, kChunkColumnCount>& climateMap,
+                     std::vector<uint8_t>& ioBlocks) {
+  int baseX = cx * kChunkSize;
+  int baseZ = cz * kChunkSize;
+  int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
+  int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+
+  auto getLocalBlock = [&](int lx, int y, int lz) -> uint8_t {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return kAir;
+    }
+    return ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))];
+  };
+
+  auto setLocalBlock = [&](int lx, int y, int lz, uint8_t type) {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return;
+    }
+    ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+  };
+
+  std::array<int, kChunkColumnCount> topHeights{};
+  topHeights.fill(minY - 1);
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+      for (int y = maxY; y >= minY; --y) {
+        uint8_t t = getLocalBlock(lx, y, lz);
+        if (t != kAir && !isWaterBlock(t)) {
+          topHeights[idx] = y;
+          break;
+        }
+      }
+    }
+  }
+
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+      int topY = topHeights[idx];
+      if (topY < minY || topY > maxY) {
+        continue;
+      }
+
+      uint8_t biome = biomeMap[idx];
+      const BiomeClimateSample& climate = climateMap[idx];
+      uint8_t top = kGrass;
+      uint8_t filler = kDirt;
+      int fillerDepth = 3;
+
+      if (biome == static_cast<uint8_t>(DebugBiomeId::kOcean) ||
+          biome == static_cast<uint8_t>(DebugBiomeId::kBeach)) {
+        top = kSand;
+        filler = kSand;
+        fillerDepth = 4;
+      } else if (biome == static_cast<uint8_t>(DebugBiomeId::kDesert)) {
+        top = kSand;
+        filler = kSand;
+        fillerDepth = 5;
+      } else if (biome == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
+        if (topY > kStageSeaLevel + 30) {
+          top = kStone;
+          filler = kStone;
+          fillerDepth = 2;
+        } else {
+          top = kGravel;
+          filler = kStone;
+          fillerDepth = 3;
+        }
+      }
+
+      if (topY <= kStageSeaLevel + 1) {
+        top = kSand;
+        filler = kSand;
+        fillerDepth = std::max(fillerDepth, 3);
+      }
+      if (climate.temperature < 0.28f && topY > kStageSeaLevel + 20) {
+        top = kStone;
+        filler = kStone;
+      }
+
+      setLocalBlock(lx, topY, lz, top);
+      for (int d = 1; d <= fillerDepth; ++d) {
+        int y = topY - d;
+        if (y < minY) {
+          break;
+        }
+        uint8_t current = getLocalBlock(lx, y, lz);
+        if (current == kAir || isWaterBlock(current)) {
+          break;
+        }
+        if (current == kStone || current == kDirt || current == kGrass || current == kSand || current == kGravel) {
+          setLocalBlock(lx, y, lz, filler);
+        }
+      }
+
+      if (top == kSand && fillerDepth >= 4) {
+        for (int d = fillerDepth + 1; d <= fillerDepth + 3; ++d) {
+          int y = topY - d;
+          if (y < minY) {
+            break;
+          }
+          uint8_t current = getLocalBlock(lx, y, lz);
+          if (current == kStone) {
+            setLocalBlock(lx, y, lz, kSand);
+          }
+        }
+      }
+
+      int worldX = baseX + lx;
+      int worldZ = baseZ + lz;
+      if (topY < kStageSeaLevel &&
+          hashedNoise01(worldX, topY, worldZ, seed, 0xC1A0u) > 0.72f) {
+        setLocalBlock(lx, topY, lz, kGravel);
+      }
+    }
+  }
+}
+
+struct CarverEvent {
+  float startX = 0.0f;
+  float startY = 0.0f;
+  float startZ = 0.0f;
+  float yaw = 0.0f;
+  float pitch = 0.0f;
+  float baseRadius = 2.0f;
+  int length = 0;
+  bool liquid = false;
+};
+
+void collectCarverEvents(int chunkX,
+                         int chunkZ,
+                         int seed,
+                         bool liquid,
+                         std::vector<CarverEvent>& outEvents) {
+  outEvents.clear();
+
+  int minRegionX = floorDiv(chunkX - 2, kCarverRegionSizeChunks);
+  int maxRegionX = floorDiv(chunkX + 2, kCarverRegionSizeChunks);
+  int minRegionZ = floorDiv(chunkZ - 2, kCarverRegionSizeChunks);
+  int maxRegionZ = floorDiv(chunkZ + 2, kCarverRegionSizeChunks);
+
+  constexpr float kPi = 3.14159265358979323846f;
+  for (int rz = minRegionZ; rz <= maxRegionZ; ++rz) {
+    for (int rx = minRegionX; rx <= maxRegionX; ++rx) {
+      uint32_t state = static_cast<uint32_t>(
+        hashChunkSeed(seed, rx, rz, liquid ? 0x1A11u : 0xCA11u));
+      int attempts = liquid ? 2 : 3;
+      for (int i = 0; i < attempts; ++i) {
+        float chance = liquid ? 0.32f : 0.58f;
+        if (rand01(state) > chance) {
+          continue;
+        }
+
+        int startChunkX = rx * kCarverRegionSizeChunks + randIntInclusive(state, 0, kCarverRegionSizeChunks - 1);
+        int startChunkZ = rz * kCarverRegionSizeChunks + randIntInclusive(state, 0, kCarverRegionSizeChunks - 1);
+        float startX = static_cast<float>(startChunkX * kChunkSize + randIntInclusive(state, 0, kChunkSize - 1));
+        float startZ = static_cast<float>(startChunkZ * kChunkSize + randIntInclusive(state, 0, kChunkSize - 1));
+        float startY = liquid
+          ? static_cast<float>(randIntInclusive(state, 2, 18))
+          : static_cast<float>(randIntInclusive(state, 10, kChunkHeight - 20));
+        float yaw = rand01(state) * 2.0f * kPi;
+        float pitch = (rand01(state) - 0.5f) * (liquid ? 0.45f : 0.30f);
+        float radius = liquid
+          ? (1.4f + rand01(state) * 2.2f)
+          : (1.7f + rand01(state) * 3.4f);
+        int length = liquid
+          ? randIntInclusive(state, 26, 72)
+          : randIntInclusive(state, 36, 128);
+        outEvents.push_back({startX, startY, startZ, yaw, pitch, radius, length, liquid});
+      }
+    }
+  }
+}
+
+void runCarverStage(int chunkX,
+                    int chunkZ,
+                    int seed,
+                    const WorldGenSettings& settings,
+                    std::vector<uint8_t>& ioBlocks,
+                    bool liquidPass) {
+  int baseX = chunkX * kChunkSize;
+  int baseZ = chunkZ * kChunkSize;
+  int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
+  int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+
+  auto setLocal = [&](int lx, int y, int lz, uint8_t type) {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return;
+    }
+    ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+  };
+
+  auto getLocal = [&](int lx, int y, int lz) -> uint8_t {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return kAir;
+    }
+    return ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))];
+  };
+
+  std::vector<CarverEvent> events;
+  collectCarverEvents(chunkX, chunkZ, seed, liquidPass, events);
+
+  constexpr float kPi = 3.14159265358979323846f;
+  for (size_t eventIndex = 0; eventIndex < events.size(); ++eventIndex) {
+    const CarverEvent& event = events[eventIndex];
+    uint32_t state = static_cast<uint32_t>(
+      hashChunkSeed(seed,
+                    static_cast<int>(event.startX),
+                    static_cast<int>(event.startZ),
+                    liquidPass ? 0x1A4Fu : 0xC4A1u ^ static_cast<uint32_t>(eventIndex)));
+
+    float x = event.startX;
+    float y = event.startY;
+    float z = event.startZ;
+    float yaw = event.yaw;
+    float pitch = event.pitch;
+
+    for (int step = 0; step < event.length; ++step) {
+      float t = (event.length <= 1) ? 0.0f : static_cast<float>(step) / static_cast<float>(event.length - 1);
+      float radiusWave = 0.75f + 0.45f * std::sin(t * kPi);
+      float radius = std::max(1.1f, event.baseRadius * radiusWave);
+
+      int minWX = static_cast<int>(std::floor(x - radius)) - 1;
+      int maxWX = static_cast<int>(std::floor(x + radius)) + 1;
+      int minWZ = static_cast<int>(std::floor(z - radius)) - 1;
+      int maxWZ = static_cast<int>(std::floor(z + radius)) + 1;
+      int minWY = std::max(minY, static_cast<int>(std::floor(y - radius)) - 1);
+      int maxWY = std::min(maxY, static_cast<int>(std::floor(y + radius)) + 1);
+
+      if (maxWX >= baseX && minWX <= baseX + kChunkSize - 1 &&
+          maxWZ >= baseZ && minWZ <= baseZ + kChunkSize - 1 &&
+          maxWY >= minY && minWY <= maxY) {
+        for (int wy = minWY; wy <= maxWY; ++wy) {
+          for (int wz = minWZ; wz <= maxWZ; ++wz) {
+            if (wz < baseZ || wz >= baseZ + kChunkSize) {
+              continue;
+            }
+            for (int wx = minWX; wx <= maxWX; ++wx) {
+              if (wx < baseX || wx >= baseX + kChunkSize) {
+                continue;
+              }
+
+              float nx = (static_cast<float>(wx) + 0.5f - x) / radius;
+              float ny = (static_cast<float>(wy) + 0.5f - y) / (radius * 0.9f);
+              float nz = (static_cast<float>(wz) + 0.5f - z) / radius;
+              float dist = nx * nx + ny * ny + nz * nz;
+              if (dist >= 1.0f) {
+                continue;
+              }
+
+              int lx = wx - baseX;
+              int lz = wz - baseZ;
+              uint8_t current = getLocal(lx, wy, lz);
+              if (current == kAir || isWaterBlock(current) || current == kLeaves || current == kWood) {
+                continue;
+              }
+
+              if (liquidPass) {
+                uint8_t fluid = kWater;
+                setLocal(lx, wy, lz, fluid);
+              } else {
+                setLocal(lx, wy, lz, kAir);
+              }
+            }
+          }
+        }
+      }
+
+      float speed = liquidPass ? 1.25f : 1.55f;
+      x += std::cos(yaw) * std::cos(pitch) * speed;
+      y += std::sin(pitch) * speed;
+      z += std::sin(yaw) * std::cos(pitch) * speed;
+      yaw += (rand01(state) - 0.5f) * (liquidPass ? 0.19f : 0.13f);
+      pitch = std::clamp(pitch + (rand01(state) - 0.5f) * (liquidPass ? 0.11f : 0.07f), -0.65f, 0.65f);
+    }
+  }
+
+  applyHeightRangeMask(ioBlocks, minY, maxY);
+}
+
+void placeOreFeatures(int cx,
+                      int cz,
+                      int seed,
+                      const WorldGenSettings& settings,
+                      std::vector<uint8_t>& ioBlocks) {
+  int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
+  int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+
+  auto getLocal = [&](int lx, int y, int lz) -> uint8_t {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return kAir;
+    }
+    return ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))];
+  };
+
+  auto setLocal = [&](int lx, int y, int lz, uint8_t type) {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return;
+    }
+    ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+  };
+
+  struct OreRule {
+    uint8_t type;
+    uint32_t salt;
+    int attempts;
+    int minY;
+    int maxY;
+    int minVein;
+    int maxVein;
+  };
+
+  std::array<OreRule, 3> rules = {{
+    {kCoalOre, 0xC011u, 18, std::max(minY, 6), maxY, 8, 16},
+    {kIronOre, 0x1A2Bu, 16, std::max(minY, 4), std::min(maxY, 74), 5, 10},
+    {kGoldOre, 0x90D1u, 4, minY, std::min(maxY, 24), 4, 8}
+  }};
+
+  for (const OreRule& rule : rules) {
+    uint32_t state = static_cast<uint32_t>(hashChunkSeed(seed, cx, cz, rule.salt));
+    int oreMinY = std::clamp(rule.minY, minY, maxY);
+    int oreMaxY = std::clamp(rule.maxY, oreMinY, maxY);
+
+    for (int attempt = 0; attempt < rule.attempts; ++attempt) {
+      int lx = randIntInclusive(state, 0, kChunkSize - 1);
+      int lz = randIntInclusive(state, 0, kChunkSize - 1);
+      int y = randIntInclusive(state, oreMinY, oreMaxY);
+      int vein = randIntInclusive(state, rule.minVein, rule.maxVein);
+
+      int px = lx;
+      int py = y;
+      int pz = lz;
+      for (int step = 0; step < vein; ++step) {
+        for (int oz = -1; oz <= 1; ++oz) {
+          for (int ox = -1; ox <= 1; ++ox) {
+            int tx = px + ox;
+            int tz = pz + oz;
+            int ty = py + randIntInclusive(state, -1, 1);
+            if (ty < oreMinY || ty > oreMaxY) {
+              continue;
+            }
+            if (getLocal(tx, ty, tz) == kStone) {
+              setLocal(tx, ty, tz, rule.type);
+            }
+          }
+        }
+        px += randIntInclusive(state, -1, 1);
+        py += randIntInclusive(state, -1, 1);
+        pz += randIntInclusive(state, -1, 1);
+      }
+    }
+  }
+}
+
+void placeTreeFeatures(int cx,
+                       int cz,
+                       int seed,
+                       const WorldGenSettings& settings,
+                       const std::array<uint8_t, kChunkColumnCount>& biomeMap,
+                       std::vector<uint8_t>& ioBlocks) {
+  int baseX = cx * kChunkSize;
+  int baseZ = cz * kChunkSize;
+  int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
+  int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+
+  auto getLocal = [&](int lx, int y, int lz) -> uint8_t {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return kAir;
+    }
+    return ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))];
+  };
+
+  auto setLocal = [&](int lx, int y, int lz, uint8_t type) {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return;
+    }
+    ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+  };
+
+  std::array<int, kChunkColumnCount> topHeights{};
+  topHeights.fill(minY - 1);
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+      for (int y = maxY; y >= minY; --y) {
+        uint8_t t = getLocal(lx, y, lz);
+        if (t != kAir && !isWaterBlock(t)) {
+          topHeights[idx] = y;
+          break;
+        }
+      }
+    }
+  }
+
+  uint32_t state = static_cast<uint32_t>(hashChunkSeed(seed, cx, cz, 0x7AEEu));
+  int attempts = 16;
+  for (int i = 0; i < attempts; ++i) {
+    int lx = randIntInclusive(state, 1, kChunkSize - 2);
+    int lz = randIntInclusive(state, 1, kChunkSize - 2);
+    size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+    int topY = topHeights[idx];
+    if (topY < minY + 1 || topY > maxY - 8) {
+      continue;
+    }
+
+    uint8_t ground = getLocal(lx, topY, lz);
+    if (ground != kGrass && ground != kDirt && ground != kSand) {
+      continue;
+    }
+
+    uint8_t biome = biomeMap[idx];
+    float chance = 0.10f;
+    if (biome == static_cast<uint8_t>(DebugBiomeId::kForest)) {
+      chance = 0.34f;
+    } else if (biome == static_cast<uint8_t>(DebugBiomeId::kPlains)) {
+      chance = 0.08f;
+    } else if (biome == static_cast<uint8_t>(DebugBiomeId::kDesert) ||
+               biome == static_cast<uint8_t>(DebugBiomeId::kBeach) ||
+               biome == static_cast<uint8_t>(DebugBiomeId::kOcean)) {
+      chance = 0.0f;
+    } else if (biome == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
+      chance = 0.05f;
+    }
+
+    if (rand01(state) > chance) {
+      continue;
+    }
+
+    int trunkHeight = randIntInclusive(state, 4, 6);
+    bool clear = true;
+    for (int y = topY + 1; y <= topY + trunkHeight + 2; ++y) {
+      if (getLocal(lx, y, lz) != kAir) {
+        clear = false;
+        break;
+      }
+    }
+    if (!clear) {
+      continue;
+    }
+
+    for (int y = topY + 1; y <= topY + trunkHeight; ++y) {
+      setLocal(lx, y, lz, kWood);
+    }
+
+    int crownY = topY + trunkHeight;
+    for (int dy = -2; dy <= 2; ++dy) {
+      int y = crownY + dy;
+      if (y < minY || y > maxY) {
+        continue;
+      }
+      int radius = (dy <= 0) ? 2 : 1;
+      if (dy == 2) {
+        radius = 0;
+      }
+      for (int oz = -radius; oz <= radius; ++oz) {
+        for (int ox = -radius; ox <= radius; ++ox) {
+          int tx = lx + ox;
+          int tz = lz + oz;
+          if (tx < 0 || tx >= kChunkSize || tz < 0 || tz >= kChunkSize) {
+            continue;
+          }
+          if (std::abs(ox) == 2 && std::abs(oz) == 2 && dy <= 0) {
+            continue;
+          }
+          uint8_t current = getLocal(tx, y, tz);
+          if (current == kAir || isWaterBlock(current)) {
+            setLocal(tx, y, tz, kLeaves);
+          }
+        }
+      }
+    }
+
+    int worldX = baseX + lx;
+    int worldZ = baseZ + lz;
+    if (hashedNoise01(worldX, topY, worldZ, seed, 0x4C41u) > 0.82f && topY + trunkHeight + 1 <= maxY) {
+      setLocal(lx, topY + trunkHeight + 1, lz, kLeaves);
+    }
+  }
+}
+
+void placeRegionalStructureFeatures(int cx,
+                                    int cz,
+                                    int seed,
+                                    const WorldGenSettings& settings,
+                                    std::vector<uint8_t>& ioBlocks) {
+  int baseX = cx * kChunkSize;
+  int baseZ = cz * kChunkSize;
+  int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
+  int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+
+  auto setWorldIfInChunk = [&](int wx, int y, int wz, uint8_t type) {
+    if (y < minY || y > maxY) {
+      return;
+    }
+    int lx = wx - baseX;
+    int lz = wz - baseZ;
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize) {
+      return;
+    }
+    ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+  };
+
+  int regionX = floorDiv(cx, kStructureRegionSizeChunks);
+  int regionZ = floorDiv(cz, kStructureRegionSizeChunks);
+  for (int rz = regionZ - 1; rz <= regionZ + 1; ++rz) {
+    for (int rx = regionX - 1; rx <= regionX + 1; ++rx) {
+      uint32_t state = static_cast<uint32_t>(hashChunkSeed(seed, rx, rz, 0x5EEDu));
+      if (rand01(state) > 0.22f) {
+        continue;
+      }
+
+      int startChunkX = rx * kStructureRegionSizeChunks + randIntInclusive(state, 0, kStructureRegionSizeChunks - 1);
+      int startChunkZ = rz * kStructureRegionSizeChunks + randIntInclusive(state, 0, kStructureRegionSizeChunks - 1);
+      int centerX = startChunkX * kChunkSize + randIntInclusive(state, 4, kChunkSize - 5);
+      int centerZ = startChunkZ * kChunkSize + randIntInclusive(state, 4, kChunkSize - 5);
+
+      int centerChunkLocalX = centerX - baseX;
+      int centerChunkLocalZ = centerZ - baseZ;
+      if ((centerChunkLocalX < -6 || centerChunkLocalX > kChunkSize + 5) &&
+          (centerChunkLocalZ < -6 || centerChunkLocalZ > kChunkSize + 5)) {
+        continue;
+      }
+
+      int foundationMinY = minY + 2;
+      int foundationMaxY = maxY - 8;
+      if (foundationMaxY < foundationMinY) {
+        continue;
+      }
+      int foundationY = randIntInclusive(state, foundationMinY, foundationMaxY);
+      for (int oz = -3; oz <= 3; ++oz) {
+        for (int ox = -3; ox <= 3; ++ox) {
+          int wx = centerX + ox;
+          int wz = centerZ + oz;
+          setWorldIfInChunk(wx, foundationY, wz, kStone);
+          if (std::abs(ox) == 3 || std::abs(oz) == 3) {
+            setWorldIfInChunk(wx, foundationY + 1, wz, kStone);
+          }
+        }
+      }
+
+      std::array<std::pair<int, int>, 4> corners = {{
+        {-2, -2}, {2, -2}, {-2, 2}, {2, 2}
+      }};
+      for (const auto& [ox, oz] : corners) {
+        int pillarH = randIntInclusive(state, 3, 6);
+        for (int y = 1; y <= pillarH; ++y) {
+          setWorldIfInChunk(centerX + ox, foundationY + y, centerZ + oz, kStone);
+        }
+      }
+    }
+  }
+}
+
+void runFeatureStage(int cx,
+                     int cz,
+                     int seed,
+                     const WorldGenSettings& settings,
+                     const std::array<uint8_t, kChunkColumnCount>& biomeMap,
+                     std::vector<uint8_t>& ioBlocks) {
+  placeOreFeatures(cx, cz, seed, settings, ioBlocks);
+  if (settings.generateStructures) {
+    placeRegionalStructureFeatures(cx, cz, seed, settings, ioBlocks);
+  }
+  placeTreeFeatures(cx, cz, seed, settings, biomeMap, ioBlocks);
+  applyHeightRangeMask(ioBlocks, settings.minY, settings.maxY);
+}
+
+struct GeneratedChunkData {
+  std::vector<uint8_t> blocks;
+  std::array<uint8_t, kChunkColumnCount> biomeMap{};
+  std::array<BiomeClimateSample, kChunkColumnCount> climateMap{};
+  ChunkGenStatus status = ChunkGenStatus::kEmpty;
+};
+
+GeneratedChunkData generateChunkDataToStatus(int cx,
+                                             int cz,
+                                             int seed,
+                                             const WorldGenSettings& settings,
+                                             ChunkGenStatus targetStatus) {
+  GeneratedChunkData out;
+  out.blocks.resize(static_cast<size_t>(kChunkSize * kChunkSize * kChunkHeight), kAir);
+  out.biomeMap.fill(static_cast<uint8_t>(DebugBiomeId::kPlains));
+  out.climateMap.fill(BiomeClimateSample{});
+
+  auto clampStatus = [](ChunkGenStatus status) {
+    if (status < ChunkGenStatus::kEmpty) {
+      return ChunkGenStatus::kEmpty;
+    }
+    if (status > ChunkGenStatus::kFull) {
+      return ChunkGenStatus::kFull;
+    }
+    return status;
+  };
+  targetStatus = clampStatus(targetStatus);
+  out.status = ChunkGenStatus::kEmpty;
+
+  if (targetStatus >= ChunkGenStatus::kStructureStarts) {
+    out.status = ChunkGenStatus::kStructureStarts;
+  }
+  if (targetStatus >= ChunkGenStatus::kStructureReferences) {
+    out.status = ChunkGenStatus::kStructureReferences;
+  }
+  if (targetStatus < ChunkGenStatus::kBiomes) {
+    return out;
+  }
+
+  computeBiomeClimateMaps(cx, cz, seed, settings, out.biomeMap, out.climateMap);
+  out.status = ChunkGenStatus::kBiomes;
+
+  if (targetStatus < ChunkGenStatus::kNoise) {
+    return out;
+  }
+  runNoiseStage(cx, cz, seed, settings, out.biomeMap, out.climateMap, out.blocks);
+  out.status = ChunkGenStatus::kNoise;
+
+  if (targetStatus < ChunkGenStatus::kSurface) {
+    return out;
+  }
+  runSurfaceStage(cx, cz, seed, settings, out.biomeMap, out.climateMap, out.blocks);
+  out.status = ChunkGenStatus::kSurface;
+
+  if (targetStatus < ChunkGenStatus::kCarvers) {
+    return out;
+  }
+  runCarverStage(cx, cz, seed, settings, out.blocks, false);
+  out.status = ChunkGenStatus::kCarvers;
+
+  if (targetStatus < ChunkGenStatus::kLiquidCarvers) {
+    return out;
+  }
+  runCarverStage(cx, cz, seed, settings, out.blocks, true);
+  out.status = ChunkGenStatus::kLiquidCarvers;
+
+  if (targetStatus < ChunkGenStatus::kFeatures) {
+    return out;
+  }
+  runFeatureStage(cx, cz, seed, settings, out.biomeMap, out.blocks);
+  out.status = ChunkGenStatus::kFeatures;
+
+  if (targetStatus >= ChunkGenStatus::kLight) {
+    out.status = ChunkGenStatus::kLight;
+  }
+  if (targetStatus >= ChunkGenStatus::kSpawn) {
+    out.status = ChunkGenStatus::kSpawn;
+  }
+  if (targetStatus >= ChunkGenStatus::kHeightmaps) {
+    out.status = ChunkGenStatus::kHeightmaps;
+  }
+  if (targetStatus >= ChunkGenStatus::kFull) {
+    out.status = ChunkGenStatus::kFull;
+  }
+
+  return out;
+}
+
 } // namespace
 
 World::World(int initialChunksXIn, int initialChunksZIn, int seedIn)
@@ -1073,11 +2013,58 @@ World::World(int initialChunksXIn, int initialChunksZIn, int seedIn)
       seed(seedIn) {
   int maxDim = std::max(initialChunksX, initialChunksZ);
   initialRadius = std::max(1, maxDim / 2);
+  setGenerationSettings(genSettings);
   startChunkWorkers();
 }
 
 World::~World() {
   stopChunkWorkers();
+}
+
+void World::setGenerationSettings(const WorldGenSettings& settings) {
+  genSettings = settings;
+  genSettings.caveDensity = std::clamp(genSettings.caveDensity, 0.25f, 2.5f);
+  genSettings.ravineFrequency = std::clamp(genSettings.ravineFrequency, 0.25f, 2.5f);
+  genSettings.startInventoryMode = genSettings.startInventoryMode <= 1 ? genSettings.startInventoryMode : 0;
+  genSettings.minY = std::clamp(genSettings.minY, 0, kChunkHeight - 1);
+  genSettings.maxY = std::clamp(genSettings.maxY, genSettings.minY, kChunkHeight - 1);
+}
+
+void World::generateChunkToStatus(int chunkX, int chunkZ, ChunkGenStatus targetStatus) {
+  if (targetStatus <= ChunkGenStatus::kEmpty) {
+    return;
+  }
+
+  pumpChunkGeneration();
+  Chunk& chunk = ensureChunk(chunkX, chunkZ);
+  if (!chunk.generating && chunk.generatedStatus >= targetStatus) {
+    return;
+  }
+
+  if (chunk.generating) {
+    using clock = std::chrono::steady_clock;
+    auto deadline = clock::now() + std::chrono::milliseconds(10);
+    while (chunk.generating && clock::now() < deadline) {
+      pumpChunkGeneration();
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  if (chunk.generating || chunk.generatedStatus < targetStatus) {
+    generateChunk(chunk, targetStatus);
+    pendingGenerationEpochByKey.erase(chunkKey(chunkX, chunkZ));
+    chunk.dirty = true;
+    markNeighborChunksDirty(chunk.cx, chunk.cz);
+    meshDirty = true;
+  }
+}
+
+ChunkGenStatus World::getChunkGenerationStatus(int chunkX, int chunkZ) const {
+  const Chunk* chunk = findChunk(chunkX, chunkZ);
+  if (!chunk) {
+    return ChunkGenStatus::kEmpty;
+  }
+  return chunk->generatedStatus;
 }
 
 void World::startChunkWorkers() {
@@ -1107,7 +2094,15 @@ void World::startChunkWorkers() {
         ChunkGenerationResult result;
         result.key = task.key;
         result.epoch = task.epoch;
-        result.blocks = generateChunkBlocks(task.cx, task.cz, task.seed, task.settings);
+        GeneratedChunkData generated = generateChunkDataToStatus(task.cx,
+                                                                 task.cz,
+                                                                 task.seed,
+                                                                 task.settings,
+                                                                 task.targetStatus);
+        result.blocks = std::move(generated.blocks);
+        result.biomeMap = generated.biomeMap;
+        result.climateMap = generated.climateMap;
+        result.status = generated.status;
 
         {
           std::lock_guard<std::mutex> lock(generationMutex);
@@ -1162,7 +2157,7 @@ const World::Chunk* World::findChunk(int cx, int cz) const {
   return &it->second;
 }
 
-void World::queueChunkGeneration(int cx, int cz, uint32_t epoch) {
+void World::queueChunkGeneration(int cx, int cz, uint32_t epoch, ChunkGenStatus targetStatus) {
   uint64_t key = chunkKey(cx, cz);
   auto pendingIt = pendingGenerationEpochByKey.find(key);
   if (pendingIt != pendingGenerationEpochByKey.end() && pendingIt->second == epoch) {
@@ -1172,7 +2167,7 @@ void World::queueChunkGeneration(int cx, int cz, uint32_t epoch) {
 
   {
     std::lock_guard<std::mutex> lock(generationMutex);
-    generationQueue.push({cx, cz, seed, genSettings, epoch, key});
+    generationQueue.push({cx, cz, seed, genSettings, epoch, key, targetStatus});
   }
   generationCv.notify_one();
 }
@@ -1240,6 +2235,9 @@ void World::pumpChunkGeneration() {
     }
 
     chunk.blocks = std::move(result.blocks);
+    chunk.biomeMap = result.biomeMap;
+    chunk.climateMap = result.climateMap;
+    chunk.generatedStatus = result.status;
     chunk.generating = false;
     chunk.dirty = true;
     markNeighborChunksDirty(chunk.cx, chunk.cz);
@@ -1258,12 +2256,15 @@ World::Chunk& World::ensureChunk(int cx, int cz) {
   chunk.cx = cx;
   chunk.cz = cz;
   chunk.blocks.resize(static_cast<size_t>(kChunkSize * kChunkSize * kChunkHeight), kAir);
+  chunk.biomeMap.fill(2);
+  chunk.climateMap.fill(BiomeClimateSample{});
   chunk.dirty = true;
 
   auto savedIt = savedChunks.find(key);
   if (savedIt != savedChunks.end()) {
     chunk.blocks = savedIt->second;
     chunk.modified = true;
+    chunk.generatedStatus = ChunkGenStatus::kFull;
     savedChunks.erase(savedIt);
   } else {
     chunk.generating = true;
@@ -1272,7 +2273,7 @@ World::Chunk& World::ensureChunk(int cx, int cz) {
 
   auto insertResult = chunks.emplace(key, std::move(chunk));
   if (insertResult.first->second.generating) {
-    queueChunkGeneration(cx, cz, insertResult.first->second.generationEpoch);
+    queueChunkGeneration(cx, cz, insertResult.first->second.generationEpoch, ChunkGenStatus::kFull);
   } else {
     markNeighborChunksDirty(cx, cz);
   }
@@ -1280,8 +2281,13 @@ World::Chunk& World::ensureChunk(int cx, int cz) {
   return insertResult.first->second;
 }
 
-void World::generateChunk(World::Chunk& chunk) {
-  chunk.blocks = generateChunkBlocks(chunk.cx, chunk.cz, seed, genSettings);
+void World::generateChunk(World::Chunk& chunk, ChunkGenStatus targetStatus) {
+  GeneratedChunkData generated =
+    generateChunkDataToStatus(chunk.cx, chunk.cz, seed, genSettings, targetStatus);
+  chunk.blocks = std::move(generated.blocks);
+  chunk.biomeMap = generated.biomeMap;
+  chunk.climateMap = generated.climateMap;
+  chunk.generatedStatus = generated.status;
   chunk.generating = false;
   chunk.generationEpoch = generationEpoch;
 }
@@ -1289,7 +2295,7 @@ void World::generateChunk(World::Chunk& chunk) {
 bool World::inBounds(int x, int y, int z) const {
   (void)x;
   (void)z;
-  return y >= 0 && y < kChunkHeight;
+  return y >= genSettings.minY && y <= genSettings.maxY;
 }
 
 uint8_t World::getBlock(int x, int y, int z) const {
@@ -1302,6 +2308,9 @@ uint8_t World::getBlock(int x, int y, int z) const {
   int lz = positiveMod(z, kChunkSize);
   const Chunk* chunk = findChunk(cx, cz);
   if (!chunk) {
+    return kAir;
+  }
+  if (chunk->generatedStatus < ChunkGenStatus::kNoise) {
     return kAir;
   }
   return chunk->blocks[static_cast<size_t>(localIndex(lx, y, lz))];
@@ -1327,7 +2336,7 @@ void World::setBlock(int x, int y, int z, uint8_t type) {
   }
 
   if (chunk->generating) {
-    generateChunk(*chunk);
+    generateChunk(*chunk, ChunkGenStatus::kFull);
     pendingGenerationEpochByKey.erase(chunkKey(cx, cz));
   }
 
@@ -1430,7 +2439,7 @@ bool World::waitForChunkRegion(int centerChunkX, int centerChunkZ, int radius, i
     for (int cz = centerChunkZ - radius; cz <= centerChunkZ + radius && ready; ++cz) {
       for (int cx = centerChunkX - radius; cx <= centerChunkX + radius; ++cx) {
         Chunk* chunk = findChunk(cx, cz);
-        if (!chunk || chunk->generating) {
+        if (!chunk || chunk->generating || chunk->generatedStatus < ChunkGenStatus::kNoise) {
           ready = false;
           break;
         }
@@ -1449,7 +2458,7 @@ bool World::waitForChunkRegion(int centerChunkX, int centerChunkZ, int radius, i
   for (int cz = centerChunkZ - radius; cz <= centerChunkZ + radius; ++cz) {
     for (int cx = centerChunkX - radius; cx <= centerChunkX + radius; ++cx) {
       Chunk* chunk = findChunk(cx, cz);
-      if (!chunk || chunk->generating) {
+      if (!chunk || chunk->generating || chunk->generatedStatus < ChunkGenStatus::kNoise) {
         return false;
       }
     }
@@ -1499,7 +2508,7 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
     int cx = floorDiv(x, kChunkSize);
     int cz = floorDiv(z, kChunkSize);
     Chunk* chunk = findChunk(cx, cz);
-    return chunk && !chunk->generating;
+    return chunk && !chunk->generating && chunk->generatedStatus >= ChunkGenStatus::kNoise;
   };
 
   auto getLoadedBlock = [&](int x, int y, int z) -> uint8_t {
@@ -1599,7 +2608,7 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
   for (int cz = minChunkZ; cz <= maxChunkZ; ++cz) {
     for (int cx = minChunkX; cx <= maxChunkX; ++cx) {
       Chunk* chunk = findChunk(cx, cz);
-      if (!chunk || chunk->generating) {
+      if (!chunk || chunk->generating || chunk->generatedStatus < ChunkGenStatus::kNoise) {
         continue;
       }
 
@@ -1667,7 +2676,7 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
     int cx = floorDiv(cell.x, kChunkSize);
     int cz = floorDiv(cell.z, kChunkSize);
     Chunk* chunk = findChunk(cx, cz);
-    if (!chunk || chunk->generating) {
+    if (!chunk || chunk->generating || chunk->generatedStatus < ChunkGenStatus::kNoise) {
       continue;
     }
 
@@ -1714,7 +2723,7 @@ void World::simulateFallingBlocks(int centerX, int centerZ, int radiusXZ, int ma
     int cx = floorDiv(x, kChunkSize);
     int cz = floorDiv(z, kChunkSize);
     Chunk* chunk = findChunk(cx, cz);
-    return chunk && !chunk->generating;
+    return chunk && !chunk->generating && chunk->generatedStatus >= ChunkGenStatus::kNoise;
   };
 
   struct FallingMove {
@@ -1733,7 +2742,7 @@ void World::simulateFallingBlocks(int centerX, int centerZ, int radiusXZ, int ma
   for (int cz = minChunkZ; cz <= maxChunkZ; ++cz) {
     for (int cx = minChunkX; cx <= maxChunkX; ++cx) {
       Chunk* chunk = findChunk(cx, cz);
-      if (!chunk || chunk->generating) {
+      if (!chunk || chunk->generating || chunk->generatedStatus < ChunkGenStatus::kNoise) {
         continue;
       }
 
@@ -1813,7 +2822,7 @@ void World::simulateFallingBlocks(int centerX, int centerZ, int radiusXZ, int ma
     int cx = floorDiv(x, kChunkSize);
     int cz = floorDiv(z, kChunkSize);
     Chunk* chunk = findChunk(cx, cz);
-    if (!chunk || chunk->generating) {
+    if (!chunk || chunk->generating || chunk->generatedStatus < ChunkGenStatus::kNoise) {
       return false;
     }
     int lx = positiveMod(x, kChunkSize);
@@ -2171,7 +3180,7 @@ void World::buildMesh(std::vector<Vertex>& outVertices,
 
   for (auto& entry : chunks) {
     Chunk& chunk = entry.second;
-    if (chunk.generating) {
+    if (chunk.generating || chunk.generatedStatus < ChunkGenStatus::kNoise) {
       continue;
     }
     if (chunk.dirty) {
@@ -2202,7 +3211,7 @@ bool World::save(const std::string& path) const {
   };
 
   const char magic[4] = {'C', 'U', 'B', '2'};
-  uint32_t version = 8;
+  uint32_t version = 9;
   uint32_t cs = static_cast<uint32_t>(kChunkSize);
   uint32_t ch = static_cast<uint32_t>(kChunkHeight);
   uint32_t seedValue = static_cast<uint32_t>(seed);
@@ -2211,6 +3220,8 @@ bool World::save(const std::string& path) const {
   float caveDensityValue = genSettings.caveDensity;
   float ravineFrequencyValue = genSettings.ravineFrequency;
   uint8_t startInventoryModeValue = genSettings.startInventoryMode;
+  int32_t minYValue = genSettings.minY;
+  int32_t maxYValue = genSettings.maxY;
 
   uint32_t modifiedCount = 0;
   for (const auto& entry : chunks) {
@@ -2230,6 +3241,8 @@ bool World::save(const std::string& path) const {
       !writeBytes(&caveDensityValue, sizeof(caveDensityValue)) ||
       !writeBytes(&ravineFrequencyValue, sizeof(ravineFrequencyValue)) ||
       !writeBytes(&startInventoryModeValue, sizeof(startInventoryModeValue)) ||
+      !writeBytes(&minYValue, sizeof(minYValue)) ||
+      !writeBytes(&maxYValue, sizeof(maxYValue)) ||
       !writeBytes(&storedCount, sizeof(storedCount))) {
     return false;
   }
@@ -2283,6 +3296,8 @@ bool World::load(const std::string& path) {
   float caveDensityValue = 1.0f;
   float ravineFrequencyValue = 1.0f;
   uint8_t startInventoryModeValue = 0;
+  int32_t minYValue = 0;
+  int32_t maxYValue = kChunkHeight - 1;
   uint32_t storedCount = 0;
 
   if (!readBytes(magic, 4) ||
@@ -2293,7 +3308,7 @@ bool World::load(const std::string& path) {
     return false;
   }
 
-  if (std::strncmp(magic, "CUB2", 4) != 0 || (version != 7 && version != 8) ||
+  if (std::strncmp(magic, "CUB2", 4) != 0 || (version != 7 && version != 8 && version != 9) ||
       cs != static_cast<uint32_t>(kChunkSize) ||
       ch != static_cast<uint32_t>(kChunkHeight)) {
     return false;
@@ -2307,6 +3322,12 @@ bool World::load(const std::string& path) {
         !readBytes(&startInventoryModeValue, sizeof(startInventoryModeValue))) {
       return false;
     }
+    if (version >= 9) {
+      if (!readBytes(&minYValue, sizeof(minYValue)) ||
+          !readBytes(&maxYValue, sizeof(maxYValue))) {
+        return false;
+      }
+    }
   }
   if (!readBytes(&storedCount, sizeof(storedCount))) {
     return false;
@@ -2316,11 +3337,15 @@ bool World::load(const std::string& path) {
   if (presetValue > static_cast<uint8_t>(WorldPreset::kClassicFlat)) {
     presetValue = static_cast<uint8_t>(WorldPreset::kMinecraftStyle);
   }
-  genSettings.preset = static_cast<WorldPreset>(presetValue);
-  genSettings.generateStructures = structuresValue != 0;
-  genSettings.caveDensity = std::clamp(caveDensityValue, 0.25f, 2.5f);
-  genSettings.ravineFrequency = std::clamp(ravineFrequencyValue, 0.25f, 2.5f);
-  genSettings.startInventoryMode = startInventoryModeValue <= 1 ? startInventoryModeValue : 0;
+  WorldGenSettings loadedSettings{};
+  loadedSettings.preset = static_cast<WorldPreset>(presetValue);
+  loadedSettings.generateStructures = structuresValue != 0;
+  loadedSettings.caveDensity = caveDensityValue;
+  loadedSettings.ravineFrequency = ravineFrequencyValue;
+  loadedSettings.startInventoryMode = startInventoryModeValue;
+  loadedSettings.minY = static_cast<int>(minYValue);
+  loadedSettings.maxY = static_cast<int>(maxYValue);
+  setGenerationSettings(loadedSettings);
   resetChunkGeneration();
   chunks.clear();
   savedChunks.clear();

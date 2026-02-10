@@ -3,6 +3,8 @@
 #include "mesh.hpp"
 
 #include <condition_variable>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <queue>
@@ -13,10 +15,36 @@
 
 constexpr int kChunkSize = 16;
 constexpr int kChunkHeight = 128;
+constexpr size_t kChunkColumnCount = static_cast<size_t>(kChunkSize * kChunkSize);
 
 enum class WorldPreset : uint8_t {
   kMinecraftStyle = 0,
   kClassicFlat = 1
+};
+
+enum class ChunkGenStatus : uint8_t {
+  kEmpty = 0,
+  kStructureStarts = 1,
+  kStructureReferences = 2,
+  kBiomes = 3,
+  kNoise = 4,
+  kSurface = 5,
+  kCarvers = 6,
+  kLiquidCarvers = 7,
+  kFeatures = 8,
+  kLight = 9,
+  kSpawn = 10,
+  kHeightmaps = 11,
+  kFull = 12
+};
+
+struct BiomeClimateSample {
+  float temperature = 0.5f;
+  float humidity = 0.5f;
+  float continentalness = 0.5f;
+  float erosion = 0.5f;
+  float depth = 0.5f;
+  float weirdness = 0.5f;
 };
 
 struct WorldGenSettings {
@@ -25,6 +53,8 @@ struct WorldGenSettings {
   float caveDensity = 1.0f;
   float ravineFrequency = 1.0f;
   uint8_t startInventoryMode = 0; // 0=Empty, 1=CreativeTest (reserved for v0.2.1+)
+  int minY = 0;
+  int maxY = kChunkHeight - 1;
 };
 
 enum BlockType : uint8_t {
@@ -85,6 +115,8 @@ public:
   void buildMesh(std::vector<Vertex>& outVertices, std::vector<uint32_t>& outIndices);
   bool save(const std::string& path) const;
   bool load(const std::string& path);
+  void generateChunkToStatus(int chunkX, int chunkZ, ChunkGenStatus targetStatus);
+  ChunkGenStatus getChunkGenerationStatus(int chunkX, int chunkZ) const;
   void updateActiveChunks(int centerChunkX, int centerChunkZ, int radius);
   bool waitForChunkRegion(int centerChunkX, int centerChunkZ, int radius, int maxWaitMs);
   void simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates);
@@ -98,7 +130,7 @@ public:
   void setBlock(int x, int y, int z, uint8_t type);
   void setSeed(int newSeed) { seed = newSeed; }
   int getSeed() const { return seed; }
-  void setGenerationSettings(const WorldGenSettings& settings) { genSettings = settings; }
+  void setGenerationSettings(const WorldGenSettings& settings);
   const WorldGenSettings& getGenerationSettings() const { return genSettings; }
 
   int height() const { return kChunkHeight; }
@@ -112,12 +144,12 @@ private:
   Chunk* findChunk(int cx, int cz);
   const Chunk* findChunk(int cx, int cz) const;
   Chunk& ensureChunk(int cx, int cz);
-  void generateChunk(Chunk& chunk);
+  void generateChunk(Chunk& chunk, ChunkGenStatus targetStatus = ChunkGenStatus::kFull);
   void buildChunkMesh(Chunk& chunk);
   void markNeighborChunksDirty(int cx, int cz);
   void startChunkWorkers();
   void stopChunkWorkers();
-  void queueChunkGeneration(int cx, int cz, uint32_t epoch);
+  void queueChunkGeneration(int cx, int cz, uint32_t epoch, ChunkGenStatus targetStatus);
   void resetChunkGeneration();
   void pumpChunkGeneration();
 
@@ -128,12 +160,16 @@ private:
     WorldGenSettings settings{};
     uint32_t epoch = 0;
     uint64_t key = 0;
+    ChunkGenStatus targetStatus = ChunkGenStatus::kFull;
   };
 
   struct ChunkGenerationResult {
     uint64_t key = 0;
     uint32_t epoch = 0;
     std::vector<uint8_t> blocks;
+    std::array<uint8_t, kChunkColumnCount> biomeMap{};
+    std::array<BiomeClimateSample, kChunkColumnCount> climateMap{};
+    ChunkGenStatus status = ChunkGenStatus::kEmpty;
   };
 
   struct BreakOverlay {
@@ -152,6 +188,9 @@ private:
     bool modified = false;
     bool generating = false;
     uint32_t generationEpoch = 0;
+    std::array<uint8_t, kChunkColumnCount> biomeMap{};
+    std::array<BiomeClimateSample, kChunkColumnCount> climateMap{};
+    ChunkGenStatus generatedStatus = ChunkGenStatus::kEmpty;
   };
 
   int initialChunksX;
