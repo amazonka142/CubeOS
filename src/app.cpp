@@ -2620,8 +2620,11 @@ void App::refreshSelectedBlock() {
   }
 }
 
-bool App::addToInventory(uint8_t type, uint16_t count) {
+bool App::addToInventory(uint8_t type, uint16_t count, uint16_t* outRemaining) {
   if (type == kAir || count == 0) {
+    if (outRemaining) {
+      *outRemaining = 0;
+    }
     return true;
   }
 
@@ -2667,6 +2670,10 @@ bool App::addToInventory(uint8_t type, uint16_t count) {
     uiDirty = true;
   }
 
+  if (outRemaining) {
+    *outRemaining = count;
+  }
+
   return count == 0;
 }
 
@@ -2691,9 +2698,14 @@ void App::setInventoryOpen(bool open) {
   }
   if (!inventoryOpen) {
     if (cursorStack.count > 0 && cursorStack.type != kAir) {
-      addToInventory(cursorStack.type, cursorStack.count);
-      cursorStack.type = kAir;
-      cursorStack.count = 0;
+      uint16_t remaining = 0;
+      addToInventory(cursorStack.type, cursorStack.count, &remaining);
+      if (remaining == 0) {
+        cursorStack.type = kAir;
+        cursorStack.count = 0;
+      } else {
+        cursorStack.count = remaining;
+      }
     }
     firstMouse = true;
   }

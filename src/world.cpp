@@ -2196,6 +2196,11 @@ bool World::save(const std::string& path) const {
     return false;
   }
 
+  auto writeBytes = [&](const void* data, std::streamsize size) {
+    out.write(reinterpret_cast<const char*>(data), size);
+    return out.good();
+  };
+
   const char magic[4] = {'C', 'U', 'B', '2'};
   uint32_t version = 8;
   uint32_t cs = static_cast<uint32_t>(kChunkSize);
@@ -2215,26 +2220,29 @@ bool World::save(const std::string& path) const {
   }
   uint32_t storedCount = static_cast<uint32_t>(savedChunks.size()) + modifiedCount;
 
-  out.write(magic, 4);
-  out.write(reinterpret_cast<const char*>(&version), sizeof(version));
-  out.write(reinterpret_cast<const char*>(&cs), sizeof(cs));
-  out.write(reinterpret_cast<const char*>(&ch), sizeof(ch));
-  out.write(reinterpret_cast<const char*>(&seedValue), sizeof(seedValue));
-  out.write(reinterpret_cast<const char*>(&presetValue), sizeof(presetValue));
-  out.write(reinterpret_cast<const char*>(&structuresValue), sizeof(structuresValue));
-  out.write(reinterpret_cast<const char*>(&caveDensityValue), sizeof(caveDensityValue));
-  out.write(reinterpret_cast<const char*>(&ravineFrequencyValue), sizeof(ravineFrequencyValue));
-  out.write(reinterpret_cast<const char*>(&startInventoryModeValue), sizeof(startInventoryModeValue));
-  out.write(reinterpret_cast<const char*>(&storedCount), sizeof(storedCount));
+  if (!writeBytes(magic, 4) ||
+      !writeBytes(&version, sizeof(version)) ||
+      !writeBytes(&cs, sizeof(cs)) ||
+      !writeBytes(&ch, sizeof(ch)) ||
+      !writeBytes(&seedValue, sizeof(seedValue)) ||
+      !writeBytes(&presetValue, sizeof(presetValue)) ||
+      !writeBytes(&structuresValue, sizeof(structuresValue)) ||
+      !writeBytes(&caveDensityValue, sizeof(caveDensityValue)) ||
+      !writeBytes(&ravineFrequencyValue, sizeof(ravineFrequencyValue)) ||
+      !writeBytes(&startInventoryModeValue, sizeof(startInventoryModeValue)) ||
+      !writeBytes(&storedCount, sizeof(storedCount))) {
+    return false;
+  }
 
   for (const auto& entry : savedChunks) {
     uint64_t key = entry.first;
     int32_t cx = static_cast<int32_t>(static_cast<uint32_t>(key >> 32));
     int32_t cz = static_cast<int32_t>(static_cast<uint32_t>(key & 0xffffffffu));
-    out.write(reinterpret_cast<const char*>(&cx), sizeof(cx));
-    out.write(reinterpret_cast<const char*>(&cz), sizeof(cz));
-    out.write(reinterpret_cast<const char*>(entry.second.data()),
-              static_cast<std::streamsize>(entry.second.size()));
+    if (!writeBytes(&cx, sizeof(cx)) ||
+        !writeBytes(&cz, sizeof(cz)) ||
+        !writeBytes(entry.second.data(), static_cast<std::streamsize>(entry.second.size()))) {
+      return false;
+    }
   }
 
   for (const auto& entry : chunks) {
@@ -2243,13 +2251,16 @@ bool World::save(const std::string& path) const {
     }
     int32_t cx = static_cast<int32_t>(entry.second.cx);
     int32_t cz = static_cast<int32_t>(entry.second.cz);
-    out.write(reinterpret_cast<const char*>(&cx), sizeof(cx));
-    out.write(reinterpret_cast<const char*>(&cz), sizeof(cz));
-    out.write(reinterpret_cast<const char*>(entry.second.blocks.data()),
-              static_cast<std::streamsize>(entry.second.blocks.size()));
+    if (!writeBytes(&cx, sizeof(cx)) ||
+        !writeBytes(&cz, sizeof(cz)) ||
+        !writeBytes(entry.second.blocks.data(),
+                    static_cast<std::streamsize>(entry.second.blocks.size()))) {
+      return false;
+    }
   }
 
-  return true;
+  out.flush();
+  return out.good();
 }
 
 bool World::load(const std::string& path) {
@@ -2258,23 +2269,29 @@ bool World::load(const std::string& path) {
     return false;
   }
 
+  auto readBytes = [&](void* data, std::streamsize size) {
+    return static_cast<bool>(in.read(reinterpret_cast<char*>(data), size));
+  };
+
   char magic[4] = {};
   uint32_t version = 0;
   uint32_t cs = 0;
   uint32_t ch = 0;
   uint32_t seedValue = 0;
   uint8_t presetValue = static_cast<uint8_t>(WorldPreset::kMinecraftStyle);
-  uint8_t structuresValue = 0;
+  uint8_t structuresValue = 1;
   float caveDensityValue = 1.0f;
   float ravineFrequencyValue = 1.0f;
   uint8_t startInventoryModeValue = 0;
   uint32_t storedCount = 0;
 
-  in.read(magic, 4);
-  in.read(reinterpret_cast<char*>(&version), sizeof(version));
-  in.read(reinterpret_cast<char*>(&cs), sizeof(cs));
-  in.read(reinterpret_cast<char*>(&ch), sizeof(ch));
-  in.read(reinterpret_cast<char*>(&seedValue), sizeof(seedValue));
+  if (!readBytes(magic, 4) ||
+      !readBytes(&version, sizeof(version)) ||
+      !readBytes(&cs, sizeof(cs)) ||
+      !readBytes(&ch, sizeof(ch)) ||
+      !readBytes(&seedValue, sizeof(seedValue))) {
+    return false;
+  }
 
   if (std::strncmp(magic, "CUB2", 4) != 0 || (version != 7 && version != 8) ||
       cs != static_cast<uint32_t>(kChunkSize) ||
@@ -2283,24 +2300,27 @@ bool World::load(const std::string& path) {
   }
 
   if (version >= 8) {
-    in.read(reinterpret_cast<char*>(&presetValue), sizeof(presetValue));
-    in.read(reinterpret_cast<char*>(&structuresValue), sizeof(structuresValue));
-    in.read(reinterpret_cast<char*>(&caveDensityValue), sizeof(caveDensityValue));
-    in.read(reinterpret_cast<char*>(&ravineFrequencyValue), sizeof(ravineFrequencyValue));
-    in.read(reinterpret_cast<char*>(&startInventoryModeValue), sizeof(startInventoryModeValue));
+    if (!readBytes(&presetValue, sizeof(presetValue)) ||
+        !readBytes(&structuresValue, sizeof(structuresValue)) ||
+        !readBytes(&caveDensityValue, sizeof(caveDensityValue)) ||
+        !readBytes(&ravineFrequencyValue, sizeof(ravineFrequencyValue)) ||
+        !readBytes(&startInventoryModeValue, sizeof(startInventoryModeValue))) {
+      return false;
+    }
   }
-  in.read(reinterpret_cast<char*>(&storedCount), sizeof(storedCount));
+  if (!readBytes(&storedCount, sizeof(storedCount))) {
+    return false;
+  }
 
   seed = static_cast<int>(seedValue);
   if (presetValue > static_cast<uint8_t>(WorldPreset::kClassicFlat)) {
     presetValue = static_cast<uint8_t>(WorldPreset::kMinecraftStyle);
   }
   genSettings.preset = static_cast<WorldPreset>(presetValue);
-  (void)structuresValue;
-  genSettings.generateStructures = true;
+  genSettings.generateStructures = structuresValue != 0;
   genSettings.caveDensity = std::clamp(caveDensityValue, 0.25f, 2.5f);
   genSettings.ravineFrequency = std::clamp(ravineFrequencyValue, 0.25f, 2.5f);
-  genSettings.startInventoryMode = startInventoryModeValue;
+  genSettings.startInventoryMode = startInventoryModeValue <= 1 ? startInventoryModeValue : 0;
   resetChunkGeneration();
   chunks.clear();
   savedChunks.clear();
@@ -2311,11 +2331,12 @@ bool World::load(const std::string& path) {
   for (uint32_t i = 0; i < storedCount; ++i) {
     int32_t cx = 0;
     int32_t cz = 0;
-    in.read(reinterpret_cast<char*>(&cx), sizeof(cx));
-    in.read(reinterpret_cast<char*>(&cz), sizeof(cz));
+    if (!readBytes(&cx, sizeof(cx)) ||
+        !readBytes(&cz, sizeof(cz))) {
+      return false;
+    }
     std::vector<uint8_t> blocks(blocksSize);
-    if (!in.read(reinterpret_cast<char*>(blocks.data()),
-                 static_cast<std::streamsize>(blocks.size()))) {
+    if (!readBytes(blocks.data(), static_cast<std::streamsize>(blocks.size()))) {
       return false;
     }
     savedChunks[chunkKey(cx, cz)] = std::move(blocks);

@@ -48,5 +48,5 @@ build/cubeos_voxel
 - Esc closes inventory; exits when inventory is closed.
 
 ## Notes
-- Validation layers are enabled by default (toggle with `-DCUBEOS_ENABLE_VALIDATION=OFF`).
+- Validation layers are disabled by default (enable with `-DCUBEOS_ENABLE_VALIDATION=ON`).
 - Next steps will add chunked voxel world, greedy meshing, and a simple player controller.

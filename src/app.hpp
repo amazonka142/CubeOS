@@ -41,7 +41,7 @@ private:
   };
 
   void refreshSelectedBlock();
-  bool addToInventory(uint8_t type, uint16_t count);
+  bool addToInventory(uint8_t type, uint16_t count, uint16_t* outRemaining = nullptr);
   void initWindow();
   void initVulkan();
   void setupGameplaySession();
