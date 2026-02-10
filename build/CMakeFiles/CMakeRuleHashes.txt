@@ -1,7 +1,0 @@
-# Hashes of file build rules.
-4d15e938abbf8dec481229c4aac1bace CMakeFiles/shaders
-27180f8c47bc8a54fb713c15717a569c _deps/glfw-build/CMakeFiles/uninstall
-58109f24db7c621a13e2552fb3602a37 _deps/glfw-build/src/CMakeFiles/update_mappings
-1e938ab561d17a6198a15c6cef9e1d05 shaders/cube.frag.spv
-7d3b929d34c20b32daaa4be8bf777c98 shaders/cube.vert.spv
-62e688254ba38d1dda0c5f8f82427616 shaders/ui.vert.spv
