@@ -24,6 +24,8 @@ constexpr int kTileLeaves = 17;
 constexpr int kTileCoalOre = 18;
 constexpr int kTileIronOre = 19;
 constexpr int kTileGoldOre = 20;
+constexpr int kTileSeagrass = 21;
+constexpr int kTileCoral = 22;
 
 struct Vertex {
   glm::vec3 pos;

@@ -76,11 +76,17 @@ enum BlockType : uint8_t {
   kWaterFlow4 = 15,
   kWaterFlow5 = 16,
   kWaterFlow6 = 17,
-  kWaterFlow7 = 18
+  kWaterFlow7 = 18,
+  kSeagrass = 19,
+  kCoral = 20
 };
 
 constexpr bool isWaterBlock(uint8_t type) {
   return type == kWater || (type >= kWaterFlow1 && type <= kWaterFlow7);
+}
+
+constexpr bool isUnderwaterPlantBlock(uint8_t type) {
+  return type == kSeagrass || type == kCoral;
 }
 
 constexpr uint8_t waterLevelFromBlock(uint8_t type) {

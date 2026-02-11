@@ -105,6 +105,10 @@ int tileForBlock(uint8_t type) {
       return kTileWood;
     case kLeaves:
       return kTileLeaves;
+    case kSeagrass:
+      return kTileSeagrass;
+    case kCoral:
+      return kTileCoral;
     case kCoalOre:
       return kTileCoalOre;
     case kIronOre:
@@ -140,6 +144,10 @@ std::string displayNameForBlock(uint8_t type) {
       return "WOOD";
     case kLeaves:
       return "LEAVES";
+    case kSeagrass:
+      return "SEAGRASS";
+    case kCoral:
+      return "CORAL";
     case kCoalOre:
       return "COAL ORE";
     case kIronOre:
@@ -818,7 +826,11 @@ void App::setupGameplaySession() {
   renderLoadingFrame(0.84f, "Searching spawn");
 
   auto isSpawnGround = [](uint8_t block) {
-    return block != kAir && !isWaterBlock(block) && block != kLeaves && block != kGravel;
+    return block != kAir &&
+           !isWaterBlock(block) &&
+           !isUnderwaterPlantBlock(block) &&
+           block != kLeaves &&
+           block != kGravel;
   };
 
   auto isPreferredSpawnGround = [](uint8_t block) {
@@ -826,7 +838,7 @@ void App::setupGameplaySession() {
   };
 
   auto isSkyPassable = [](uint8_t block) {
-    return block == kAir || block == kLeaves;
+    return block == kAir || block == kLeaves || isUnderwaterPlantBlock(block);
   };
 
   auto findSurfaceSpawn = [&]() -> glm::vec3 {
@@ -995,18 +1007,18 @@ void App::setupGameplaySession() {
             int x = bestWater->x + ox;
             int z = bestWater->z + oz;
             uint8_t below = world.getBlock(x, platformTopY - 1, z);
-            if (below == kAir || isWaterBlock(below) || below == kLeaves) {
+            if (below == kAir || isWaterBlock(below) || isUnderwaterPlantBlock(below) || below == kLeaves) {
               world.setBlock(x, platformTopY - 1, z, kStone);
             }
 
             uint8_t floorBlock = world.getBlock(x, platformTopY, z);
-            if (floorBlock == kAir || isWaterBlock(floorBlock) || floorBlock == kLeaves) {
+            if (floorBlock == kAir || isWaterBlock(floorBlock) || isUnderwaterPlantBlock(floorBlock) || floorBlock == kLeaves) {
               world.setBlock(x, platformTopY, z, kDirt);
             }
 
             for (int y = platformTopY + 1; y <= platformTopY + 3; ++y) {
               uint8_t headBlock = world.getBlock(x, y, z);
-              if (isWaterBlock(headBlock) || headBlock == kLeaves) {
+              if (isWaterBlock(headBlock) || isUnderwaterPlantBlock(headBlock) || headBlock == kLeaves) {
                 world.setBlock(x, y, z, kAir);
               }
             }
@@ -1021,7 +1033,7 @@ void App::setupGameplaySession() {
       int highestSolid = 0;
       for (int y = world.height() - 3; y >= 1; --y) {
         uint8_t block = world.getBlock(baseX, y, baseZ);
-        if (block == kAir || isWaterBlock(block) || block == kLeaves) {
+        if (block == kAir || isWaterBlock(block) || isUnderwaterPlantBlock(block) || block == kLeaves) {
           continue;
         }
         highestSolid = y;
@@ -1067,7 +1079,7 @@ void App::setupGameplaySession() {
       int minY = std::max(1, y - kMaxDropForResume);
       for (int sy = y - 1; sy >= minY; --sy) {
         uint8_t block = world.getBlock(x, sy, z);
-        if (block == kAir || block == kLeaves) {
+        if (block == kAir || block == kLeaves || isUnderwaterPlantBlock(block)) {
           continue;
         }
         return true;
@@ -1989,7 +2001,7 @@ void App::processInput(float deltaTime) {
           }
 
           uint8_t candidate = world.getBlock(voxel.x, voxel.y, voxel.z);
-          if (candidate == kAir || isWaterBlock(candidate)) {
+          if (candidate == kAir || isWaterBlock(candidate) || isUnderwaterPlantBlock(candidate)) {
             continue;
           }
           targetBlock = voxel;
@@ -2004,7 +2016,7 @@ void App::processInput(float deltaTime) {
           int minY = std::max(0, hit.block.y - kMaxWaterProbeDepth);
           for (int y = hit.block.y - 1; y >= minY; --y) {
             uint8_t belowType = world.getBlock(hit.block.x, y, hit.block.z);
-            if (belowType == kAir || isWaterBlock(belowType)) {
+            if (belowType == kAir || isWaterBlock(belowType) || isUnderwaterPlantBlock(belowType)) {
               continue;
             }
             targetBlock = {hit.block.x, y, hit.block.z};
@@ -2067,13 +2079,13 @@ void App::processInput(float deltaTime) {
           }
 
           uint8_t candidate = world.getBlock(voxel.x, voxel.y, voxel.z);
-          if (candidate == kAir || isWaterBlock(candidate)) {
+          if (candidate == kAir || isWaterBlock(candidate) || isUnderwaterPlantBlock(candidate)) {
             lastReplaceable = voxel;
             continue;
           }
 
           uint8_t replaceType = world.getBlock(lastReplaceable.x, lastReplaceable.y, lastReplaceable.z);
-          if (replaceType == kAir || isWaterBlock(replaceType)) {
+          if (replaceType == kAir || isWaterBlock(replaceType) || isUnderwaterPlantBlock(replaceType)) {
             target = lastReplaceable;
             foundPlace = true;
           }
@@ -2086,7 +2098,9 @@ void App::processInput(float deltaTime) {
       }
 
       uint8_t targetType = world.getBlock(target.x, target.y, target.z);
-      bool targetReplaceable = targetType == kAir || isWaterBlock(targetType);
+      bool targetReplaceable = targetType == kAir ||
+                               isWaterBlock(targetType) ||
+                               isUnderwaterPlantBlock(targetType);
       if (world.inBounds(target.x, target.y, target.z) &&
           targetReplaceable &&
           !blockIntersectsPlayer(target.x, target.y, target.z)) {
@@ -3282,7 +3296,7 @@ bool App::collidesAt(const glm::vec3& pos) const {
           return true;
         }
         uint8_t block = world.getBlock(x, y, z);
-        if (block != kAir && !isWaterBlock(block)) {
+        if (block != kAir && !isWaterBlock(block) && !isUnderwaterPlantBlock(block)) {
           return true;
         }
       }

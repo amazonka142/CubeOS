@@ -92,6 +92,10 @@ void main() {
     vColor.b > (vColor.g + 0.12) &&
     vColor.g > vColor.r;
 
+  if (!looksLikeWater && texColor.a < 0.05) {
+    discard;
+  }
+
   if (looksLikeWater) {
     float t = ubo.params.x;
     float waveX = sin((vUV.x + vUV.y) * 42.0 + t * 2.20) * 0.0026;

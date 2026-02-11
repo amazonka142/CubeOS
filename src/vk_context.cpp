@@ -521,9 +521,9 @@ void VulkanContext::createInstance() {
   VkApplicationInfo appInfo{};
   appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   appInfo.pApplicationName = "CubeOS Voxel";
-  appInfo.applicationVersion = VK_MAKE_VERSION(0, 1, 0);
+  appInfo.applicationVersion = VK_MAKE_VERSION(0, 2, 0);
   appInfo.pEngineName = "CubeOS";
-  appInfo.engineVersion = VK_MAKE_VERSION(0, 1, 0);
+  appInfo.engineVersion = VK_MAKE_VERSION(0, 2, 0);
   appInfo.apiVersion = VK_API_VERSION_1_2;
 
   VkInstanceCreateInfo createInfo{};
@@ -1210,6 +1210,85 @@ void VulkanContext::createTextureImage() {
       int b = 54 + grain / 4 + (highlight ? 12 : 0);
       putPixel(leavesTileX + x,
                leavesTileY + y,
+               static_cast<uint8_t>(std::clamp(r, 0, 255)),
+               static_cast<uint8_t>(std::clamp(g, 0, 255)),
+               static_cast<uint8_t>(std::clamp(b, 0, 255)),
+               255);
+    }
+  }
+
+  auto clearTileAlpha = [&](int tileIndex) {
+    int tileX = (tileIndex % kAtlasCols) * kAtlasTileSize;
+    int tileY = (tileIndex / kAtlasCols) * kAtlasTileSize;
+    for (int y = 0; y < kAtlasTileSize; ++y) {
+      for (int x = 0; x < kAtlasTileSize; ++x) {
+        putPixel(tileX + x, tileY + y, 0, 0, 0, 0);
+      }
+    }
+  };
+
+  // Seagrass tile: alpha-cutout strands for crossed underwater plants.
+  const int seagrassTileIndex = kTileSeagrass;
+  const int seagrassTileX = (seagrassTileIndex % kAtlasCols) * kAtlasTileSize;
+  const int seagrassTileY = (seagrassTileIndex / kAtlasCols) * kAtlasTileSize;
+  clearTileAlpha(seagrassTileIndex);
+  std::array<int, 4> stalkBases = {2, 6, 10, 13};
+  for (size_t i = 0; i < stalkBases.size(); ++i) {
+    int sx = stalkBases[i];
+    int h = 7 + static_cast<int>(hash(sx, static_cast<int>(i), 211) % 8u);
+    int sway = static_cast<int>(hash(sx, 7, 223) % 3u) - 1;
+    for (int step = 0; step < h; ++step) {
+      int y = kAtlasTileSize - 1 - step;
+      int drift = (step > 4) ? sway : 0;
+      int x = std::clamp(sx + drift, 0, kAtlasTileSize - 1);
+      uint32_t grainHash = hash(x, y, 227 + static_cast<int>(i) * 7);
+      int r = 32 + static_cast<int>(grainHash % 14u);
+      int g = 148 + static_cast<int>((grainHash >> 3) % 44u);
+      int b = 64 + static_cast<int>((grainHash >> 5) % 26u);
+      putPixel(seagrassTileX + x,
+               seagrassTileY + y,
+               static_cast<uint8_t>(std::clamp(r, 0, 255)),
+               static_cast<uint8_t>(std::clamp(g, 0, 255)),
+               static_cast<uint8_t>(std::clamp(b, 0, 255)),
+               255);
+
+      if (step > 2 && (grainHash & 3u) == 0u) {
+        int side = (grainHash & 4u) ? 1 : -1;
+        int leafX = std::clamp(x + side, 0, kAtlasTileSize - 1);
+        putPixel(seagrassTileX + leafX,
+                 seagrassTileY + y,
+                 static_cast<uint8_t>(std::clamp(r + 8, 0, 255)),
+                 static_cast<uint8_t>(std::clamp(g + 12, 0, 255)),
+                 static_cast<uint8_t>(std::clamp(b + 6, 0, 255)),
+                 255);
+      }
+    }
+  }
+
+  // Coral tile: compact alpha-cutout cluster with warm colors.
+  const int coralTileIndex = kTileCoral;
+  const int coralTileX = (coralTileIndex % kAtlasCols) * kAtlasTileSize;
+  const int coralTileY = (coralTileIndex / kAtlasCols) * kAtlasTileSize;
+  clearTileAlpha(coralTileIndex);
+  for (int y = 0; y < kAtlasTileSize; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      uint32_t h = hash(x, y, 239);
+      int fromBottom = (kAtlasTileSize - 1) - y;
+      bool base = fromBottom <= 2 && (h % 5u) != 0u;
+      bool branch = fromBottom >= 2 && fromBottom <= 10 &&
+                    ((h % 13u) == 0u || (h % 17u) == 1u);
+      bool cluster = fromBottom >= 3 && fromBottom <= 9 &&
+                     std::abs(x - (kAtlasTileSize / 2)) <= 4 &&
+                     ((h % 9u) <= 1u);
+      if (!base && !branch && !cluster) {
+        continue;
+      }
+
+      int r = 196 + static_cast<int>(h % 34u);
+      int g = 82 + static_cast<int>((h >> 2) % 34u);
+      int b = 70 + static_cast<int>((h >> 4) % 38u);
+      putPixel(coralTileX + x,
+               coralTileY + y,
                static_cast<uint8_t>(std::clamp(r, 0, 255)),
                static_cast<uint8_t>(std::clamp(g, 0, 255)),
                static_cast<uint8_t>(std::clamp(b, 0, 255)),

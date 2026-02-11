@@ -1834,6 +1834,128 @@ void placeTreeFeatures(int cx,
   }
 }
 
+void placeUnderwaterPlantFeatures(int cx,
+                                  int cz,
+                                  int seed,
+                                  const WorldGenSettings& settings,
+                                  const std::array<uint8_t, kChunkColumnCount>& biomeMap,
+                                  std::vector<uint8_t>& ioBlocks) {
+  int baseX = cx * kChunkSize;
+  int baseZ = cz * kChunkSize;
+  int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
+  int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+  const float seedF = static_cast<float>(seed);
+
+  auto getLocal = [&](int lx, int y, int lz) -> uint8_t {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return kAir;
+    }
+    return ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))];
+  };
+
+  auto setLocal = [&](int lx, int y, int lz, uint8_t type) {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return;
+    }
+    ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+  };
+
+  uint32_t state = static_cast<uint32_t>(hashChunkSeed(seed, cx, cz, 0xA91Fu));
+
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+      int topY = minY - 1;
+      for (int y = maxY - 1; y >= minY; --y) {
+        uint8_t t = getLocal(lx, y, lz);
+        if (t != kAir && !isWaterBlock(t) && !isUnderwaterPlantBlock(t)) {
+          topY = y;
+          break;
+        }
+      }
+
+      if (topY < minY || topY + 1 > maxY) {
+        continue;
+      }
+
+      uint8_t ground = getLocal(lx, topY, lz);
+      if (ground != kSand && ground != kGravel && ground != kDirt && ground != kStone) {
+        continue;
+      }
+
+      if (!isWaterBlock(getLocal(lx, topY + 1, lz))) {
+        continue;
+      }
+
+      int waterDepth = 0;
+      for (int y = topY + 1; y <= maxY; ++y) {
+        if (!isWaterBlock(getLocal(lx, y, lz))) {
+          break;
+        }
+        ++waterDepth;
+      }
+      if (waterDepth <= 0) {
+        continue;
+      }
+
+      uint8_t biome = biomeMap[idx];
+      float chance = 0.06f;
+      if (biome == static_cast<uint8_t>(DebugBiomeId::kOcean)) {
+        chance = 0.22f;
+      } else if (biome == static_cast<uint8_t>(DebugBiomeId::kBeach)) {
+        chance = 0.14f;
+      }
+
+      if (ground == kSand || ground == kGravel) {
+        chance += 0.04f;
+      }
+      if (waterDepth >= 4) {
+        chance += 0.03f;
+      } else if (waterDepth <= 1) {
+        chance *= 0.35f;
+      }
+
+      int worldX = baseX + lx;
+      int worldZ = baseZ + lz;
+      float cluster = 0.5f + 0.5f * glm::perlin(glm::vec2(
+        (static_cast<float>(worldX) + seedF * 71.0f) * 0.036f,
+        (static_cast<float>(worldZ) - seedF * 67.0f) * 0.036f));
+      chance *= (0.70f + cluster * 0.65f);
+      chance = std::clamp(chance, 0.0f, 0.58f);
+      if (rand01(state) > chance) {
+        continue;
+      }
+
+      float coralChance = 0.06f;
+      if (ground == kGravel || ground == kStone) {
+        coralChance += 0.18f;
+      }
+      if (waterDepth >= 4) {
+        coralChance += 0.06f;
+      }
+      coralChance = std::clamp(coralChance, 0.0f, 0.42f);
+      if (rand01(state) < coralChance) {
+        setLocal(lx, topY + 1, lz, kCoral);
+        continue;
+      }
+
+      int maxPlantHeight = std::min(waterDepth, 4);
+      int plantHeight = 1;
+      if (waterDepth >= 3 && rand01(state) < 0.42f) {
+        plantHeight = std::min(maxPlantHeight, randIntInclusive(state, 2, 4));
+      }
+
+      for (int h = 0; h < plantHeight; ++h) {
+        int py = topY + 1 + h;
+        if (!isWaterBlock(getLocal(lx, py, lz))) {
+          break;
+        }
+        setLocal(lx, py, lz, kSeagrass);
+      }
+    }
+  }
+}
+
 void placeRegionalStructureFeatures(int cx,
                                     int cz,
                                     int seed,
@@ -1918,6 +2040,7 @@ void runFeatureStage(int cx,
     placeRegionalStructureFeatures(cx, cz, seed, settings, ioBlocks);
   }
   placeTreeFeatures(cx, cz, seed, settings, biomeMap, ioBlocks);
+  placeUnderwaterPlantFeatures(cx, cz, seed, settings, biomeMap, ioBlocks);
   applyHeightRangeMask(ioBlocks, settings.minY, settings.maxY);
 }
 
@@ -2375,6 +2498,10 @@ glm::vec3 World::blockColor(uint8_t type) const {
       return {0.49f, 0.33f, 0.16f};
     case kLeaves:
       return {0.16f, 0.58f, 0.16f};
+    case kSeagrass:
+      return {0.14f, 0.62f, 0.34f};
+    case kCoral:
+      return {0.88f, 0.48f, 0.40f};
     case kCoalOre:
       return {0.22f, 0.22f, 0.22f};
     case kIronOre:
@@ -2949,10 +3076,13 @@ void World::buildChunkMesh(World::Chunk& chunk) {
   chunk.meshIndices.clear();
 
   auto isFaceVisible = [](uint8_t current, uint8_t neighbor) {
-    if (isWaterBlock(current)) {
-      return neighbor == kAir;
+    if (isUnderwaterPlantBlock(current)) {
+      return false;
     }
-    return neighbor == kAir || isWaterBlock(neighbor);
+    if (isWaterBlock(current)) {
+      return neighbor == kAir || isUnderwaterPlantBlock(neighbor);
+    }
+    return neighbor == kAir || isWaterBlock(neighbor) || isUnderwaterPlantBlock(neighbor);
   };
 
   auto tileFor = [](uint8_t type, int axis, bool positive) {
@@ -2982,6 +3112,12 @@ void World::buildChunkMesh(World::Chunk& chunk) {
     }
     if (type == kLeaves) {
       return kTileLeaves;
+    }
+    if (type == kSeagrass) {
+      return kTileSeagrass;
+    }
+    if (type == kCoral) {
+      return kTileCoral;
     }
     if (type == kCoalOre) {
       return kTileCoalOre;
@@ -3072,6 +3208,25 @@ void World::buildChunkMesh(World::Chunk& chunk) {
 
         bool isBreakTarget = overlayActive &&
                              overlayX == x && overlayY == y && overlayZ == z;
+
+        if (isUnderwaterPlantBlock(blockType)) {
+          int tile = tileFor(blockType, 1, true);
+          glm::vec3 color = blockColor(blockType) * (0.84f + 0.16f * heightFactor);
+          float inset = 0.16f;
+          addQuad({fx + inset, fy, fz + inset},
+                  {fx + inset, fy1, fz + inset},
+                  {fx1 - inset, fy1, fz1 - inset},
+                  {fx1 - inset, fy, fz1 - inset},
+                  color,
+                  tile);
+          addQuad({fx1 - inset, fy, fz + inset},
+                  {fx1 - inset, fy1, fz + inset},
+                  {fx + inset, fy1, fz1 - inset},
+                  {fx + inset, fy, fz1 - inset},
+                  color,
+                  tile);
+          continue;
+        }
 
         if (isFaceVisible(blockType, getBlock(x + 1, y, z))) {
           float shade = 0.8f;
