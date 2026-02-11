@@ -786,42 +786,56 @@ void App::setupGameplaySession() {
   int initialCx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int initialCz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
   int spawnChunkRadius = std::max(8, activeChunkViewRadius + 1);
+  int preloadRadius = std::max(4, std::min(activeChunkViewRadius, 6));
   world.updateActiveChunks(initialCx, initialCz, spawnChunkRadius);
   renderLoadingFrame(0.32f, "Generating chunks");
 
-  auto waitForRadiusWithLoading = [&](int radius,
-                                      int maxWaitMs,
-                                      float progressStart,
-                                      float progressEnd,
-                                      const std::string& message) {
-    using clock = std::chrono::steady_clock;
-    auto start = clock::now();
-    auto deadline = start + std::chrono::milliseconds(std::max(1, maxWaitMs));
-    while (clock::now() < deadline) {
-      if (world.waitForChunkRegion(initialCx, initialCz, radius, 18)) {
+  auto countReadyChunks = [&](int radius) {
+    int ready = 0;
+    for (int cz = initialCz - radius; cz <= initialCz + radius; ++cz) {
+      for (int cx = initialCx - radius; cx <= initialCx + radius; ++cx) {
+        if (world.getChunkGenerationStatus(cx, cz) >= ChunkGenStatus::kNoise) {
+          ++ready;
+        }
+      }
+    }
+    return ready;
+  };
+
+  auto preloadRadiusWithAnimation = [&](int radius,
+                                        float progressStart,
+                                        float progressEnd,
+                                        const std::string& message) {
+    int diameter = radius * 2 + 1;
+    int total = diameter * diameter;
+    if (total <= 0) {
+      renderLoadingFrame(progressEnd, message);
+      return true;
+    }
+
+    while (true) {
+      world.waitForChunkRegion(initialCx, initialCz, radius, 12);
+      int ready = countReadyChunks(radius);
+      float ratio = std::clamp(static_cast<float>(ready) / static_cast<float>(total), 0.0f, 1.0f);
+      std::string status = message + " " + std::to_string(ready) + "/" + std::to_string(total);
+      float progress = progressStart + (progressEnd - progressStart) * ratio;
+      renderLoadingFrame(progress, status);
+
+      if (ready >= total) {
         renderLoadingFrame(progressEnd, message);
         return true;
       }
-
-      auto now = clock::now();
-      float t = std::chrono::duration<float>(now - start).count() /
-                std::max(0.001f, static_cast<float>(maxWaitMs) / 1000.0f);
-      float progress = progressStart + (progressEnd - progressStart) * std::clamp(t, 0.0f, 1.0f);
-      renderLoadingFrame(progress, message);
-
       if (window && glfwWindowShouldClose(window)) {
         return false;
       }
     }
-    return world.waitForChunkRegion(initialCx, initialCz, radius, 1);
   };
 
-  bool fullSpawnRegionReady =
-    waitForRadiusWithLoading(spawnChunkRadius, 3000, 0.32f, 0.68f, "Generating chunks");
-  if (!fullSpawnRegionReady) {
-    // If the full radius isn't ready yet, ensure at least the core area is generated
-    // so surface probing does not fall back to high-altitude emergency spawn.
-    waitForRadiusWithLoading(2, 7000, 0.68f, 0.82f, "Preparing spawn area");
+  if (!preloadRadiusWithAnimation(2, 0.32f, 0.56f, "Preparing spawn area")) {
+    return;
+  }
+  if (!preloadRadiusWithAnimation(preloadRadius, 0.56f, 0.84f, "Preloading world")) {
+    return;
   }
   renderLoadingFrame(0.84f, "Searching spawn");
 
@@ -3289,10 +3303,20 @@ bool App::collidesAt(const glm::vec3& pos) const {
   int minZ = static_cast<int>(std::floor(min.z));
   int maxZ = static_cast<int>(std::floor(max.z));
 
+  auto chunkReadyAt = [&](int worldX, int worldZ) {
+    int cx = static_cast<int>(std::floor(static_cast<float>(worldX) / static_cast<float>(kChunkSize)));
+    int cz = static_cast<int>(std::floor(static_cast<float>(worldZ) / static_cast<float>(kChunkSize)));
+    return world.getChunkGenerationStatus(cx, cz) >= ChunkGenStatus::kNoise;
+  };
+
   for (int y = minY; y <= maxY; ++y) {
     for (int z = minZ; z <= maxZ; ++z) {
       for (int x = minX; x <= maxX; ++x) {
         if (!world.inBounds(x, y, z)) {
+          return true;
+        }
+        // Prevent falling through not-yet-generated chunk areas while streaming.
+        if (!chunkReadyAt(x, z)) {
           return true;
         }
         uint8_t block = world.getBlock(x, y, z);
