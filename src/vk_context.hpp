@@ -189,6 +189,7 @@ private:
   uint32_t uiIndexCount = 0;
   std::unordered_map<uint64_t, ChunkGpuMesh> worldChunkMeshes;
   std::vector<uint64_t> worldChunkDrawOrder;
+  std::unordered_map<uint64_t, size_t> worldChunkDrawOrderIndex;
   std::vector<ChunkGpuMesh> retiredWorldChunkMeshes;
   glm::mat4 cameraView{1.0f};
   glm::mat4 cameraProj{1.0f};

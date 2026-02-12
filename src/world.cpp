@@ -2933,13 +2933,60 @@ bool World::queueSectionRebuildTask(Chunk& chunk, int sectionY) {
   int baseX = chunk.cx * kChunkSize;
   int baseY = sectionY * kChunkSectionSize;
   int baseZ = chunk.cz * kChunkSize;
+  Chunk* neighborGrid[3][3] = {{nullptr, nullptr, nullptr},
+                               {nullptr, nullptr, nullptr},
+                               {nullptr, nullptr, nullptr}};
+  for (int dz = -1; dz <= 1; ++dz) {
+    for (int dx = -1; dx <= 1; ++dx) {
+      Chunk* neighbor = findChunk(chunk.cx + dx, chunk.cz + dz);
+      if (neighbor && isChunkMeshReady(*neighbor)) {
+        neighborGrid[dz + 1][dx + 1] = neighbor;
+      }
+    }
+  }
+
+  auto sampleBlockFast = [&](int wx, int wy, int wz) -> uint8_t {
+    if (wy < genSettings.minY || wy > genSettings.maxY) {
+      return kAir;
+    }
+    if (wy < 0 || wy >= kChunkHeight) {
+      return kAir;
+    }
+
+    int lx = wx - baseX;
+    int lz = wz - baseZ;
+    int chunkOffsetX = 1;
+    int chunkOffsetZ = 1;
+    if (lx < 0) {
+      lx += kChunkSize;
+      chunkOffsetX = 0;
+    } else if (lx >= kChunkSize) {
+      lx -= kChunkSize;
+      chunkOffsetX = 2;
+    }
+    if (lz < 0) {
+      lz += kChunkSize;
+      chunkOffsetZ = 0;
+    } else if (lz >= kChunkSize) {
+      lz -= kChunkSize;
+      chunkOffsetZ = 2;
+    }
+
+    Chunk* source = neighborGrid[chunkOffsetZ][chunkOffsetX];
+    if (!source) {
+      return kAir;
+    }
+    return source->blocks[static_cast<size_t>(localIndex(lx, wy, lz))];
+  };
+
   for (int sz = 0; sz < kSectionSampleSize; ++sz) {
     for (int sx = 0; sx < kSectionSampleSize; ++sx) {
       for (int sy = 0; sy < kSectionSampleSize; ++sy) {
         int wx = baseX + (sx - 1);
         int wy = baseY + (sy - 1);
         int wz = baseZ + (sz - 1);
-        task.samples[static_cast<size_t>(sectionSampleIndex(sx, sy, sz))] = getBlock(wx, wy, wz);
+        task.samples[static_cast<size_t>(sectionSampleIndex(sx, sy, sz))] =
+          sampleBlockFast(wx, wy, wz);
       }
     }
   }

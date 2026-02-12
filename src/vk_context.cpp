@@ -593,6 +593,7 @@ void VulkanContext::clearWorldChunkMeshes() {
   }
   worldChunkMeshes.clear();
   worldChunkDrawOrder.clear();
+  worldChunkDrawOrderIndex.clear();
   for (ChunkGpuMesh& mesh : retiredWorldChunkMeshes) {
     destroyChunkGpuMesh(mesh);
   }
@@ -608,10 +609,12 @@ void VulkanContext::setWorldChunkMeshes(const std::vector<WorldChunkMeshUpload>&
   clearWorldChunkMeshes();
 
   worldChunkDrawOrder.reserve(uploads.size());
+  worldChunkDrawOrderIndex.reserve(uploads.size());
   for (const WorldChunkMeshUpload& upload : uploads) {
     ChunkGpuMesh mesh{};
     uploadChunkGpuMesh(upload, mesh);
     worldChunkMeshes[upload.key] = mesh;
+    worldChunkDrawOrderIndex[upload.key] = worldChunkDrawOrder.size();
     worldChunkDrawOrder.push_back(upload.key);
   }
 }
@@ -625,6 +628,23 @@ void VulkanContext::updateWorldChunkMeshes(const std::vector<WorldChunkMeshUploa
     return;
   }
 
+  auto removeDrawKey = [&](uint64_t key) {
+    auto idxIt = worldChunkDrawOrderIndex.find(key);
+    if (idxIt == worldChunkDrawOrderIndex.end()) {
+      return;
+    }
+
+    size_t index = idxIt->second;
+    size_t lastIndex = worldChunkDrawOrder.size() - 1;
+    if (index != lastIndex) {
+      uint64_t swappedKey = worldChunkDrawOrder[lastIndex];
+      worldChunkDrawOrder[index] = swappedKey;
+      worldChunkDrawOrderIndex[swappedKey] = index;
+    }
+    worldChunkDrawOrder.pop_back();
+    worldChunkDrawOrderIndex.erase(idxIt);
+  };
+
   for (uint64_t key : removedKeys) {
     auto it = worldChunkMeshes.find(key);
     if (it == worldChunkMeshes.end()) {
@@ -632,9 +652,7 @@ void VulkanContext::updateWorldChunkMeshes(const std::vector<WorldChunkMeshUploa
     }
     retireChunkGpuMesh(it->second);
     worldChunkMeshes.erase(it);
-    worldChunkDrawOrder.erase(
-      std::remove(worldChunkDrawOrder.begin(), worldChunkDrawOrder.end(), key),
-      worldChunkDrawOrder.end());
+    removeDrawKey(key);
   }
 
   for (const WorldChunkMeshUpload& upload : uploads) {
@@ -642,14 +660,13 @@ void VulkanContext::updateWorldChunkMeshes(const std::vector<WorldChunkMeshUploa
     if (existing != worldChunkMeshes.end()) {
       retireChunkGpuMesh(existing->second);
       worldChunkMeshes.erase(existing);
-      worldChunkDrawOrder.erase(
-        std::remove(worldChunkDrawOrder.begin(), worldChunkDrawOrder.end(), upload.key),
-        worldChunkDrawOrder.end());
+      removeDrawKey(upload.key);
     }
 
     ChunkGpuMesh mesh{};
     uploadChunkGpuMesh(upload, mesh);
     worldChunkMeshes[upload.key] = mesh;
+    worldChunkDrawOrderIndex[upload.key] = worldChunkDrawOrder.size();
     worldChunkDrawOrder.push_back(upload.key);
   }
 
