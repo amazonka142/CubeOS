@@ -320,6 +320,8 @@ void VulkanContext::cleanup() {
     indexBufferMemory = VK_NULL_HANDLE;
   }
 
+  clearWorldChunkMeshes();
+
   if (vertexBuffer != VK_NULL_HANDLE) {
     vkDestroyBuffer(device, vertexBuffer, nullptr);
     vertexBuffer = VK_NULL_HANDLE;
@@ -501,6 +503,157 @@ void VulkanContext::updateMesh(const std::vector<Vertex>& vertices,
 
   createVertexBuffer();
   createIndexBuffer();
+}
+
+bool VulkanContext::uploadChunkGpuMesh(const WorldChunkMeshUpload& upload, ChunkGpuMesh& outMesh) {
+  if (upload.vertices.empty() || upload.indices.empty()) {
+    outMesh.indexCount = 0;
+    return true;
+  }
+
+  VkDeviceSize vertexSize = sizeof(Vertex) * upload.vertices.size();
+  VkDeviceSize indexSize = sizeof(uint32_t) * upload.indices.size();
+  if (vertexSize == 0 || indexSize == 0) {
+    outMesh.indexCount = 0;
+    return true;
+  }
+
+  createBuffer(vertexSize,
+               VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+               outMesh.vertexBuffer,
+               outMesh.vertexMemory);
+  createBuffer(indexSize,
+               VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+               outMesh.indexBuffer,
+               outMesh.indexMemory);
+
+  void* vertexData = nullptr;
+  vkMapMemory(device, outMesh.vertexMemory, 0, vertexSize, 0, &vertexData);
+  std::memcpy(vertexData, upload.vertices.data(), static_cast<size_t>(vertexSize));
+  vkUnmapMemory(device, outMesh.vertexMemory);
+
+  void* indexData = nullptr;
+  vkMapMemory(device, outMesh.indexMemory, 0, indexSize, 0, &indexData);
+  std::memcpy(indexData, upload.indices.data(), static_cast<size_t>(indexSize));
+  vkUnmapMemory(device, outMesh.indexMemory);
+
+  outMesh.indexCount = static_cast<uint32_t>(upload.indices.size());
+  return true;
+}
+
+void VulkanContext::destroyChunkGpuMesh(ChunkGpuMesh& mesh) {
+  if (mesh.vertexBuffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(device, mesh.vertexBuffer, nullptr);
+    mesh.vertexBuffer = VK_NULL_HANDLE;
+  }
+  if (mesh.vertexMemory != VK_NULL_HANDLE) {
+    vkFreeMemory(device, mesh.vertexMemory, nullptr);
+    mesh.vertexMemory = VK_NULL_HANDLE;
+  }
+  if (mesh.indexBuffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(device, mesh.indexBuffer, nullptr);
+    mesh.indexBuffer = VK_NULL_HANDLE;
+  }
+  if (mesh.indexMemory != VK_NULL_HANDLE) {
+    vkFreeMemory(device, mesh.indexMemory, nullptr);
+    mesh.indexMemory = VK_NULL_HANDLE;
+  }
+  mesh.indexCount = 0;
+}
+
+void VulkanContext::retireChunkGpuMesh(ChunkGpuMesh& mesh) {
+  if (mesh.vertexBuffer == VK_NULL_HANDLE && mesh.vertexMemory == VK_NULL_HANDLE &&
+      mesh.indexBuffer == VK_NULL_HANDLE && mesh.indexMemory == VK_NULL_HANDLE) {
+    return;
+  }
+  retiredWorldChunkMeshes.push_back(mesh);
+  mesh = {};
+}
+
+void VulkanContext::collectRetiredWorldChunkMeshes(bool force) {
+  if (retiredWorldChunkMeshes.empty()) {
+    return;
+  }
+  constexpr size_t kRetiredMeshCleanupThreshold = 1024;
+  if (!force && retiredWorldChunkMeshes.size() < kRetiredMeshCleanupThreshold) {
+    return;
+  }
+  vkDeviceWaitIdle(device);
+  for (ChunkGpuMesh& mesh : retiredWorldChunkMeshes) {
+    destroyChunkGpuMesh(mesh);
+  }
+  retiredWorldChunkMeshes.clear();
+}
+
+void VulkanContext::clearWorldChunkMeshes() {
+  for (auto& entry : worldChunkMeshes) {
+    destroyChunkGpuMesh(entry.second);
+  }
+  worldChunkMeshes.clear();
+  worldChunkDrawOrder.clear();
+  for (ChunkGpuMesh& mesh : retiredWorldChunkMeshes) {
+    destroyChunkGpuMesh(mesh);
+  }
+  retiredWorldChunkMeshes.clear();
+}
+
+void VulkanContext::setWorldChunkMeshes(const std::vector<WorldChunkMeshUpload>& uploads) {
+  if (device == VK_NULL_HANDLE) {
+    return;
+  }
+
+  vkDeviceWaitIdle(device);
+  clearWorldChunkMeshes();
+
+  worldChunkDrawOrder.reserve(uploads.size());
+  for (const WorldChunkMeshUpload& upload : uploads) {
+    ChunkGpuMesh mesh{};
+    uploadChunkGpuMesh(upload, mesh);
+    worldChunkMeshes[upload.key] = mesh;
+    worldChunkDrawOrder.push_back(upload.key);
+  }
+}
+
+void VulkanContext::updateWorldChunkMeshes(const std::vector<WorldChunkMeshUpload>& uploads,
+                                           const std::vector<uint64_t>& removedKeys) {
+  if (device == VK_NULL_HANDLE) {
+    return;
+  }
+  if (uploads.empty() && removedKeys.empty()) {
+    return;
+  }
+
+  for (uint64_t key : removedKeys) {
+    auto it = worldChunkMeshes.find(key);
+    if (it == worldChunkMeshes.end()) {
+      continue;
+    }
+    retireChunkGpuMesh(it->second);
+    worldChunkMeshes.erase(it);
+    worldChunkDrawOrder.erase(
+      std::remove(worldChunkDrawOrder.begin(), worldChunkDrawOrder.end(), key),
+      worldChunkDrawOrder.end());
+  }
+
+  for (const WorldChunkMeshUpload& upload : uploads) {
+    auto existing = worldChunkMeshes.find(upload.key);
+    if (existing != worldChunkMeshes.end()) {
+      retireChunkGpuMesh(existing->second);
+      worldChunkMeshes.erase(existing);
+      worldChunkDrawOrder.erase(
+        std::remove(worldChunkDrawOrder.begin(), worldChunkDrawOrder.end(), upload.key),
+        worldChunkDrawOrder.end());
+    }
+
+    ChunkGpuMesh mesh{};
+    uploadChunkGpuMesh(upload, mesh);
+    worldChunkMeshes[upload.key] = mesh;
+    worldChunkDrawOrder.push_back(upload.key);
+  }
+
+  collectRetiredWorldChunkMeshes(false);
 }
 
 void VulkanContext::setCameraMatrices(const glm::mat4& view, const glm::mat4& proj) {
@@ -1595,7 +1748,7 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
   scissor.extent = swapchainExtent;
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-  if (!meshIndices.empty()) {
+  if (!meshIndices.empty() && vertexBuffer != VK_NULL_HANDLE && indexBuffer != VK_NULL_HANDLE) {
     VkBuffer vertexBuffers[] = {vertexBuffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
@@ -1614,36 +1767,56 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
       vkCmdDrawIndexed(commandBuffer, skyIndexCount, 1, 0, 0, 0);
     }
 
-    if (worldIndexCount > 0) {
-      vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-      vkCmdBindDescriptorSets(commandBuffer,
-                              VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              pipelineLayout,
-                              0,
-                              1,
-                              &descriptorSets[imageIndex],
-                              0,
-                              nullptr);
-      vkCmdDrawIndexed(commandBuffer, worldIndexCount, 1, skyIndexCount, 0, 0);
-    }
+  }
 
-    if (uiIndexCount > 0 && uiPipeline != VK_NULL_HANDLE) {
-      vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline);
-      vkCmdBindDescriptorSets(commandBuffer,
-                              VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              pipelineLayout,
-                              0,
-                              1,
-                              &descriptorSets[imageIndex],
-                              0,
-                              nullptr);
-      vkCmdDrawIndexed(commandBuffer,
-                       uiIndexCount,
-                       1,
-                       skyIndexCount + worldIndexCount,
-                       0,
-                       0);
+  if (!worldChunkDrawOrder.empty() && graphicsPipeline != VK_NULL_HANDLE) {
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    vkCmdBindDescriptorSets(commandBuffer,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineLayout,
+                            0,
+                            1,
+                            &descriptorSets[imageIndex],
+                            0,
+                            nullptr);
+
+    VkDeviceSize offset = 0;
+    for (uint64_t key : worldChunkDrawOrder) {
+      auto it = worldChunkMeshes.find(key);
+      if (it == worldChunkMeshes.end()) {
+        continue;
+      }
+      const ChunkGpuMesh& mesh = it->second;
+      if (mesh.vertexBuffer == VK_NULL_HANDLE || mesh.indexBuffer == VK_NULL_HANDLE || mesh.indexCount == 0) {
+        continue;
+      }
+      vkCmdBindVertexBuffers(commandBuffer, 0, 1, &mesh.vertexBuffer, &offset);
+      vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+      vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
     }
+  }
+
+  if (!meshIndices.empty() && vertexBuffer != VK_NULL_HANDLE && indexBuffer != VK_NULL_HANDLE &&
+      uiIndexCount > 0 && uiPipeline != VK_NULL_HANDLE) {
+    VkBuffer vertexBuffers[] = {vertexBuffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+    vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline);
+    vkCmdBindDescriptorSets(commandBuffer,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineLayout,
+                            0,
+                            1,
+                            &descriptorSets[imageIndex],
+                            0,
+                            nullptr);
+    vkCmdDrawIndexed(commandBuffer,
+                     uiIndexCount,
+                     1,
+                     skyIndexCount + worldIndexCount,
+                     0,
+                     0);
   }
   vkCmdEndRenderPass(commandBuffer);
 

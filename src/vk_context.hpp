@@ -3,14 +3,22 @@
 #include "mesh.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct GLFWwindow;
 
 class VulkanContext {
 public:
+  struct WorldChunkMeshUpload {
+    uint64_t key = 0;
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+  };
+
   void init(GLFWwindow* window, bool* framebufferResizedFlag);
   void cleanup();
   void drawFrame();
@@ -25,6 +33,9 @@ public:
                   uint32_t skyIndexCount,
                   uint32_t worldIndexCount,
                   uint32_t uiIndexCount);
+  void setWorldChunkMeshes(const std::vector<WorldChunkMeshUpload>& uploads);
+  void updateWorldChunkMeshes(const std::vector<WorldChunkMeshUpload>& uploads,
+                              const std::vector<uint64_t>& removedKeys);
   void setCameraMatrices(const glm::mat4& view, const glm::mat4& proj);
   void setCameraWorldState(const glm::vec3& eyePosition, bool underwater);
 
@@ -114,6 +125,18 @@ private:
   VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates,
                                VkImageTiling tiling,
                                VkFormatFeatureFlags features) const;
+  struct ChunkGpuMesh {
+    VkBuffer vertexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
+    VkBuffer indexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory indexMemory = VK_NULL_HANDLE;
+    uint32_t indexCount = 0;
+  };
+  bool uploadChunkGpuMesh(const WorldChunkMeshUpload& upload, ChunkGpuMesh& outMesh);
+  void destroyChunkGpuMesh(ChunkGpuMesh& mesh);
+  void retireChunkGpuMesh(ChunkGpuMesh& mesh);
+  void collectRetiredWorldChunkMeshes(bool force);
+  void clearWorldChunkMeshes();
 
   VkInstance instance = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
@@ -164,6 +187,9 @@ private:
   uint32_t skyIndexCount = 0;
   uint32_t worldIndexCount = 0;
   uint32_t uiIndexCount = 0;
+  std::unordered_map<uint64_t, ChunkGpuMesh> worldChunkMeshes;
+  std::vector<uint64_t> worldChunkDrawOrder;
+  std::vector<ChunkGpuMesh> retiredWorldChunkMeshes;
   glm::mat4 cameraView{1.0f};
   glm::mat4 cameraProj{1.0f};
   glm::vec3 cameraWorldPos{0.0f};

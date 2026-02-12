@@ -269,6 +269,21 @@
   - Depends on: `CUBE-301`.
   - Acceptance: player can obtain and use all tool tiers.
 
+- `CUBE-308` Render-layer split and transparent sorting.
+  - Scope: split chunk-section mesh output into `solid` / `cutout` / `translucent` layers and add per-section translucent sort path.
+  - Depends on: chunk-section streaming pipeline in v0.2.x.
+  - Acceptance: transparent blocks/plants render in stable order without major artifacts during movement.
+
+- `CUBE-309` Aggressive section culling (frustum + occlusion).
+  - Scope: add per-section frustum culling and occlusion-aware rejection to reduce overdraw and draw-call load.
+  - Depends on: `CUBE-308`.
+  - Acceptance: hidden/off-camera sections are skipped consistently; measurable draw-count reduction in dense scenes.
+
+- `CUBE-310` GPU upload batching and sync modernization.
+  - Scope: replace coarse update sync with staged/batched chunk-section uploads and non-blocking lifetime management.
+  - Depends on: `CUBE-308`.
+  - Acceptance: chunk streaming under player movement avoids visible frame hitches from upload synchronization.
+
 ### P3
 - `CUBE-307` Mining feel polish.
   - Scope: tweak break duration curves by tool/material.

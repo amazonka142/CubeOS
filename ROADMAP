@@ -63,7 +63,7 @@ Definition of done:
 - Player can collect coins in world and keep balance between sessions.
 - Player can buy at least one upgrade in main menu and feel effect in gameplay.
 
-## v0.3 - Tools & Mining Loop
+## v0.3.0 - Tools, Mining & Render Streaming Parity
 - Add tools:
   - Wooden, stone and iron pickaxe.
   - Axe and shovel (same material tiers).
@@ -75,10 +75,15 @@ Definition of done:
   - Ores drop proper items only with correct tool tier.
 - UI:
   - Tool icons and durability display in hotbar/inventory.
+- Rendering architecture (Minecraft-style parity):
+  - Full render-layer split (`solid` / `cutout` / `translucent`) with dedicated transparent sorting.
+  - More aggressive section culling (frustum + occlusion).
+  - More mature GPU sync and upload batching pipeline for chunk-section streaming.
 
 Definition of done:
 - Player can craft/use tools (or obtain them in test mode) and mine faster with proper tool.
 - Durability decreases and tools break correctly.
+- Moving across chunk borders does not cause noticeable frame spikes from mesh rebuild/upload bursts.
 
 ## v0.4 - Balance & Polish
 - Balance world parameters:

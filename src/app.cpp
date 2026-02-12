@@ -191,6 +191,19 @@ std::string trimAscii(const std::string& value) {
   return value.substr(first, last - first);
 }
 
+std::vector<VulkanContext::WorldChunkMeshUpload> toVkChunkUploads(std::vector<ChunkMeshUpload>&& uploads) {
+  std::vector<VulkanContext::WorldChunkMeshUpload> out;
+  out.reserve(uploads.size());
+  for (ChunkMeshUpload& upload : uploads) {
+    VulkanContext::WorldChunkMeshUpload vkUpload;
+    vkUpload.key = upload.key;
+    vkUpload.vertices = std::move(upload.vertices);
+    vkUpload.indices = std::move(upload.indices);
+    out.push_back(std::move(vkUpload));
+  }
+  return out;
+}
+
 std::string sanitizeWorldNameForFile(const std::string& value) {
   std::string source = trimAscii(value);
   if (source.empty()) {
@@ -1126,15 +1139,22 @@ void App::setupGameplaySession() {
   currentChunkZ = cz;
   chunkCenterValid = true;
 
-  renderLoadingFrame(0.92f, "Building world mesh");
-  world.buildMesh(worldVertices, worldIndices);
+  renderLoadingFrame(0.92f, "Building chunk render data");
+  std::vector<ChunkMeshUpload> worldSnapshot;
+  world.snapshotChunkMeshes(worldSnapshot);
   rebuildUiMesh();
   composeMeshData();
+  std::vector<VulkanContext::WorldChunkMeshUpload> vkWorldSnapshot =
+    toVkChunkUploads(std::move(worldSnapshot));
   if (vkReady) {
     vk.updateMesh(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
+    vk.setWorldChunkMeshes(vkWorldSnapshot);
   } else {
     vk.setMeshData(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
   }
+  pendingWorldChunkUploads.clear();
+  pendingWorldChunkRemovals.clear();
+  lastWorldChunkUploadTime = glfwGetTime();
   uiDirty = false;
   refreshSelectedBlock();
 
@@ -1712,7 +1732,6 @@ void App::initVulkan() {
   world.generate();
   world.updateActiveChunks(0, 0, 3);
   world.waitForChunkRegion(0, 0, 3, 2500);
-  world.buildMesh(worldVertices, worldIndices);
 
   pendingWorldSettings = startupSettings;
   pendingWorldName = "World";
@@ -1727,9 +1746,19 @@ void App::initVulkan() {
   vk.setMeshData(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
   vk.init(window, &framebufferResized);
   vkReady = true;
+
+  std::vector<ChunkMeshUpload> worldSnapshot;
+  world.snapshotChunkMeshes(worldSnapshot);
+  vk.setWorldChunkMeshes(toVkChunkUploads(std::move(worldSnapshot)));
+  pendingWorldChunkUploads.clear();
+  pendingWorldChunkRemovals.clear();
+  lastWorldChunkUploadTime = glfwGetTime();
 }
 
 void App::mainLoop() {
+  constexpr double kWorldChunkUploadMinIntervalSec = 1.0 / 30.0; // Section uploads are cheap enough to stream at ~30 Hz.
+  constexpr int kMeshRebuildTaskBudgetPerTick = 10;
+  constexpr int kMeshUploadBudgetPerTick = 16;
   double lastTime = glfwGetTime();
   while (!glfwWindowShouldClose(window)) {
     double currentTime = glfwGetTime();
@@ -1784,14 +1813,51 @@ void App::mainLoop() {
       waterSimAccumulator = 0.0f;
     }
 
-    bool worldChanged = world.consumeMeshDirty();
-    if (worldChanged) {
-      world.buildMesh(worldVertices, worldIndices);
+    std::vector<ChunkMeshUpload> chunkUpdates;
+    std::vector<uint64_t> removedChunkKeys;
+    bool hasChunkUpdateBatch = world.consumeChunkMeshUpdates(
+      chunkUpdates,
+      removedChunkKeys,
+      kMeshRebuildTaskBudgetPerTick,
+      kMeshUploadBudgetPerTick);
+    if (hasChunkUpdateBatch) {
+      for (uint64_t key : removedChunkKeys) {
+        pendingWorldChunkUploads.erase(key);
+        pendingWorldChunkRemovals.insert(key);
+      }
+
+      std::vector<VulkanContext::WorldChunkMeshUpload> vkUpdates =
+        toVkChunkUploads(std::move(chunkUpdates));
+      for (VulkanContext::WorldChunkMeshUpload& update : vkUpdates) {
+        pendingWorldChunkRemovals.erase(update.key);
+        pendingWorldChunkUploads[update.key] = std::move(update);
+      }
     }
+
+    bool shouldFlushWorldChunks = !pendingWorldChunkUploads.empty() || !pendingWorldChunkRemovals.empty();
+    if (shouldFlushWorldChunks &&
+        (currentTime - lastWorldChunkUploadTime) >= kWorldChunkUploadMinIntervalSec) {
+      std::vector<uint64_t> removals;
+      removals.reserve(pendingWorldChunkRemovals.size());
+      for (uint64_t key : pendingWorldChunkRemovals) {
+        removals.push_back(key);
+      }
+      pendingWorldChunkRemovals.clear();
+
+      std::vector<VulkanContext::WorldChunkMeshUpload> uploads;
+      uploads.reserve(pendingWorldChunkUploads.size());
+      for (auto& [key, upload] : pendingWorldChunkUploads) {
+        (void)key;
+        uploads.push_back(std::move(upload));
+      }
+      pendingWorldChunkUploads.clear();
+
+      vk.updateWorldChunkMeshes(uploads, removals);
+      lastWorldChunkUploadTime = currentTime;
+    }
+
     if (uiDirty) {
       rebuildUiMesh();
-    }
-    if (worldChanged || uiDirty) {
       composeMeshData();
       vk.updateMesh(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
       uiDirty = false;
@@ -2220,8 +2286,14 @@ void App::updateStreaming() {
 }
 
 void App::rebuildWorldMesh() {
-  world.buildMesh(worldVertices, worldIndices);
-  composeMeshData();
+  std::vector<ChunkMeshUpload> snapshot;
+  world.snapshotChunkMeshes(snapshot);
+  if (vkReady) {
+    vk.setWorldChunkMeshes(toVkChunkUploads(std::move(snapshot)));
+    pendingWorldChunkUploads.clear();
+    pendingWorldChunkRemovals.clear();
+    lastWorldChunkUploadTime = glfwGetTime();
+  }
 }
 
 void App::rebuildUiMesh() {
@@ -2941,16 +3013,9 @@ void App::composeMeshData() {
   meshVertices = skyVertices;
   meshIndices = skyIndices;
   skyIndexCount = static_cast<uint32_t>(skyIndices.size());
+  worldIndexCount = 0;
 
   uint32_t vertexOffset = static_cast<uint32_t>(meshVertices.size());
-  meshVertices.insert(meshVertices.end(), worldVertices.begin(), worldVertices.end());
-  meshIndices.reserve(meshIndices.size() + worldIndices.size());
-  for (uint32_t idx : worldIndices) {
-    meshIndices.push_back(idx + vertexOffset);
-  }
-  worldIndexCount = static_cast<uint32_t>(worldIndices.size());
-
-  vertexOffset = static_cast<uint32_t>(meshVertices.size());
   meshVertices.insert(meshVertices.end(), uiVertices.begin(), uiVertices.end());
   meshIndices.reserve(meshIndices.size() + uiIndices.size());
   for (uint32_t idx : uiIndices) {

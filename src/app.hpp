@@ -7,6 +7,8 @@
 #include <glm/glm.hpp>
 #include <array>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct GLFWwindow;
@@ -137,6 +139,9 @@ private:
   bool mouseLeftDown = false;
   bool mouseRightDown = false;
   bool uiDirty = true;
+  std::unordered_map<uint64_t, VulkanContext::WorldChunkMeshUpload> pendingWorldChunkUploads{};
+  std::unordered_set<uint64_t> pendingWorldChunkRemovals{};
+  double lastWorldChunkUploadTime = 0.0;
   float waterSimAccumulator = 0.0f;
   float waterSimBoostTimer = 0.0f;
   ScreenState screenState = ScreenState::kMainMenu;

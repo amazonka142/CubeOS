@@ -6,16 +6,25 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <queue>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 constexpr int kChunkSize = 16;
 constexpr int kChunkHeight = 128;
 constexpr size_t kChunkColumnCount = static_cast<size_t>(kChunkSize * kChunkSize);
+constexpr int kChunkSectionSize = 16;
+constexpr int kChunkSectionCount = kChunkHeight / kChunkSectionSize;
+constexpr int kSectionSampleSize = kChunkSectionSize + 2;
+constexpr size_t kSectionSampleCount =
+  static_cast<size_t>(kSectionSampleSize * kSectionSampleSize * kSectionSampleSize);
+static_assert(kChunkHeight % kChunkSectionSize == 0,
+              "kChunkHeight must be divisible by kChunkSectionSize");
 
 enum class WorldPreset : uint8_t {
   kMinecraftStyle = 0,
@@ -109,6 +118,12 @@ constexpr uint8_t blockFromWaterLevel(uint8_t level) {
   return kAir;
 }
 
+struct ChunkMeshUpload {
+  uint64_t key = 0;
+  std::vector<Vertex> vertices;
+  std::vector<uint32_t> indices;
+};
+
 class World {
 public:
   World(int initialChunksX, int initialChunksZ, int seed = 1337);
@@ -119,6 +134,11 @@ public:
 
   void generate();
   void buildMesh(std::vector<Vertex>& outVertices, std::vector<uint32_t>& outIndices);
+  void snapshotChunkMeshes(std::vector<ChunkMeshUpload>& outUploads);
+  bool consumeChunkMeshUpdates(std::vector<ChunkMeshUpload>& outUploads,
+                               std::vector<uint64_t>& outRemoved,
+                               int buildBudget,
+                               int uploadBudget);
   bool save(const std::string& path) const;
   bool load(const std::string& path);
   void generateChunkToStatus(int chunkX, int chunkZ, ChunkGenStatus targetStatus);
@@ -147,12 +167,28 @@ private:
   int localIndex(int lx, int ly, int lz) const;
   glm::vec3 blockColor(uint8_t type) const;
   uint64_t chunkKey(int cx, int cz) const;
+  uint64_t sectionKey(int cx, int cz, int sectionY) const;
+  bool decodeSectionKey(uint64_t key, int& outCx, int& outCz, int& outSectionY) const;
+  bool isChunkMeshReady(const Chunk& chunk) const;
+  int sectionIndexForY(int y) const;
   Chunk* findChunk(int cx, int cz);
   const Chunk* findChunk(int cx, int cz) const;
   Chunk& ensureChunk(int cx, int cz);
   void generateChunk(Chunk& chunk, ChunkGenStatus targetStatus = ChunkGenStatus::kFull);
+  bool buildChunkSectionMeshNow(Chunk& chunk, int sectionY);
   void buildChunkMesh(Chunk& chunk);
+  void markChunkSectionDirty(Chunk& chunk, int sectionY, bool queueRebuild);
+  void markChunkSectionsDirty(Chunk& chunk, bool queueRebuild);
+  void markSectionAndNeighborsDirty(int cx, int cz, int lx, int y, int lz, bool queueRebuild);
   void markNeighborChunksDirty(int cx, int cz);
+  void markChunkBoundaryNeighborsDirty(int cx, int cz);
+  void enqueueSectionRebuild(uint64_t key);
+  bool queueSectionRebuildTask(Chunk& chunk, int sectionY);
+  void enqueueChunkMeshUpload(uint64_t key);
+  void pumpMeshRebuildResults();
+  void resetMeshRebuildQueues();
+  void startMeshWorkers();
+  void stopMeshWorkers();
   void startChunkWorkers();
   void stopChunkWorkers();
   void queueChunkGeneration(int cx, int cz, uint32_t epoch, ChunkGenStatus targetStatus);
@@ -184,12 +220,41 @@ private:
     int stage = 0;
   };
 
+  struct SectionRenderData {
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    bool dirty = true;
+    bool queued = false;
+    uint32_t version = 1;
+  };
+
+  struct SectionRebuildTask {
+    uint64_t sectionKey = 0;
+    uint64_t chunkLookupKey = 0;
+    int cx = 0;
+    int cz = 0;
+    int sectionY = 0;
+    uint32_t version = 0;
+    std::array<uint8_t, kSectionSampleCount> samples{};
+    bool overlayActive = false;
+    glm::ivec3 overlayBlock{};
+    int overlayStage = 0;
+  };
+
+  struct SectionRebuildResult {
+    uint64_t sectionKey = 0;
+    uint64_t chunkLookupKey = 0;
+    int sectionY = 0;
+    uint32_t version = 0;
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+  };
+
   struct Chunk {
     int cx = 0;
     int cz = 0;
     std::vector<uint8_t> blocks;
-    std::vector<Vertex> meshVertices;
-    std::vector<uint32_t> meshIndices;
+    std::array<SectionRenderData, kChunkSectionCount> sectionMeshes{};
     bool dirty = true;
     bool modified = false;
     bool generating = false;
@@ -208,6 +273,17 @@ private:
   BreakOverlay breakOverlay{};
   std::unordered_map<uint64_t, Chunk> chunks;
   std::unordered_map<uint64_t, std::vector<uint8_t>> savedChunks;
+  std::vector<uint64_t> pendingRemovedMeshKeys;
+  std::deque<uint64_t> pendingSectionRebuildQueue;
+  std::unordered_set<uint64_t> pendingSectionRebuildSet;
+  std::deque<uint64_t> pendingMeshUploadQueue;
+  std::unordered_set<uint64_t> pendingMeshUploadSet;
+  std::queue<SectionRebuildTask> sectionRebuildQueue;
+  std::queue<SectionRebuildResult> sectionRebuildResults;
+  std::vector<std::thread> sectionRebuildWorkers;
+  bool stopSectionRebuildWorkers = false;
+  mutable std::mutex sectionRebuildMutex;
+  std::condition_variable sectionRebuildCv;
   uint32_t generationEpoch = 1;
   std::unordered_map<uint64_t, uint32_t> pendingGenerationEpochByKey;
   std::queue<ChunkGenerationTask> generationQueue;
