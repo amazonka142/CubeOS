@@ -27,6 +27,7 @@ private:
     int graphicsQuality = 1;   // 0=Low, 1=Medium, 2=High
     float sensitivity = 0.10f; // mouse look sensitivity
     int audioVolume = 80;      // placeholder value, reserved for audio system
+    int language = 0;          // 0=English, 1=Russian
   };
 
   enum class ScreenState : uint8_t {

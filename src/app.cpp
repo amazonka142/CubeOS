@@ -48,7 +48,7 @@ constexpr uint8_t kDigitMap[10][kDigitHeight] = {
 
 constexpr int kGlyphWidth = 3;
 constexpr int kGlyphHeight = 5;
-constexpr uint8_t kAlphabetMap[26][kGlyphHeight] = {
+constexpr uint8_t kLatinAlphabetMap[26][kGlyphHeight] = {
   {0b111, 0b101, 0b111, 0b101, 0b101}, // A
   {0b110, 0b101, 0b110, 0b101, 0b110}, // B
   {0b111, 0b100, 0b100, 0b100, 0b111}, // C
@@ -77,12 +77,131 @@ constexpr uint8_t kAlphabetMap[26][kGlyphHeight] = {
   {0b111, 0b001, 0b010, 0b100, 0b111}  // Z
 };
 
-const uint8_t* glyphForChar(char c) {
-  if (c >= 'A' && c <= 'Z') {
-    return kAlphabetMap[static_cast<size_t>(c - 'A')];
+constexpr uint8_t kCyrillicAlphabetMap[33][kGlyphHeight] = {
+  {0b111, 0b101, 0b111, 0b101, 0b101}, // А
+  {0b111, 0b100, 0b110, 0b101, 0b111}, // Б
+  {0b110, 0b101, 0b110, 0b101, 0b110}, // В
+  {0b111, 0b100, 0b100, 0b100, 0b100}, // Г
+  {0b011, 0b101, 0b101, 0b101, 0b111}, // Д
+  {0b111, 0b100, 0b110, 0b100, 0b111}, // Е
+  {0b111, 0b100, 0b110, 0b100, 0b111}, // Ё
+  {0b101, 0b101, 0b010, 0b101, 0b101}, // Ж
+  {0b111, 0b001, 0b011, 0b001, 0b111}, // З
+  {0b101, 0b111, 0b111, 0b111, 0b101}, // И
+  {0b101, 0b111, 0b111, 0b111, 0b101}, // Й
+  {0b101, 0b101, 0b110, 0b101, 0b101}, // К
+  {0b011, 0b101, 0b101, 0b101, 0b101}, // Л
+  {0b101, 0b111, 0b111, 0b101, 0b101}, // М
+  {0b101, 0b101, 0b111, 0b101, 0b101}, // Н
+  {0b111, 0b101, 0b101, 0b101, 0b111}, // О
+  {0b111, 0b101, 0b101, 0b101, 0b101}, // П
+  {0b111, 0b101, 0b111, 0b100, 0b100}, // Р
+  {0b111, 0b100, 0b100, 0b100, 0b111}, // С
+  {0b111, 0b010, 0b010, 0b010, 0b010}, // Т
+  {0b101, 0b101, 0b010, 0b010, 0b010}, // У
+  {0b010, 0b111, 0b111, 0b111, 0b010}, // Ф
+  {0b101, 0b101, 0b010, 0b101, 0b101}, // Х
+  {0b101, 0b101, 0b101, 0b111, 0b001}, // Ц
+  {0b101, 0b101, 0b111, 0b001, 0b001}, // Ч
+  {0b101, 0b101, 0b111, 0b111, 0b101}, // Ш
+  {0b101, 0b101, 0b111, 0b111, 0b001}, // Щ
+  {0b110, 0b010, 0b011, 0b010, 0b111}, // Ъ
+  {0b101, 0b101, 0b111, 0b101, 0b111}, // Ы
+  {0b100, 0b100, 0b110, 0b101, 0b110}, // Ь
+  {0b111, 0b001, 0b111, 0b001, 0b111}, // Э
+  {0b101, 0b111, 0b111, 0b111, 0b101}, // Ю
+  {0b111, 0b101, 0b111, 0b011, 0b101}  // Я
+};
+
+uint32_t toUpperCodepoint(uint32_t codepoint) {
+  if (codepoint >= 'a' && codepoint <= 'z') {
+    return codepoint - 32u;
   }
-  if (c >= '0' && c <= '9') {
-    return kDigitMap[static_cast<size_t>(c - '0')];
+  if (codepoint >= 0x430u && codepoint <= 0x44Fu) {
+    return codepoint - 0x20u;
+  }
+  if (codepoint == 0x451u) { // ё
+    return 0x401u;
+  }
+  return codepoint;
+}
+
+bool nextUtf8Codepoint(const std::string& text, size_t& index, uint32_t& outCodepoint) {
+  if (index >= text.size()) {
+    return false;
+  }
+
+  unsigned char c0 = static_cast<unsigned char>(text[index++]);
+  if ((c0 & 0x80u) == 0) {
+    outCodepoint = c0;
+    return true;
+  }
+
+  auto takeCont = [&](uint32_t& outPart) -> bool {
+    if (index >= text.size()) {
+      return false;
+    }
+    unsigned char cx = static_cast<unsigned char>(text[index]);
+    if ((cx & 0xC0u) != 0x80u) {
+      return false;
+    }
+    ++index;
+    outPart = static_cast<uint32_t>(cx & 0x3Fu);
+    return true;
+  };
+
+  if ((c0 & 0xE0u) == 0xC0u) {
+    uint32_t c1 = 0;
+    if (!takeCont(c1)) {
+      outCodepoint = '?';
+      return true;
+    }
+    outCodepoint = ((static_cast<uint32_t>(c0) & 0x1Fu) << 6) | c1;
+    return true;
+  }
+
+  if ((c0 & 0xF0u) == 0xE0u) {
+    uint32_t c1 = 0;
+    uint32_t c2 = 0;
+    if (!takeCont(c1) || !takeCont(c2)) {
+      outCodepoint = '?';
+      return true;
+    }
+    outCodepoint = ((static_cast<uint32_t>(c0) & 0x0Fu) << 12) | (c1 << 6) | c2;
+    return true;
+  }
+
+  if ((c0 & 0xF8u) == 0xF0u) {
+    uint32_t c1 = 0;
+    uint32_t c2 = 0;
+    uint32_t c3 = 0;
+    if (!takeCont(c1) || !takeCont(c2) || !takeCont(c3)) {
+      outCodepoint = '?';
+      return true;
+    }
+    outCodepoint = ((static_cast<uint32_t>(c0) & 0x07u) << 18) | (c1 << 12) | (c2 << 6) | c3;
+    return true;
+  }
+
+  outCodepoint = '?';
+  return true;
+}
+
+const uint8_t* glyphForCodepoint(uint32_t codepoint) {
+  if (codepoint >= 'A' && codepoint <= 'Z') {
+    return kLatinAlphabetMap[static_cast<size_t>(codepoint - 'A')];
+  }
+  if (codepoint >= '0' && codepoint <= '9') {
+    return kDigitMap[static_cast<size_t>(codepoint - '0')];
+  }
+  if (codepoint >= 0x410u && codepoint <= 0x415u) {
+    return kCyrillicAlphabetMap[static_cast<size_t>(codepoint - 0x410u)];
+  }
+  if (codepoint == 0x401u) {
+    return kCyrillicAlphabetMap[6];
+  }
+  if (codepoint >= 0x416u && codepoint <= 0x42Fu) {
+    return kCyrillicAlphabetMap[static_cast<size_t>(7u + (codepoint - 0x416u))];
   }
   return nullptr;
 }
@@ -122,40 +241,40 @@ int tileForBlock(uint8_t type) {
   }
 }
 
-std::string displayNameForBlock(uint8_t type) {
+std::string displayNameForBlock(uint8_t type, bool russian) {
   if (isWaterBlock(type)) {
-    return "WATER";
+    return russian ? "ВОДА" : "WATER";
   }
 
   switch (type) {
     case kAir:
-      return "EMPTY HAND";
+      return russian ? "ПУСТЫЕ РУКИ" : "EMPTY HAND";
     case kGrass:
-      return "GRASS BLOCK";
+      return russian ? "ТРАВА" : "GRASS BLOCK";
     case kDirt:
-      return "DIRT";
+      return russian ? "ЗЕМЛЯ" : "DIRT";
     case kStone:
-      return "STONE";
+      return russian ? "КАМЕНЬ" : "STONE";
     case kSand:
-      return "SAND";
+      return russian ? "ПЕСОК" : "SAND";
     case kGravel:
-      return "GRAVEL";
+      return russian ? "ГРАВИЙ" : "GRAVEL";
     case kWood:
-      return "WOOD";
+      return russian ? "ДЕРЕВО" : "WOOD";
     case kLeaves:
-      return "LEAVES";
+      return russian ? "ЛИСТВА" : "LEAVES";
     case kSeagrass:
-      return "SEAGRASS";
+      return russian ? "МОРСКАЯ ТРАВА" : "SEAGRASS";
     case kCoral:
-      return "CORAL";
+      return russian ? "КОРАЛЛ" : "CORAL";
     case kCoalOre:
-      return "COAL ORE";
+      return russian ? "УГОЛЬНАЯ РУДА" : "COAL ORE";
     case kIronOre:
-      return "IRON ORE";
+      return russian ? "ЖЕЛЕЗНАЯ РУДА" : "IRON ORE";
     case kGoldOre:
-      return "GOLD ORE";
+      return russian ? "ЗОЛОТАЯ РУДА" : "GOLD ORE";
     default:
-      return "BLOCK";
+      return russian ? "БЛОК" : "BLOCK";
   }
 }
 
@@ -516,7 +635,12 @@ void App::updateWindowTitle() {
     return;
   }
 
-  auto mark = [](int current, int index, const char* label) {
+  const bool ru = appliedSettings.language == 1;
+  auto loc = [&](const char* en, const char* ruText) {
+    return ru ? std::string(ruText) : std::string(en);
+  };
+
+  auto mark = [](int current, int index, const std::string& label) {
     return current == index
       ? std::string("[") + label + "]"
       : std::string(label);
@@ -525,54 +649,57 @@ void App::updateWindowTitle() {
   std::string title = "CubeOS v0.2.0";
   switch (screenState) {
     case ScreenState::kMainMenu:
-      title += " | Menu: " + mark(mainMenuSelection, 0, "Start") + "  "
-            + mark(mainMenuSelection, 1, "Settings") + "  "
-            + mark(mainMenuSelection, 2, "Quit");
+      title += " | " + loc("Menu: ", "Меню: ") + mark(mainMenuSelection, 0, loc("Start", "Начать")) + "  "
+            + mark(mainMenuSelection, 1, loc("Settings", "Настройки")) + "  "
+            + mark(mainMenuSelection, 2, loc("Quit", "Выход"));
       break;
     case ScreenState::kWorldSelect: {
       int rowCount = static_cast<int>(worldSelectEntries.size()) + 2;
       int clampedSelection = std::clamp(worldSelectSelection, 0, std::max(0, rowCount - 1));
       if (clampedSelection == 0) {
-        title += " | World Select | [Create New World]";
+        title += " | " + loc("World Select", "Выбор мира") + " | [" + loc("Create New World", "Создать мир") + "]";
       } else if (clampedSelection == rowCount - 1) {
-        title += " | World Select | [Back To Menu]";
+        title += " | " + loc("World Select", "Выбор мира") + " | [" + loc("Back To Menu", "Назад в меню") + "]";
       } else {
         int worldIndex = clampedSelection - 1;
         std::string worldLabel = worldSelectEntries[static_cast<size_t>(worldIndex)].displayName;
-        title += " | World Select | [" + worldLabel + "]";
+        title += " | " + loc("World Select", "Выбор мира") + " | [" + worldLabel + "]";
       }
       break;
     }
     case ScreenState::kSettings:
-      title += " | Settings | Up/Down Select | Left/Right Adjust | Enter Action";
+      title += ru
+        ? " | Настройки | Вверх/Вниз выбор | Влево/Вправо изменить | Enter действие"
+        : " | Settings | Up/Down Select | Left/Right Adjust | Enter Action";
       break;
     case ScreenState::kPaused:
-      title += " | Paused: " + mark(pauseMenuSelection, 0, "Continue") + "  "
-            + mark(pauseMenuSelection, 1, "Settings") + "  "
-            + mark(pauseMenuSelection, 2, "Main Menu");
+      title += " | " + loc("Paused: ", "Пауза: ") + mark(pauseMenuSelection, 0, loc("Continue", "Продолжить")) + "  "
+            + mark(pauseMenuSelection, 1, loc("Settings", "Настройки")) + "  "
+            + mark(pauseMenuSelection, 2, loc("Main Menu", "Меню"));
       break;
     case ScreenState::kLoadingWorld:
-      title += " | Loading World";
+      title += " | " + loc("Loading World", "Загрузка мира");
       break;
     case ScreenState::kCreateWorld: {
       std::string presetName = pendingWorldSettings.preset == WorldPreset::kClassicFlat
-        ? "Classic Flat"
-        : "Minecraft-style";
+        ? loc("Classic Flat", "Классический плоский")
+        : loc("Minecraft-style", "Minecraft-стиль");
       std::string invMode = pendingWorldSettings.startInventoryMode == 0
-        ? "Empty"
-        : "Creative test";
-      std::string seedText = pendingSeedText.empty() ? "random" : pendingSeedText;
-      std::string nameText = pendingWorldName.empty() ? "World" : pendingWorldName;
-      title += " | Create World | Name: " + nameText +
-               " | Seed: " + seedText +
-               " | Preset: " + presetName +
-               " | Cave: " + std::to_string(pendingWorldSettings.caveDensity).substr(0, 4) +
-               " | Ravine: " + std::to_string(pendingWorldSettings.ravineFrequency).substr(0, 4) +
-               " | Start: " + invMode;
+        ? loc("Empty", "Пусто")
+        : loc("Creative test", "Тест креатива");
+      std::string seedText = pendingSeedText.empty() ? loc("random", "случайно") : pendingSeedText;
+      std::string nameText = pendingWorldName.empty() ? loc("World", "Мир") : pendingWorldName;
+      title += " | " + loc("Create World", "Создание мира") +
+               " | " + loc("Name", "Имя") + ": " + nameText +
+               " | " + loc("Seed", "Сид") + ": " + seedText +
+               " | " + loc("Preset", "Пресет") + ": " + presetName +
+               " | " + loc("Cave", "Пещеры") + ": " + std::to_string(pendingWorldSettings.caveDensity).substr(0, 4) +
+               " | " + loc("Ravine", "Овраги") + ": " + std::to_string(pendingWorldSettings.ravineFrequency).substr(0, 4) +
+               " | " + loc("Start", "Старт") + ": " + invMode;
       break;
     }
     case ScreenState::kPlaying:
-      title += " | In Game";
+      title += " | " + loc("In Game", "В игре");
       break;
   }
 
@@ -653,7 +780,8 @@ void App::loadWorldFromSelection(int entryIndex) {
   }
 
   setScreenState(ScreenState::kLoadingWorld);
-  renderLoadingFrame(0.05f, "Reading world data");
+  const bool ru = appliedSettings.language == 1;
+  renderLoadingFrame(0.05f, ru ? "Чтение данных мира" : "Reading world data");
 
   const WorldSelectEntry& entry = worldSelectEntries[static_cast<size_t>(entryIndex)];
   currentWorldPath = entry.path;
@@ -664,7 +792,7 @@ void App::loadWorldFromSelection(int entryIndex) {
     return;
   }
 
-  renderLoadingFrame(0.18f, "Preparing settings");
+  renderLoadingFrame(0.18f, ru ? "Подготовка настроек" : "Preparing settings");
 
   pendingWorldName = entry.displayName;
   pendingWorldSettings = world.getGenerationSettings();
@@ -698,7 +826,7 @@ void App::loadWorldFromSelection(int entryIndex) {
     }
   }
 
-  renderLoadingFrame(0.24f, "Preparing spawn");
+  renderLoadingFrame(0.24f, ru ? "Подготовка спавна" : "Preparing spawn");
   setupGameplaySession();
 }
 
@@ -748,13 +876,14 @@ void App::createWorldFromMenu() {
   saveWorldDisplayNameMeta(currentWorldPath, pendingWorldName);
   hasPendingPlayerResume = false;
 
+  const bool ru = appliedSettings.language == 1;
   setScreenState(ScreenState::kLoadingWorld);
-  renderLoadingFrame(0.05f, "Creating world");
+  renderLoadingFrame(0.05f, ru ? "Создание мира" : "Creating world");
 
   world.setSeed(seedValue);
   world.setGenerationSettings(settings);
   world.generate();
-  renderLoadingFrame(0.20f, "Generating terrain");
+  renderLoadingFrame(0.20f, ru ? "Генерация ландшафта" : "Generating terrain");
 
   for (ItemStack& slot : hotbar) {
     slot.type = kAir;
@@ -778,7 +907,7 @@ void App::createWorldFromMenu() {
     }
   }
 
-  renderLoadingFrame(0.25f, "Preparing spawn");
+  renderLoadingFrame(0.25f, ru ? "Подготовка спавна" : "Preparing spawn");
   setupGameplaySession();
 }
 
@@ -800,8 +929,9 @@ void App::setupGameplaySession() {
   int initialCz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
   int spawnChunkRadius = std::max(8, activeChunkViewRadius + 1);
   int preloadRadius = std::max(4, std::min(activeChunkViewRadius, 6));
+  const bool ru = appliedSettings.language == 1;
   world.updateActiveChunks(initialCx, initialCz, spawnChunkRadius);
-  renderLoadingFrame(0.32f, "Generating chunks");
+  renderLoadingFrame(0.32f, ru ? "Генерация чанков" : "Generating chunks");
 
   auto countReadyChunks = [&](int radius) {
     int ready = 0;
@@ -844,13 +974,13 @@ void App::setupGameplaySession() {
     }
   };
 
-  if (!preloadRadiusWithAnimation(2, 0.32f, 0.56f, "Preparing spawn area")) {
+  if (!preloadRadiusWithAnimation(2, 0.32f, 0.56f, ru ? "Подготовка зоны спавна" : "Preparing spawn area")) {
     return;
   }
-  if (!preloadRadiusWithAnimation(preloadRadius, 0.56f, 0.84f, "Preloading world")) {
+  if (!preloadRadiusWithAnimation(preloadRadius, 0.56f, 0.84f, ru ? "Предзагрузка мира" : "Preloading world")) {
     return;
   }
-  renderLoadingFrame(0.84f, "Searching spawn");
+  renderLoadingFrame(0.84f, ru ? "Поиск спавна" : "Searching spawn");
 
   auto isSpawnGround = [](uint8_t block) {
     return block != kAir &&
@@ -1139,7 +1269,8 @@ void App::setupGameplaySession() {
   currentChunkZ = cz;
   chunkCenterValid = true;
 
-  renderLoadingFrame(0.92f, "Building chunk render data");
+  const bool ruUi = appliedSettings.language == 1;
+  renderLoadingFrame(0.92f, ruUi ? "Сборка рендера чанков" : "Building chunk render data");
   std::vector<ChunkMeshUpload> worldSnapshot;
   world.snapshotChunkMeshes(worldSnapshot);
   rebuildUiMesh();
@@ -1158,7 +1289,7 @@ void App::setupGameplaySession() {
   uiDirty = false;
   refreshSelectedBlock();
 
-  renderLoadingFrame(1.0f, "Done");
+  renderLoadingFrame(1.0f, ruUi ? "Готово" : "Done");
   setScreenState(ScreenState::kPlaying);
 
   world.save(currentWorldPath);
@@ -1273,7 +1404,8 @@ void App::processMenuInput(float deltaTime) {
     settingsDirty =
       pendingSettings.graphicsQuality != appliedSettings.graphicsQuality ||
       std::abs(pendingSettings.sensitivity - appliedSettings.sensitivity) > 0.0001f ||
-      pendingSettings.audioVolume != appliedSettings.audioVolume;
+      pendingSettings.audioVolume != appliedSettings.audioVolume ||
+      pendingSettings.language != appliedSettings.language;
   };
 
   auto adjustSettingsValue = [&](bool increase) {
@@ -1291,6 +1423,10 @@ void App::processMenuInput(float deltaTime) {
       case 2: {
         int delta = increase ? 5 : -5;
         pendingSettings.audioVolume = std::clamp(pendingSettings.audioVolume + delta, 0, 100);
+        break;
+      }
+      case 3: {
+        pendingSettings.language = pendingSettings.language == 0 ? 1 : 0;
         break;
       }
       default:
@@ -1494,7 +1630,7 @@ void App::processMenuInput(float deltaTime) {
   } else if (screenState == ScreenState::kLoadingWorld) {
     // Loading is driven by synchronous world setup functions.
   } else if (screenState == ScreenState::kSettings) {
-    constexpr int kSettingsFieldCount = 6;
+    constexpr int kSettingsFieldCount = 7;
     if (upPressed && !menuUpDown) {
       settingsSelection = std::max(0, settingsSelection - 1);
       uiDirty = true;
@@ -1507,19 +1643,19 @@ void App::processMenuInput(float deltaTime) {
       adjustSettingsValue(rightPressed && !menuRightDown);
     }
     if (enterPressed && !menuEnterDown) {
-      if (settingsSelection <= 2) {
+      if (settingsSelection <= 3) {
         adjustSettingsValue(true);
-      } else if (settingsSelection == 3) {
+      } else if (settingsSelection == 4) {
         bool inGameContext =
           settingsReturnState == ScreenState::kPlaying ||
           settingsReturnState == ScreenState::kPaused;
         applySettings(inGameContext);
         saveSettings();
-      } else if (settingsSelection == 4) {
+      } else if (settingsSelection == 5) {
         pendingSettings = UserSettings{};
         updateSettingsDirtyFlag();
         uiDirty = true;
-      } else if (settingsSelection == 5) {
+      } else if (settingsSelection == 6) {
         pendingSettings = appliedSettings;
         settingsDirty = false;
         setScreenState(settingsReturnState);
@@ -1646,6 +1782,12 @@ void App::loadSettings() {
           appliedSettings.audioVolume = std::stoi(value);
         } catch (...) {
         }
+      } else if (key == "language") {
+        std::string lowered = value;
+        for (char& c : lowered) {
+          c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        appliedSettings.language = (lowered == "ru" || lowered == "russian" || lowered == "1") ? 1 : 0;
       }
     }
   }
@@ -1664,6 +1806,7 @@ bool App::saveSettings() const {
   out << "graphics_quality=" << appliedSettings.graphicsQuality << "\n";
   out << "sensitivity=" << appliedSettings.sensitivity << "\n";
   out << "audio_volume=" << appliedSettings.audioVolume << "\n";
+  out << "language=" << (appliedSettings.language == 1 ? "ru" : "en") << "\n";
   return true;
 }
 
@@ -1671,6 +1814,7 @@ void App::applySettings(bool refreshWorldStreaming) {
   appliedSettings.graphicsQuality = std::clamp(pendingSettings.graphicsQuality, 0, 2);
   appliedSettings.sensitivity = std::clamp(pendingSettings.sensitivity, 0.03f, 0.40f);
   appliedSettings.audioVolume = std::clamp(pendingSettings.audioVolume, 0, 100);
+  appliedSettings.language = std::clamp(pendingSettings.language, 0, 1);
   pendingSettings = appliedSettings;
   settingsDirty = false;
 
@@ -1686,6 +1830,7 @@ void App::applySettings(bool refreshWorldStreaming) {
     chunkCenterValid = true;
   }
 
+  updateWindowTitle();
   uiDirty = true;
 }
 
@@ -2400,9 +2545,14 @@ void App::rebuildUiMesh() {
 
   auto measureTextWidth = [&](const std::string& text, float pixel) -> float {
     float widthPx = 0.0f;
-    for (char raw : text) {
-      char c = static_cast<char>(std::toupper(static_cast<unsigned char>(raw)));
-      if (c == ' ') {
+    size_t index = 0;
+    while (index < text.size()) {
+      uint32_t cp = 0;
+      if (!nextUtf8Codepoint(text, index, cp)) {
+        break;
+      }
+      cp = toUpperCodepoint(cp);
+      if (cp == static_cast<uint32_t>(' ')) {
         widthPx += pixel * 2.0f;
         continue;
       }
@@ -2428,31 +2578,36 @@ void App::rebuildUiMesh() {
       x -= measureTextWidth(text, pixel) * 0.5f;
     }
 
-    for (char raw : text) {
-      char c = static_cast<char>(std::toupper(static_cast<unsigned char>(raw)));
-      if (c == ' ') {
+    size_t index = 0;
+    while (index < text.size()) {
+      uint32_t cp = 0;
+      if (!nextUtf8Codepoint(text, index, cp)) {
+        break;
+      }
+      cp = toUpperCodepoint(cp);
+      if (cp == static_cast<uint32_t>(' ')) {
         x += pixel * 2.0f;
         continue;
       }
 
       uint8_t fallback[kGlyphHeight] = {0, 0, 0, 0, 0};
-      const uint8_t* glyph = glyphForChar(c);
+      const uint8_t* glyph = glyphForCodepoint(cp);
       if (!glyph) {
-        switch (c) {
-          case '-':
+        switch (cp) {
+          case static_cast<uint32_t>('-'):
             fallback[2] = 0b111;
             glyph = fallback;
             break;
-          case '.':
+          case static_cast<uint32_t>('.'):
             fallback[4] = 0b010;
             glyph = fallback;
             break;
-          case ':':
+          case static_cast<uint32_t>(':'):
             fallback[1] = 0b010;
             fallback[3] = 0b010;
             glyph = fallback;
             break;
-          case '/':
+          case static_cast<uint32_t>('/'):
             fallback[0] = 0b001;
             fallback[1] = 0b001;
             fallback[2] = 0b010;
@@ -2491,6 +2646,7 @@ void App::rebuildUiMesh() {
   };
 
   if (screenState != ScreenState::kPlaying) {
+    const bool ruUi = appliedSettings.language == 1;
     float t = static_cast<float>(glfwGetTime());
     float intro = menuIntro * menuIntro * (3.0f - 2.0f * menuIntro);
     float pulse = 0.5f + 0.5f * std::sin(t * 6.5f);
@@ -2539,11 +2695,20 @@ void App::rebuildUiMesh() {
     };
 
     if (screenState == ScreenState::kMainMenu) {
-      drawText("MAIN MENU", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
+      drawText(ruUi ? "ГЛАВНОЕ МЕНЮ" : "MAIN MENU",
+               panelX + panelWidth * 0.5f,
+               panelY + 56.0f,
+               3.0f,
+               glm::vec3(0.90f),
+               true);
       float totalH = kMenuButtonHeight * 3.0f + kMenuButtonGap * 2.0f;
       float bx = panelX + (panelWidth - kMenuButtonWidth) * 0.5f;
       float by = panelY + 90.0f + (panelHeight - 130.0f - totalH) * 0.5f;
-      static constexpr const char* kMenuLabels[3] = {"START", "SETTINGS", "QUIT"};
+      const char* menuLabels[3] = {
+        ruUi ? "НАЧАТЬ" : "START",
+        ruUi ? "НАСТРОЙКИ" : "SETTINGS",
+        ruUi ? "ВЫХОД" : "QUIT"
+      };
       for (int i = 0; i < 3; ++i) {
         drawMenuRow(i,
                     mainMenuSelection,
@@ -2552,7 +2717,7 @@ void App::rebuildUiMesh() {
                     kMenuButtonWidth,
                     kMenuButtonHeight,
                     glm::vec3(0.22f, 0.24f, 0.29f));
-        drawText(kMenuLabels[i],
+        drawText(menuLabels[i],
                  bx + kMenuButtonWidth * 0.5f,
                  by + static_cast<float>(i) * (kMenuButtonHeight + kMenuButtonGap) + 12.0f,
                  3.1f,
@@ -2560,11 +2725,20 @@ void App::rebuildUiMesh() {
                  true);
       }
     } else if (screenState == ScreenState::kPaused) {
-      drawText("GAME PAUSED", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
+      drawText(ruUi ? "ПАУЗА" : "GAME PAUSED",
+               panelX + panelWidth * 0.5f,
+               panelY + 56.0f,
+               3.0f,
+               glm::vec3(0.90f),
+               true);
       float totalH = kMenuButtonHeight * 3.0f + kMenuButtonGap * 2.0f;
       float bx = panelX + (panelWidth - kMenuButtonWidth) * 0.5f;
       float by = panelY + 90.0f + (panelHeight - 130.0f - totalH) * 0.5f;
-      static constexpr const char* kPauseLabels[3] = {"CONTINUE", "SETTINGS", "MAIN MENU"};
+      const char* pauseLabels[3] = {
+        ruUi ? "ПРОДОЛЖИТЬ" : "CONTINUE",
+        ruUi ? "НАСТРОЙКИ" : "SETTINGS",
+        ruUi ? "В МЕНЮ" : "MAIN MENU"
+      };
       for (int i = 0; i < 3; ++i) {
         glm::vec3 rowColor = glm::vec3(0.22f, 0.24f, 0.29f);
         if (i == 2) {
@@ -2577,7 +2751,7 @@ void App::rebuildUiMesh() {
                     kMenuButtonWidth,
                     kMenuButtonHeight,
                     rowColor);
-        drawText(kPauseLabels[i],
+        drawText(pauseLabels[i],
                  bx + kMenuButtonWidth * 0.5f,
                  by + static_cast<float>(i) * (kMenuButtonHeight + kMenuButtonGap) + 12.0f,
                  3.1f,
@@ -2585,7 +2759,7 @@ void App::rebuildUiMesh() {
                  true);
       }
     } else if (screenState == ScreenState::kLoadingWorld) {
-      drawText("LOADING WORLD", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f,
+      drawText(ruUi ? "ЗАГРУЗКА МИРА" : "LOADING WORLD", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f,
                glm::vec3(0.90f), true);
 
       float barW = panelWidth - 140.0f;
@@ -2615,7 +2789,8 @@ void App::rebuildUiMesh() {
                glm::vec3(0.88f, 0.92f, 0.98f),
                true);
 
-      std::string message = loadingWorldMessage.empty() ? "LOADING" : loadingWorldMessage;
+      std::string message = loadingWorldMessage.empty() ? (ruUi ? "ЗАГРУЗКА" : "LOADING")
+                                                        : loadingWorldMessage;
       drawText(message,
                panelX + panelWidth * 0.5f,
                barY - 24.0f,
@@ -2623,7 +2798,12 @@ void App::rebuildUiMesh() {
                glm::vec3(0.84f, 0.88f, 0.95f),
                true);
     } else if (screenState == ScreenState::kWorldSelect) {
-      drawText("SELECT WORLD", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
+      drawText(ruUi ? "ВЫБОР МИРА" : "SELECT WORLD",
+               panelX + panelWidth * 0.5f,
+               panelY + 56.0f,
+               3.0f,
+               glm::vec3(0.90f),
+               true);
 
       int totalRows = static_cast<int>(worldSelectEntries.size()) + 2;
       constexpr int kVisibleRows = 8;
@@ -2663,9 +2843,9 @@ void App::rebuildUiMesh() {
       for (int row = startRow; row < endRow; ++row) {
         std::string label;
         if (row == 0) {
-          label = "CREATE NEW WORLD";
+          label = ruUi ? "СОЗДАТЬ МИР" : "CREATE NEW WORLD";
         } else if (row == totalRows - 1) {
-          label = "BACK TO MENU";
+          label = ruUi ? "НАЗАД В МЕНЮ" : "BACK TO MENU";
         } else {
           label = worldSelectEntries[static_cast<size_t>(row - 1)].displayName;
         }
@@ -2679,7 +2859,10 @@ void App::rebuildUiMesh() {
       }
 
       if (totalRows > kVisibleRows) {
-        std::string hint = "SCROLL " + std::to_string(startRow + 1) + "/" + std::to_string(totalRows);
+        std::string hint = (ruUi ? "СПИСОК " : "SCROLL ") +
+                           std::to_string(startRow + 1) +
+                           "/" +
+                           std::to_string(totalRows);
         drawText(hint,
                  panelX + panelWidth - 166.0f,
                  panelY + panelHeight - 22.0f,
@@ -2687,17 +2870,26 @@ void App::rebuildUiMesh() {
                  glm::vec3(0.70f, 0.75f, 0.83f),
                  false);
       } else if (worldSelectEntries.empty()) {
-        drawText("NO WORLDS YET", panelX + panelWidth * 0.5f, panelY + panelHeight - 24.0f, 2.0f,
+        drawText(ruUi ? "МИРОВ ПОКА НЕТ" : "NO WORLDS YET",
+                 panelX + panelWidth * 0.5f,
+                 panelY + panelHeight - 24.0f,
+                 2.0f,
                  glm::vec3(0.70f, 0.75f, 0.83f), true);
       }
     } else if (screenState == ScreenState::kSettings) {
-      drawText("SETTINGS", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
+      const bool ru = appliedSettings.language == 1;
+      drawText(ru ? "НАСТРОЙКИ" : "SETTINGS",
+               panelX + panelWidth * 0.5f,
+               panelY + 56.0f,
+               3.0f,
+               glm::vec3(0.90f),
+               true);
       float rowW = panelWidth - 120.0f;
       float rowX = panelX + (panelWidth - rowW) * 0.5f;
       float rowH = 40.0f;
       float rowGap = 14.0f;
       float rowY = panelY + 92.0f;
-      for (int i = 0; i < 6; ++i) {
+      for (int i = 0; i < 7; ++i) {
         drawMenuRow(i,
                     settingsSelection,
                     rowX,
@@ -2713,24 +2905,41 @@ void App::rebuildUiMesh() {
       } else if (pendingSettings.graphicsQuality == 2) {
         graphicsValue = "HIGH";
       }
+      if (ru) {
+        if (pendingSettings.graphicsQuality == 0) {
+          graphicsValue = "НИЗКО";
+        } else if (pendingSettings.graphicsQuality == 2) {
+          graphicsValue = "ВЫСОКО";
+        } else {
+          graphicsValue = "СРЕДНЕ";
+        }
+      }
 
       std::ostringstream sens;
       sens.setf(std::ios::fixed);
       sens.precision(2);
       sens << pendingSettings.sensitivity;
 
-      std::string dirtyMark = settingsDirty ? " UNSAVED" : " SAVED";
+      std::string dirtyMark = settingsDirty
+        ? (ru ? " НЕ СОХРАНЕНО" : " UNSAVED")
+        : (ru ? " СОХРАНЕНО" : " SAVED");
       std::string backText =
-        settingsReturnState == ScreenState::kPaused ? "BACK TO PAUSE" : "BACK TO MENU";
-      std::string line0 = "GRAPHICS " + graphicsValue;
-      std::string line1 = "SENSITIVITY " + sens.str();
-      std::string line2 = "AUDIO " + std::to_string(pendingSettings.audioVolume);
-      std::string line3 = "SAVE AND APPLY";
-      std::string line4 = "RESET DEFAULTS";
-      std::string line5 = backText + dirtyMark;
+        settingsReturnState == ScreenState::kPaused
+          ? (ru ? "НАЗАД В ПАУЗУ" : "BACK TO PAUSE")
+          : (ru ? "НАЗАД В МЕНЮ" : "BACK TO MENU");
+      std::string languageValue = pendingSettings.language == 1
+        ? (ru ? "РУССКИЙ" : "RUSSIAN")
+        : (ru ? "АНГЛИЙСКИЙ" : "ENGLISH");
+      std::string line0 = (ru ? "ГРАФИКА " : "GRAPHICS ") + graphicsValue;
+      std::string line1 = (ru ? "ЧУВСТВИТЕЛЬНОСТЬ " : "SENSITIVITY ") + sens.str();
+      std::string line2 = (ru ? "ГРОМКОСТЬ " : "AUDIO ") + std::to_string(pendingSettings.audioVolume);
+      std::string line3 = (ru ? "ЯЗЫК " : "LANGUAGE ") + languageValue;
+      std::string line4 = ru ? "СОХРАНИТЬ И ПРИМЕНИТЬ" : "SAVE AND APPLY";
+      std::string line5 = ru ? "СБРОС ПО УМОЛЧАНИЮ" : "RESET DEFAULTS";
+      std::string line6 = backText + dirtyMark;
 
-      std::array<std::string, 6> lines = {line0, line1, line2, line3, line4, line5};
-      for (int i = 0; i < 6; ++i) {
+      std::array<std::string, 7> lines = {line0, line1, line2, line3, line4, line5, line6};
+      for (int i = 0; i < 7; ++i) {
         drawText(lines[static_cast<size_t>(i)],
                  rowX + 16.0f,
                  rowY + static_cast<float>(i) * (rowH + rowGap) + 12.0f,
@@ -2739,7 +2948,12 @@ void App::rebuildUiMesh() {
                  false);
       }
     } else if (screenState == ScreenState::kCreateWorld) {
-      drawText("CREATE WORLD", panelX + panelWidth * 0.5f, panelY + 56.0f, 3.0f, glm::vec3(0.90f), true);
+      drawText(ruUi ? "СОЗДАТЬ МИР" : "CREATE WORLD",
+               panelX + panelWidth * 0.5f,
+               panelY + 56.0f,
+               3.0f,
+               glm::vec3(0.90f),
+               true);
       constexpr int kRowCount = 8;
       float rowW = panelWidth - 120.0f;
       float rowX = panelX + (panelWidth - rowW) * 0.5f;
@@ -2816,11 +3030,11 @@ void App::rebuildUiMesh() {
                 : glm::vec3(0.40f, 0.28f, 0.22f),
               backgroundTile);
 
-      std::string nameText = pendingWorldName.empty() ? "WORLD" : pendingWorldName;
-      std::string seedText = pendingSeedText.empty() ? "RANDOM" : pendingSeedText;
+      std::string nameText = pendingWorldName.empty() ? (ruUi ? "МИР" : "WORLD") : pendingWorldName;
+      std::string seedText = pendingSeedText.empty() ? (ruUi ? "СЛУЧАЙНО" : "RANDOM") : pendingSeedText;
       std::string presetText = pendingWorldSettings.preset == WorldPreset::kClassicFlat
-        ? "CLASSIC FLAT"
-        : "MINECRAFT STYLE";
+        ? (ruUi ? "КЛАССИЧЕСКИЙ ПЛОСКИЙ" : "CLASSIC FLAT")
+        : (ruUi ? "MINECRAFT СТИЛЬ" : "MINECRAFT STYLE");
       std::ostringstream caveText;
       caveText.setf(std::ios::fixed);
       caveText.precision(2);
@@ -2829,17 +3043,19 @@ void App::rebuildUiMesh() {
       ravineText.setf(std::ios::fixed);
       ravineText.precision(2);
       ravineText << pendingWorldSettings.ravineFrequency;
-      std::string invText = pendingWorldSettings.startInventoryMode == 0 ? "EMPTY" : "CREATIVE TEST";
+      std::string invText = pendingWorldSettings.startInventoryMode == 0
+        ? (ruUi ? "ПУСТО" : "EMPTY")
+        : (ruUi ? "ТЕСТ КРЕАТИВА" : "CREATIVE TEST");
 
       std::array<std::string, 8> labels = {
-        "WORLD NAME " + nameText,
-        "SEED " + seedText,
-        "PRESET " + presetText,
-        "CAVE DENSITY " + caveText.str(),
-        "RAVINE FREQ " + ravineText.str(),
-        "START INVENTORY " + invText,
-        "CREATE WORLD",
-        "CANCEL"
+        (ruUi ? "ИМЯ МИРА " : "WORLD NAME ") + nameText,
+        (ruUi ? "СИД " : "SEED ") + seedText,
+        (ruUi ? "ПРЕСЕТ " : "PRESET ") + presetText,
+        (ruUi ? "ПЛОТНОСТЬ ПЕЩЕР " : "CAVE DENSITY ") + caveText.str(),
+        (ruUi ? "ЧАСТОТА ОВРАГОВ " : "RAVINE FREQ ") + ravineText.str(),
+        (ruUi ? "СТАРТ ИНВЕНТАРЬ " : "START INVENTORY ") + invText,
+        ruUi ? "СОЗДАТЬ МИР" : "CREATE WORLD",
+        ruUi ? "ОТМЕНА" : "CANCEL"
       };
 
       for (int i = 0; i < kRowCount; ++i) {
@@ -3037,7 +3253,7 @@ void App::refreshSelectedBlock() {
 }
 
 void App::showSelectedItemToast() {
-  selectedItemToastText = displayNameForBlock(selectedBlock);
+  selectedItemToastText = displayNameForBlock(selectedBlock, appliedSettings.language == 1);
   selectedItemToastTimer = 2.0f;
   uiDirty = true;
 }
