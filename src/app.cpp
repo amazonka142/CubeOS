@@ -34,6 +34,12 @@ constexpr float kMenuButtonGap = 14.0f;
 constexpr char kSettingsFilePath[] = "settings.cfg";
 constexpr int kMinRenderDistance = 4;
 constexpr int kMaxRenderDistance = 14;
+constexpr uint64_t kDroppedItemsMeshKey = std::numeric_limits<uint64_t>::max() - 1ull;
+constexpr float kDroppedItemHalfSize = 0.19f;
+constexpr float kDroppedItemHalfHeight = 0.19f;
+constexpr float kDroppedItemGravity = -16.5f;
+constexpr float kDroppedItemPickupRadius = 1.35f;
+constexpr float kDroppedItemMeshUpdateInterval = 1.0f / 30.0f;
 
 constexpr uint8_t kDigitMap[10][kDigitHeight] = {
   {0b111, 0b101, 0b101, 0b101, 0b111}, // 0
@@ -298,6 +304,108 @@ glm::vec2 uvForTile(int tile, float u, float v) {
   float uClamped = uMin + u * (uMax - uMin);
   float vClamped = vMin + v * (vMax - vMin);
   return glm::vec2(uClamped, vClamped);
+}
+
+float fract01(float value) {
+  return value - std::floor(value);
+}
+
+glm::vec3 droppedItemColor(uint8_t type) {
+  if (isWaterBlock(type)) {
+    return {0.22f, 0.45f, 0.88f};
+  }
+
+  switch (type) {
+    case kGrass:
+      return {0.20f, 0.80f, 0.20f};
+    case kDirt:
+      return {0.55f, 0.35f, 0.20f};
+    case kSand:
+      return {0.86f, 0.78f, 0.50f};
+    case kGravel:
+      return {0.46f, 0.44f, 0.42f};
+    case kWood:
+      return {0.49f, 0.33f, 0.16f};
+    case kLeaves:
+      return {0.16f, 0.58f, 0.16f};
+    case kSeagrass:
+      return {0.14f, 0.62f, 0.34f};
+    case kCoral:
+      return {0.88f, 0.48f, 0.40f};
+    case kCoalOre:
+      return {0.22f, 0.22f, 0.22f};
+    case kIronOre:
+      return {0.73f, 0.54f, 0.40f};
+    case kGoldOre:
+      return {0.92f, 0.75f, 0.22f};
+    case kStone:
+      return {0.60f, 0.60f, 0.60f};
+    default:
+      return {0.90f, 0.90f, 0.90f};
+  }
+}
+
+void appendDroppedItemQuad(std::vector<Vertex>& vertices,
+                           std::vector<uint32_t>& indices,
+                           const glm::vec3& v0,
+                           const glm::vec3& v1,
+                           const glm::vec3& v2,
+                           const glm::vec3& v3,
+                           const glm::vec3& color,
+                           int tile) {
+  glm::vec2 uv0 = uvForTile(tile, 0.0f, 0.0f);
+  glm::vec2 uv1 = uvForTile(tile, 1.0f, 0.0f);
+  glm::vec2 uv2 = uvForTile(tile, 1.0f, 1.0f);
+  glm::vec2 uv3 = uvForTile(tile, 0.0f, 1.0f);
+
+  uint32_t start = static_cast<uint32_t>(vertices.size());
+  vertices.push_back({v0, color, uv0});
+  vertices.push_back({v1, color, uv1});
+  vertices.push_back({v2, color, uv2});
+  vertices.push_back({v3, color, uv3});
+
+  indices.push_back(start + 0);
+  indices.push_back(start + 1);
+  indices.push_back(start + 2);
+  indices.push_back(start + 0);
+  indices.push_back(start + 2);
+  indices.push_back(start + 3);
+}
+
+void appendDroppedItemCube(std::vector<Vertex>& vertices,
+                           std::vector<uint32_t>& indices,
+                           const glm::vec3& center,
+                           float spinY,
+                           uint8_t type) {
+  const float s = kDroppedItemHalfSize;
+  const float h = kDroppedItemHalfHeight;
+  const glm::vec3 base = droppedItemColor(type);
+  const int tile = tileForBlock(type);
+  const float c = std::cos(spinY);
+  const float sRot = std::sin(spinY);
+
+  auto rot = [&](const glm::vec3& local) {
+    glm::vec3 p = local;
+    float x = p.x * c - p.z * sRot;
+    float z = p.x * sRot + p.z * c;
+    return center + glm::vec3(x, p.y, z);
+  };
+
+  glm::vec3 p000 = rot({-s, -h, -s});
+  glm::vec3 p001 = rot({-s, -h, s});
+  glm::vec3 p010 = rot({-s, h, -s});
+  glm::vec3 p011 = rot({-s, h, s});
+  glm::vec3 p100 = rot({s, -h, -s});
+  glm::vec3 p101 = rot({s, -h, s});
+  glm::vec3 p110 = rot({s, h, -s});
+  glm::vec3 p111 = rot({s, h, s});
+
+  appendDroppedItemQuad(vertices, indices, p100, p110, p111, p101, base * 0.84f, tile); // +X
+  appendDroppedItemQuad(vertices, indices, p001, p011, p010, p000, base * 0.84f, tile); // -X
+  appendDroppedItemQuad(vertices, indices, p010, p011, p111, p110, base * 1.04f, tile); // +Y
+  appendDroppedItemQuad(vertices, indices, p000, p100, p101, p001, base * 0.62f, tile); // -Y
+  appendDroppedItemQuad(vertices, indices, p101, p111, p011, p001, base * 0.92f, tile); // +Z
+  appendDroppedItemQuad(vertices, indices, p000, p010, p110, p100, base * 0.76f, tile); // -Z
 }
 
 std::string trimAscii(const std::string& value) {
@@ -593,6 +701,11 @@ void App::setScreenState(ScreenState state) {
       !currentWorldPath.empty()) {
     saveCurrentPlayerState();
     world.save(currentWorldPath);
+  }
+
+  if (leavingGameplay && !pauseToInGameSettings) {
+    droppedItems.clear();
+    syncDroppedItemMesh(true);
   }
 
   if (state != ScreenState::kPlaying && state != ScreenState::kPaused && inventoryOpen) {
@@ -932,6 +1045,9 @@ void App::setupGameplaySession() {
   breakingActive = false;
   breakingProgress = 0.0f;
   breakingStage = 0;
+  droppedItems.clear();
+  droppedItemMeshUploaded = false;
+  droppedItemMeshTimer = 0.0f;
   world.clearBreakOverlay();
 
   int initialCx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
@@ -2001,6 +2117,11 @@ void App::mainLoop() {
       waterSimAccumulator = 0.0f;
     }
 
+    if (screenState == ScreenState::kPlaying) {
+      updateDroppedItems(deltaTime);
+    }
+    syncDroppedItemMesh(false);
+
     std::vector<ChunkMeshUpload> chunkUpdates;
     std::vector<uint64_t> removedChunkKeys;
     bool hasChunkUpdateBatch = world.consumeChunkMeshUpdates(
@@ -2239,9 +2360,7 @@ void App::processInput(float deltaTime) {
           if (removed != kAir && !isWaterBlock(removed)) {
             world.setBlock(blockPos.x, blockPos.y, blockPos.z, kAir);
             waterSimBoostTimer = std::max(waterSimBoostTimer, 2.0f);
-            addToInventory(removed, 1);
-            refreshSelectedBlock();
-            uiDirty = true;
+            spawnDroppedItem(removed, blockPos);
           }
           breakingActive = false;
           breakingProgress = 0.0f;
@@ -3401,6 +3520,231 @@ bool App::addToInventory(uint8_t type, uint16_t count, uint16_t* outRemaining) {
   }
 
   return count == 0;
+}
+
+void App::spawnDroppedItem(uint8_t type, const glm::ivec3& blockPos) {
+  if (type == kAir || isWaterBlock(type)) {
+    return;
+  }
+
+  if (droppedItems.size() >= 384) {
+    droppedItems.erase(droppedItems.begin());
+  }
+
+  float noise = std::sin(static_cast<float>(blockPos.x) * 12.9898f +
+                         static_cast<float>(blockPos.y) * 78.233f +
+                         static_cast<float>(blockPos.z) * 37.719f);
+  float seed = fract01(noise * 43758.5453f);
+  float angle = seed * 6.2831853f;
+  float speed = 0.95f + 0.45f * seed;
+
+  DroppedItemEntity item;
+  item.type = type;
+  item.count = 1;
+  item.pos = glm::vec3(static_cast<float>(blockPos.x) + 0.5f,
+                       static_cast<float>(blockPos.y) + 0.18f,
+                       static_cast<float>(blockPos.z) + 0.5f);
+  item.vel = glm::vec3(std::cos(angle) * speed,
+                       2.8f + seed * 0.4f,
+                       std::sin(angle) * speed);
+  item.age = 0.0f;
+  item.pickupDelay = 0.26f;
+  item.spinPhase = seed * 6.2831853f;
+  item.onGround = false;
+  droppedItems.push_back(item);
+
+  droppedItemMeshTimer = kDroppedItemMeshUpdateInterval;
+}
+
+bool App::droppedItemCollidesAt(const glm::vec3& pos) const {
+  glm::vec3 min = {pos.x - kDroppedItemHalfSize,
+                   pos.y - kDroppedItemHalfHeight,
+                   pos.z - kDroppedItemHalfSize};
+  glm::vec3 max = {pos.x + kDroppedItemHalfSize,
+                   pos.y + kDroppedItemHalfHeight,
+                   pos.z + kDroppedItemHalfSize};
+
+  int minX = static_cast<int>(std::floor(min.x));
+  int maxX = static_cast<int>(std::floor(max.x));
+  int minY = static_cast<int>(std::floor(min.y));
+  int maxY = static_cast<int>(std::floor(max.y));
+  int minZ = static_cast<int>(std::floor(min.z));
+  int maxZ = static_cast<int>(std::floor(max.z));
+
+  auto chunkReadyAt = [&](int worldX, int worldZ) {
+    int cx = static_cast<int>(std::floor(static_cast<float>(worldX) / static_cast<float>(kChunkSize)));
+    int cz = static_cast<int>(std::floor(static_cast<float>(worldZ) / static_cast<float>(kChunkSize)));
+    return world.getChunkGenerationStatus(cx, cz) >= ChunkGenStatus::kNoise;
+  };
+
+  for (int y = minY; y <= maxY; ++y) {
+    for (int z = minZ; z <= maxZ; ++z) {
+      for (int x = minX; x <= maxX; ++x) {
+        if (!world.inBounds(x, y, z)) {
+          return true;
+        }
+        if (!chunkReadyAt(x, z)) {
+          return true;
+        }
+        uint8_t block = world.getBlock(x, y, z);
+        if (block != kAir && !isWaterBlock(block) && !isUnderwaterPlantBlock(block)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+void App::updateDroppedItems(float deltaTime) {
+  if (droppedItems.empty()) {
+    return;
+  }
+
+  if (deltaTime <= 0.0f) {
+    return;
+  }
+
+  droppedItemMeshTimer += deltaTime;
+  glm::vec3 pickupCenter = playerPos + glm::vec3(0.0f, 0.95f, 0.0f);
+
+  for (size_t i = 0; i < droppedItems.size();) {
+    DroppedItemEntity& item = droppedItems[i];
+    item.age += deltaTime;
+    item.pickupDelay = std::max(0.0f, item.pickupDelay - deltaTime);
+
+    int bx = static_cast<int>(std::floor(item.pos.x));
+    int by = static_cast<int>(std::floor(item.pos.y));
+    int bz = static_cast<int>(std::floor(item.pos.z));
+    bool inWater = isWaterBlock(world.getBlock(bx, by, bz));
+
+    float gravity = inWater ? (kDroppedItemGravity * 0.32f) : kDroppedItemGravity;
+    item.vel.y += gravity * deltaTime;
+    item.vel.y = std::max(item.vel.y, inWater ? -2.4f : -11.5f);
+
+    glm::vec3 next = item.pos;
+    next.x += item.vel.x * deltaTime;
+    if (droppedItemCollidesAt(next)) {
+      next.x = item.pos.x;
+      item.vel.x *= -0.2f;
+      if (std::abs(item.vel.x) < 0.05f) {
+        item.vel.x = 0.0f;
+      }
+    }
+
+    next.y += item.vel.y * deltaTime;
+    if (droppedItemCollidesAt(next)) {
+      if (item.vel.y < 0.0f) {
+        item.onGround = true;
+      }
+      next.y = item.pos.y;
+      item.vel.y *= -0.24f;
+      if (std::abs(item.vel.y) < 0.28f) {
+        item.vel.y = 0.0f;
+      }
+    } else {
+      item.onGround = false;
+    }
+
+    next.z += item.vel.z * deltaTime;
+    if (droppedItemCollidesAt(next)) {
+      next.z = item.pos.z;
+      item.vel.z *= -0.2f;
+      if (std::abs(item.vel.z) < 0.05f) {
+        item.vel.z = 0.0f;
+      }
+    }
+
+    float drag = item.onGround ? 0.24f : 0.05f;
+    float dragFactor = std::clamp(1.0f - drag * deltaTime * 8.0f, 0.0f, 1.0f);
+    item.vel.x *= dragFactor;
+    item.vel.z *= dragFactor;
+
+    item.pos = next;
+
+    bool removeItem = false;
+    if (item.pickupDelay <= 0.0f) {
+      glm::vec3 toPlayer = pickupCenter - item.pos;
+      float distSq = glm::dot(toPlayer, toPlayer);
+      if (distSq <= kDroppedItemPickupRadius * kDroppedItemPickupRadius) {
+        uint16_t remaining = 0;
+        addToInventory(item.type, item.count, &remaining);
+        if (remaining == 0) {
+          removeItem = true;
+        } else {
+          item.count = remaining;
+        }
+      }
+    }
+
+    if (item.age >= 180.0f) {
+      removeItem = true;
+    }
+
+    if (removeItem) {
+      droppedItems[i] = droppedItems.back();
+      droppedItems.pop_back();
+      droppedItemMeshTimer = kDroppedItemMeshUpdateInterval;
+      continue;
+    }
+
+    ++i;
+  }
+}
+
+void App::syncDroppedItemMesh(bool force) {
+  if (force) {
+    droppedItemMeshTimer = kDroppedItemMeshUpdateInterval;
+  }
+
+  if (droppedItems.empty()) {
+    if (droppedItemMeshUploaded) {
+      pendingWorldChunkUploads.erase(kDroppedItemsMeshKey);
+      pendingWorldChunkRemovals.insert(kDroppedItemsMeshKey);
+      droppedItemMeshUploaded = false;
+    }
+    return;
+  }
+
+  if (!force && droppedItemMeshTimer < kDroppedItemMeshUpdateInterval) {
+    return;
+  }
+
+  std::vector<Vertex> vertices;
+  std::vector<uint32_t> indices;
+  vertices.reserve(droppedItems.size() * 24);
+  indices.reserve(droppedItems.size() * 36);
+
+  for (const DroppedItemEntity& item : droppedItems) {
+    if (item.count == 0 || item.type == kAir || isWaterBlock(item.type)) {
+      continue;
+    }
+    float bob = 0.14f + std::sin(item.age * 3.9f + item.spinPhase) * 0.07f;
+    float spin = item.age * 2.8f + item.spinPhase;
+    glm::vec3 center = item.pos + glm::vec3(0.0f, bob, 0.0f);
+    appendDroppedItemCube(vertices, indices, center, spin, item.type);
+  }
+
+  if (vertices.empty() || indices.empty()) {
+    if (droppedItemMeshUploaded) {
+      pendingWorldChunkUploads.erase(kDroppedItemsMeshKey);
+      pendingWorldChunkRemovals.insert(kDroppedItemsMeshKey);
+      droppedItemMeshUploaded = false;
+    }
+    droppedItemMeshTimer = 0.0f;
+    return;
+  }
+
+  VulkanContext::WorldChunkMeshUpload upload;
+  upload.key = kDroppedItemsMeshKey;
+  upload.vertices = std::move(vertices);
+  upload.indices = std::move(indices);
+
+  pendingWorldChunkRemovals.erase(kDroppedItemsMeshKey);
+  pendingWorldChunkUploads[kDroppedItemsMeshKey] = std::move(upload);
+  droppedItemMeshUploaded = true;
+  droppedItemMeshTimer = 0.0f;
 }
 
 void App::setInventoryOpen(bool open) {

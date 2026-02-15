@@ -2150,12 +2150,13 @@ VkSurfaceFormatKHR VulkanContext::chooseSwapSurfaceFormat(
 
 VkPresentModeKHR VulkanContext::chooseSwapPresentMode(
   const std::vector<VkPresentModeKHR>& modes) const {
+  // Prefer FIFO (vsync) to avoid aggressive frame spinning and high CPU usage.
   for (const auto& availablePresentMode : modes) {
-    if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+    if (availablePresentMode == VK_PRESENT_MODE_FIFO_KHR) {
       return availablePresentMode;
     }
   }
-
+  // Fallback to a mode that should exist on all Vulkan implementations.
   return VK_PRESENT_MODE_FIFO_KHR;
 }
 

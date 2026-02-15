@@ -73,6 +73,9 @@ private:
   void mainLoop();
   void processInput(float deltaTime);
   void updatePlayer(float deltaTime);
+  void spawnDroppedItem(uint8_t type, const glm::ivec3& blockPos);
+  void updateDroppedItems(float deltaTime);
+  void syncDroppedItemMesh(bool force);
   void rebuildWorldMesh();
   void rebuildUiMesh();
   void composeMeshData();
@@ -83,6 +86,7 @@ private:
   bool hitTestHotbar(float x, float y, int& outSlot) const;
   bool hitTestInventory(float x, float y, int& outIndex) const;
   bool collidesAt(const glm::vec3& pos) const;
+  bool droppedItemCollidesAt(const glm::vec3& pos) const;
   bool intersectsWaterAt(const glm::vec3& pos) const;
   bool blockIntersectsPlayer(int x, int y, int z) const;
   glm::vec3 cameraFront() const;
@@ -90,6 +94,17 @@ private:
     bool hit = false;
     glm::ivec3 block{};
     glm::ivec3 normal{};
+  };
+
+  struct DroppedItemEntity {
+    uint8_t type = kAir;
+    uint16_t count = 0;
+    glm::vec3 pos{0.0f};
+    glm::vec3 vel{0.0f};
+    float age = 0.0f;
+    float pickupDelay = 0.0f;
+    float spinPhase = 0.0f;
+    bool onGround = false;
   };
   RaycastHit raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const;
   void cleanup();
@@ -143,6 +158,9 @@ private:
   bool uiDirty = true;
   std::unordered_map<uint64_t, VulkanContext::WorldChunkMeshUpload> pendingWorldChunkUploads{};
   std::unordered_set<uint64_t> pendingWorldChunkRemovals{};
+  std::vector<DroppedItemEntity> droppedItems{};
+  bool droppedItemMeshUploaded = false;
+  float droppedItemMeshTimer = 0.0f;
   double lastWorldChunkUploadTime = 0.0;
   float waterSimAccumulator = 0.0f;
   float waterSimBoostTimer = 0.0f;
