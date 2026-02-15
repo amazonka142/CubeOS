@@ -25,6 +25,7 @@ public:
 private:
   struct UserSettings {
     int graphicsQuality = 1;   // 0=Low, 1=Medium, 2=High
+    int renderDistance = 8;    // chunk view radius
     float sensitivity = 0.10f; // mouse look sensitivity
     int audioVolume = 80;      // placeholder value, reserved for audio system
     int language = 0;          // 0=English, 1=Russian
@@ -178,6 +179,9 @@ private:
   float selectedItemToastTimer = 0.0f;
   float loadingWorldProgress = 0.0f;
   std::string loadingWorldMessage{};
+  float fpsSampleAccum = 0.0f;
+  int fpsSampleFrames = 0;
+  int fpsDisplayValue = 0;
 
   float yaw = -90.0f;
   float pitch = 0.0f;

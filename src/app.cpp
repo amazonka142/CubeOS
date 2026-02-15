@@ -32,6 +32,8 @@ constexpr float kMenuButtonWidth = 320.0f;
 constexpr float kMenuButtonHeight = 44.0f;
 constexpr float kMenuButtonGap = 14.0f;
 constexpr char kSettingsFilePath[] = "settings.cfg";
+constexpr int kMinRenderDistance = 4;
+constexpr int kMaxRenderDistance = 14;
 
 constexpr uint8_t kDigitMap[10][kDigitHeight] = {
   {0b111, 0b101, 0b101, 0b101, 0b111}, // 0
@@ -346,6 +348,13 @@ std::string sanitizeWorldNameForFile(const std::string& value) {
     out.resize(48);
   }
   return out;
+}
+
+int defaultRenderDistanceForQuality(int quality) {
+  static constexpr int kQualityToRadius[3] = {6, 8, 10};
+  int clampedQuality = std::clamp(quality, 0, 2);
+  int radius = kQualityToRadius[clampedQuality];
+  return std::clamp(radius, kMinRenderDistance, kMaxRenderDistance);
 }
 
 std::string worldMetaPathForWorld(const std::filesystem::path& worldPath) {
@@ -1403,6 +1412,7 @@ void App::processMenuInput(float deltaTime) {
   auto updateSettingsDirtyFlag = [&]() {
     settingsDirty =
       pendingSettings.graphicsQuality != appliedSettings.graphicsQuality ||
+      pendingSettings.renderDistance != appliedSettings.renderDistance ||
       std::abs(pendingSettings.sensitivity - appliedSettings.sensitivity) > 0.0001f ||
       pendingSettings.audioVolume != appliedSettings.audioVolume ||
       pendingSettings.language != appliedSettings.language;
@@ -1416,16 +1426,22 @@ void App::processMenuInput(float deltaTime) {
         break;
       }
       case 1: {
+        int delta = increase ? 1 : -1;
+        pendingSettings.renderDistance =
+          std::clamp(pendingSettings.renderDistance + delta, kMinRenderDistance, kMaxRenderDistance);
+        break;
+      }
+      case 2: {
         float delta = increase ? 0.01f : -0.01f;
         pendingSettings.sensitivity = std::clamp(pendingSettings.sensitivity + delta, 0.03f, 0.40f);
         break;
       }
-      case 2: {
+      case 3: {
         int delta = increase ? 5 : -5;
         pendingSettings.audioVolume = std::clamp(pendingSettings.audioVolume + delta, 0, 100);
         break;
       }
-      case 3: {
+      case 4: {
         pendingSettings.language = pendingSettings.language == 0 ? 1 : 0;
         break;
       }
@@ -1630,7 +1646,7 @@ void App::processMenuInput(float deltaTime) {
   } else if (screenState == ScreenState::kLoadingWorld) {
     // Loading is driven by synchronous world setup functions.
   } else if (screenState == ScreenState::kSettings) {
-    constexpr int kSettingsFieldCount = 7;
+    constexpr int kSettingsFieldCount = 8;
     if (upPressed && !menuUpDown) {
       settingsSelection = std::max(0, settingsSelection - 1);
       uiDirty = true;
@@ -1643,19 +1659,19 @@ void App::processMenuInput(float deltaTime) {
       adjustSettingsValue(rightPressed && !menuRightDown);
     }
     if (enterPressed && !menuEnterDown) {
-      if (settingsSelection <= 3) {
+      if (settingsSelection <= 4) {
         adjustSettingsValue(true);
-      } else if (settingsSelection == 4) {
+      } else if (settingsSelection == 5) {
         bool inGameContext =
           settingsReturnState == ScreenState::kPlaying ||
           settingsReturnState == ScreenState::kPaused;
         applySettings(inGameContext);
         saveSettings();
-      } else if (settingsSelection == 5) {
+      } else if (settingsSelection == 6) {
         pendingSettings = UserSettings{};
         updateSettingsDirtyFlag();
         uiDirty = true;
-      } else if (settingsSelection == 6) {
+      } else if (settingsSelection == 7) {
         pendingSettings = appliedSettings;
         settingsDirty = false;
         setScreenState(settingsReturnState);
@@ -1751,6 +1767,7 @@ void App::onCharInput(unsigned int codepoint) {
 
 void App::loadSettings() {
   appliedSettings = UserSettings{};
+  bool hasRenderDistance = false;
   std::ifstream in(kSettingsFilePath);
   if (in.is_open()) {
     std::string line;
@@ -1770,6 +1787,12 @@ void App::loadSettings() {
       if (key == "graphics_quality") {
         try {
           appliedSettings.graphicsQuality = std::stoi(value);
+        } catch (...) {
+        }
+      } else if (key == "render_distance") {
+        try {
+          appliedSettings.renderDistance = std::stoi(value);
+          hasRenderDistance = true;
         } catch (...) {
         }
       } else if (key == "sensitivity") {
@@ -1792,6 +1815,10 @@ void App::loadSettings() {
     }
   }
 
+  if (!hasRenderDistance) {
+    appliedSettings.renderDistance = defaultRenderDistanceForQuality(appliedSettings.graphicsQuality);
+  }
+
   pendingSettings = appliedSettings;
   applySettings(false);
   settingsDirty = false;
@@ -1804,6 +1831,7 @@ bool App::saveSettings() const {
   }
 
   out << "graphics_quality=" << appliedSettings.graphicsQuality << "\n";
+  out << "render_distance=" << appliedSettings.renderDistance << "\n";
   out << "sensitivity=" << appliedSettings.sensitivity << "\n";
   out << "audio_volume=" << appliedSettings.audioVolume << "\n";
   out << "language=" << (appliedSettings.language == 1 ? "ru" : "en") << "\n";
@@ -1812,14 +1840,16 @@ bool App::saveSettings() const {
 
 void App::applySettings(bool refreshWorldStreaming) {
   appliedSettings.graphicsQuality = std::clamp(pendingSettings.graphicsQuality, 0, 2);
+  appliedSettings.renderDistance = std::clamp(pendingSettings.renderDistance,
+                                              kMinRenderDistance,
+                                              kMaxRenderDistance);
   appliedSettings.sensitivity = std::clamp(pendingSettings.sensitivity, 0.03f, 0.40f);
   appliedSettings.audioVolume = std::clamp(pendingSettings.audioVolume, 0, 100);
   appliedSettings.language = std::clamp(pendingSettings.language, 0, 1);
   pendingSettings = appliedSettings;
   settingsDirty = false;
 
-  static constexpr int kQualityToRadius[3] = {6, 8, 10};
-  activeChunkViewRadius = kQualityToRadius[appliedSettings.graphicsQuality];
+  activeChunkViewRadius = appliedSettings.renderDistance;
 
   if (refreshWorldStreaming && screenState == ScreenState::kPlaying) {
     int cx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
@@ -1909,6 +1939,19 @@ void App::mainLoop() {
     double currentTime = glfwGetTime();
     float deltaTime = static_cast<float>(currentTime - lastTime);
     lastTime = currentTime;
+    float positiveDelta = std::max(0.0f, deltaTime);
+    fpsSampleAccum += positiveDelta;
+    fpsSampleFrames += 1;
+    if (fpsSampleAccum >= 0.25f && fpsSampleFrames > 0) {
+      int newFps = static_cast<int>(std::lround(static_cast<double>(fpsSampleFrames) /
+                                                std::max(0.001, static_cast<double>(fpsSampleAccum))));
+      if (newFps != fpsDisplayValue) {
+        fpsDisplayValue = newFps;
+        uiDirty = true;
+      }
+      fpsSampleAccum = 0.0f;
+      fpsSampleFrames = 0;
+    }
 
     glfwPollEvents();
     processInput(deltaTime);
@@ -2889,7 +2932,7 @@ void App::rebuildUiMesh() {
       float rowH = 40.0f;
       float rowGap = 14.0f;
       float rowY = panelY + 92.0f;
-      for (int i = 0; i < 7; ++i) {
+      for (int i = 0; i < 8; ++i) {
         drawMenuRow(i,
                     settingsSelection,
                     rowX,
@@ -2931,15 +2974,18 @@ void App::rebuildUiMesh() {
         ? (ru ? "РУССКИЙ" : "RUSSIAN")
         : (ru ? "АНГЛИЙСКИЙ" : "ENGLISH");
       std::string line0 = (ru ? "ГРАФИКА " : "GRAPHICS ") + graphicsValue;
-      std::string line1 = (ru ? "ЧУВСТВИТЕЛЬНОСТЬ " : "SENSITIVITY ") + sens.str();
-      std::string line2 = (ru ? "ГРОМКОСТЬ " : "AUDIO ") + std::to_string(pendingSettings.audioVolume);
-      std::string line3 = (ru ? "ЯЗЫК " : "LANGUAGE ") + languageValue;
-      std::string line4 = ru ? "СОХРАНИТЬ И ПРИМЕНИТЬ" : "SAVE AND APPLY";
-      std::string line5 = ru ? "СБРОС ПО УМОЛЧАНИЮ" : "RESET DEFAULTS";
-      std::string line6 = backText + dirtyMark;
+      std::string line1 = (ru ? "ДАЛЬНОСТЬ " : "RENDER DISTANCE ") +
+                          std::to_string(pendingSettings.renderDistance) +
+                          (ru ? " ЧАНКОВ" : " CHUNKS");
+      std::string line2 = (ru ? "ЧУВСТВИТЕЛЬНОСТЬ " : "SENSITIVITY ") + sens.str();
+      std::string line3 = (ru ? "ГРОМКОСТЬ " : "AUDIO ") + std::to_string(pendingSettings.audioVolume);
+      std::string line4 = (ru ? "ЯЗЫК " : "LANGUAGE ") + languageValue;
+      std::string line5 = ru ? "СОХРАНИТЬ И ПРИМЕНИТЬ" : "SAVE AND APPLY";
+      std::string line6 = ru ? "СБРОС ПО УМОЛЧАНИЮ" : "RESET DEFAULTS";
+      std::string line7 = backText + dirtyMark;
 
-      std::array<std::string, 7> lines = {line0, line1, line2, line3, line4, line5, line6};
-      for (int i = 0; i < 7; ++i) {
+      std::array<std::string, 8> lines = {line0, line1, line2, line3, line4, line5, line6, line7};
+      for (int i = 0; i < 8; ++i) {
         drawText(lines[static_cast<size_t>(i)],
                  rowX + 16.0f,
                  rowY + static_cast<float>(i) * (rowH + rowGap) + 12.0f,
@@ -3212,6 +3258,17 @@ void App::rebuildUiMesh() {
     float cx = cursorFbX - kSlotSize * 0.5f;
     float cy = cursorFbY - kSlotSize * 0.5f;
     drawStack(cursorStack, cx, cy);
+  }
+
+  if (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused) {
+    bool ru = appliedSettings.language == 1;
+    std::string fpsText = (ru ? "КАДРЫ " : "FPS ") + std::to_string(std::max(0, fpsDisplayValue));
+    float fpsPixel = 2.2f;
+    float fpsTextWidth = measureTextWidth(fpsText, fpsPixel);
+    float fpsBoxWidth = fpsTextWidth + 16.0f;
+    float fpsBoxHeight = fpsPixel * static_cast<float>(kGlyphHeight) + 10.0f;
+    addQuad(14.0f, 12.0f, fpsBoxWidth, fpsBoxHeight, glm::vec3(0.06f, 0.08f, 0.12f), backgroundTile);
+    drawText(fpsText, 22.0f, 17.0f, fpsPixel, glm::vec3(0.92f, 0.95f, 0.99f), false);
   }
 
   const float centerX = static_cast<float>(width) * 0.5f;
