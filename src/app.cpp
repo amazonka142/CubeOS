@@ -860,8 +860,20 @@ void App::saveCurrentPlayerState() const {
     return;
   }
 
-  std::ofstream out(statePath, std::ios::trunc);
+  std::filesystem::path stateFile(statePath);
+  std::error_code ec;
+  if (stateFile.has_parent_path()) {
+    std::filesystem::create_directories(stateFile.parent_path(), ec);
+    if (ec) {
+      std::cerr << "Warning: failed to prepare player-state directory: " << stateFile.parent_path()
+                << " (" << ec.message() << ")\n";
+      return;
+    }
+  }
+
+  std::ofstream out(stateFile, std::ios::trunc);
   if (!out.is_open()) {
+    std::cerr << "Warning: failed to open player-state file for write: " << statePath << "\n";
     return;
   }
   out << playerPos.x << " "
@@ -869,6 +881,9 @@ void App::saveCurrentPlayerState() const {
       << playerPos.z << " "
       << yaw << " "
       << pitch << "\n";
+  if (!out.good()) {
+    std::cerr << "Warning: failed to flush player-state data: " << statePath << "\n";
+  }
 }
 
 bool App::loadPlayerStateForWorld(const std::string& worldPath,
