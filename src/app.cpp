@@ -681,6 +681,17 @@ std::vector<DiskWorldEntry> collectWorldSelectEntries() {
   return result;
 }
 
+bool saveWorldWithWarning(World& world, const std::string& worldPath, const char* reason) {
+  if (worldPath.empty()) {
+    return false;
+  }
+  if (world.save(worldPath)) {
+    return true;
+  }
+  std::cerr << "Warning: failed to save world (" << reason << "): " << worldPath << "\n";
+  return false;
+}
+
 } // namespace
 
 void App::setScreenState(ScreenState state) {
@@ -700,7 +711,7 @@ void App::setScreenState(ScreenState state) {
       !pauseToInGameSettings &&
       !currentWorldPath.empty()) {
     saveCurrentPlayerState();
-    world.save(currentWorldPath);
+    saveWorldWithWarning(world, currentWorldPath, "leaving gameplay");
   }
 
   if (leavingGameplay && !pauseToInGameSettings) {
