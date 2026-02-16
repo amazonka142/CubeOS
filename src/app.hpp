@@ -3,6 +3,7 @@
 #include "vk_context.hpp"
 #include "world.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <glm/glm.hpp>
 #include <array>
@@ -20,6 +21,9 @@ struct ItemStack {
 
 class App {
 public:
+  static constexpr size_t kHotbarSlotCount = 9;
+  static constexpr size_t kInventorySlotCount = 27;
+
   void run();
 
 private:
@@ -144,8 +148,8 @@ private:
   float breakingProgress = 0.0f;
   int breakingStage = 0;
   uint8_t selectedBlock = kAir;
-  std::array<ItemStack, 9> hotbar{};
-  std::array<ItemStack, 27> inventory{};
+  std::array<ItemStack, kHotbarSlotCount> hotbar{};
+  std::array<ItemStack, kInventorySlotCount> inventory{};
   ItemStack cursorStack{};
   float cursorFbX = 0.0f;
   float cursorFbY = 0.0f;
