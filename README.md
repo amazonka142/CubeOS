@@ -70,6 +70,13 @@ build/cubeos_voxel
 - Esc closes inventory.
 - Esc (with inventory closed) opens pause menu with `Continue`, `Settings`, `Main Menu`.
 
+## Project structure
+- `src/app.*`: game loop, UI, player controls, input/state transitions.
+- `src/world.*`: chunk generation, streaming, meshing, block simulation.
+- `src/vk_context.*`: Vulkan device/swapchain/pipeline setup and rendering.
+- `shaders/`: GLSL shader sources compiled during build.
+- `cmake/BundleMacOS.cmake`: macOS bundle post-build packaging logic.
+
 ## v0.2.1 Direction
 - Expand world generation toward Minecraft Java 1.18+ style logic:
   - richer multi-noise climate sampling and biome mapping
