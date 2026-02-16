@@ -26,6 +26,21 @@ cmake --build build
 
 The shaders are compiled with `glslc` from the Vulkan SDK and copied next to the binary.
 
+## Preset-based build
+If you prefer presets (see `CMakePresets.json`):
+
+```bash
+cmake --preset debug
+cmake --build --preset debug
+```
+
+For optimized builds:
+
+```bash
+cmake --preset release
+cmake --build --preset release
+```
+
 ## Running
 The executable will be under:
 
