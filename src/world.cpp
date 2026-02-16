@@ -2658,8 +2658,9 @@ void World::stopMeshWorkers() {
 
 void World::startChunkWorkers() {
   uint32_t hw = std::thread::hardware_concurrency();
-  size_t workerCount = hw == 0 ? 2u : static_cast<size_t>(hw);
-  workerCount = std::max<size_t>(1, std::min<size_t>(workerCount, 4));
+  // Keep chunk generation worker count conservative to avoid pegging all CPU cores.
+  size_t workerCount = hw == 0 ? 2u : static_cast<size_t>(std::max(1u, hw / 2u));
+  workerCount = std::max<size_t>(1, std::min<size_t>(workerCount, 2));
 
   generationWorkers.reserve(workerCount);
   for (size_t i = 0; i < workerCount; ++i) {
@@ -3333,8 +3334,9 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
 
   std::vector<WaterCell> updates;
   updates.reserve(static_cast<size_t>(maxUpdates * 6));
+  const size_t candidateBudget = static_cast<size_t>(maxUpdates * 16);
   std::unordered_set<uint64_t> touched;
-  touched.reserve(static_cast<size_t>(maxUpdates * 16));
+  touched.reserve(candidateBudget);
 
   auto posHash = [](int x, int y, int z) -> uint64_t {
     uint64_t hx = static_cast<uint64_t>(mixBits(static_cast<uint32_t>(x)));
@@ -3402,6 +3404,9 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
   };
 
   auto addCandidate = [&](int x, int y, int z) {
+    if (updates.size() >= candidateBudget) {
+      return;
+    }
     if (!inBounds(x, y, z)) {
       return;
     }
@@ -3444,8 +3449,9 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
     {0, -1}
   }};
 
-  for (int cz = minChunkZ; cz <= maxChunkZ; ++cz) {
-    for (int cx = minChunkX; cx <= maxChunkX; ++cx) {
+  bool reachedCandidateBudget = false;
+  for (int cz = minChunkZ; cz <= maxChunkZ && !reachedCandidateBudget; ++cz) {
+    for (int cx = minChunkX; cx <= maxChunkX && !reachedCandidateBudget; ++cx) {
       Chunk* chunk = findChunk(cx, cz);
       if (!chunk || chunk->generating || chunk->generatedStatus < ChunkGenStatus::kNoise) {
         continue;
@@ -3458,8 +3464,8 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
       int lzStart = std::clamp(minZ - baseZ, 0, kChunkSize - 1);
       int lzEnd = std::clamp(maxZ - baseZ, 0, kChunkSize - 1);
 
-      for (int lz = lzStart; lz <= lzEnd; ++lz) {
-        for (int lx = lxStart; lx <= lxEnd; ++lx) {
+      for (int lz = lzStart; lz <= lzEnd && !reachedCandidateBudget; ++lz) {
+        for (int lx = lxStart; lx <= lxEnd && !reachedCandidateBudget; ++lx) {
           int x = baseX + lx;
           int z = baseZ + lz;
           for (int y = 1; y < kChunkHeight - 1; ++y) {
@@ -3475,7 +3481,8 @@ void World::simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates
               addCandidate(x + ox, y, z + oz);
             }
 
-            if (updates.size() > static_cast<size_t>(maxUpdates * 16)) {
+            if (updates.size() >= candidateBudget) {
+              reachedCandidateBudget = true;
               break;
             }
           }

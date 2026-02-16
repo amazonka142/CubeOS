@@ -8,10 +8,12 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <sstream>
 #include <string>
 #include <stdexcept>
+#include <thread>
 
 namespace {
 
@@ -2083,8 +2085,11 @@ void App::mainLoop() {
   constexpr double kWorldChunkUploadMinIntervalSec = 1.0 / 30.0; // Section uploads are cheap enough to stream at ~30 Hz.
   constexpr int kMeshRebuildTaskBudgetPerTick = 10;
   constexpr int kMeshUploadBudgetPerTick = 16;
+  constexpr double kMaxFrameRatePlaying = 120.0;
+  constexpr double kMaxFrameRateMenus = 60.0;
   double lastTime = glfwGetTime();
   while (!glfwWindowShouldClose(window)) {
+    double frameStart = glfwGetTime();
     double currentTime = glfwGetTime();
     float deltaTime = static_cast<float>(currentTime - lastTime);
     lastTime = currentTime;
@@ -2229,6 +2234,14 @@ void App::mainLoop() {
     vk.setCameraWorldState(eye, cameraInWater);
     vk.setCameraMatrices(view, proj);
     vk.drawFrame();
+
+    double frameDuration = glfwGetTime() - frameStart;
+    bool playingState = screenState == ScreenState::kPlaying;
+    double frameBudget = 1.0 / (playingState ? kMaxFrameRatePlaying : kMaxFrameRateMenus);
+    if (frameDuration < frameBudget) {
+      auto sleepTime = std::chrono::duration<double>(frameBudget - frameDuration);
+      std::this_thread::sleep_for(std::chrono::duration_cast<std::chrono::microseconds>(sleepTime));
+    }
   }
 
   vk.waitIdle();
