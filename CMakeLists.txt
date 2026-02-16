@@ -81,23 +81,18 @@ set(SHADER_BINARIES
   ${SHADER_BINARY_DIR}/cube.frag.spv
 )
 
-add_custom_command(
-  OUTPUT ${SHADER_BINARY_DIR}/cube.vert.spv
-  COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/cube.vert.spv ${SHADER_SOURCE_DIR}/cube.vert
-  DEPENDS ${SHADER_SOURCE_DIR}/cube.vert
-)
+function(cubeos_add_shader SOURCE_PATH OUTPUT_PATH)
+  add_custom_command(
+    OUTPUT ${OUTPUT_PATH}
+    COMMAND "${GLSLC}" -o ${OUTPUT_PATH} ${SOURCE_PATH}
+    DEPENDS ${SOURCE_PATH}
+    VERBATIM
+  )
+endfunction()
 
-add_custom_command(
-  OUTPUT ${SHADER_BINARY_DIR}/ui.vert.spv
-  COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/ui.vert.spv ${SHADER_SOURCE_DIR}/ui.vert
-  DEPENDS ${SHADER_SOURCE_DIR}/ui.vert
-)
-
-add_custom_command(
-  OUTPUT ${SHADER_BINARY_DIR}/cube.frag.spv
-  COMMAND "${GLSLC}" -o ${SHADER_BINARY_DIR}/cube.frag.spv ${SHADER_SOURCE_DIR}/cube.frag
-  DEPENDS ${SHADER_SOURCE_DIR}/cube.frag
-)
+cubeos_add_shader(${SHADER_SOURCE_DIR}/cube.vert ${SHADER_BINARY_DIR}/cube.vert.spv)
+cubeos_add_shader(${SHADER_SOURCE_DIR}/ui.vert ${SHADER_BINARY_DIR}/ui.vert.spv)
+cubeos_add_shader(${SHADER_SOURCE_DIR}/cube.frag ${SHADER_BINARY_DIR}/cube.frag.spv)
 
 add_custom_target(shaders ALL DEPENDS ${SHADER_BINARIES})
 
