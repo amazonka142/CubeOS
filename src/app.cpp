@@ -939,7 +939,7 @@ void App::loadWorldFromSelection(int entryIndex) {
   selectedSlot = 0;
 
   if (pendingWorldSettings.startInventoryMode != 0) {
-    std::array<uint8_t, 9> creativeBlocks = {
+    std::array<uint8_t, App::kHotbarSlotCount> creativeBlocks = {
       kGrass, kDirt, kStone, kSand, kWater, kWood, kLeaves, kCoalOre, kGoldOre
     };
     for (size_t i = 0; i < hotbar.size() && i < creativeBlocks.size(); ++i) {
@@ -1020,7 +1020,7 @@ void App::createWorldFromMenu() {
   selectedSlot = 0;
 
   if (settings.startInventoryMode != 0) {
-    std::array<uint8_t, 9> creativeBlocks = {
+    std::array<uint8_t, App::kHotbarSlotCount> creativeBlocks = {
       kGrass, kDirt, kStone, kSand, kWater, kWood, kLeaves, kCoalOre, kGoldOre
     };
     for (size_t i = 0; i < hotbar.size() && i < creativeBlocks.size(); ++i) {
