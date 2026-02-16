@@ -13,6 +13,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(CUBEOS_ENABLE_VALIDATION "Enable Vulkan validation layers" OFF)
 option(CUBEOS_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(CUBEOS_BUILD_SHADERS "Compile GLSL shaders during build" ON)
 
 include(FetchContent)
 
@@ -53,48 +54,50 @@ FetchContent_MakeAvailable(volk)
 
 set(SHADER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
-
-find_program(GLSLC glslc)
-if (NOT GLSLC AND DEFINED ENV{VULKAN_SDK})
-  if (WIN32)
-    set(GLSLC "$ENV{VULKAN_SDK}/Bin/glslc.exe")
-  else()
-    set(GLSLC "$ENV{VULKAN_SDK}/bin/glslc")
+set(SHADER_BINARIES)
+if (CUBEOS_BUILD_SHADERS)
+  find_program(GLSLC glslc)
+  if (NOT GLSLC AND DEFINED ENV{VULKAN_SDK})
+    if (WIN32)
+      set(GLSLC "$ENV{VULKAN_SDK}/Bin/glslc.exe")
+    else()
+      set(GLSLC "$ENV{VULKAN_SDK}/bin/glslc")
+    endif()
   endif()
-endif()
 
-if (NOT GLSLC)
-  message(FATAL_ERROR "glslc not found. Install Vulkan SDK and ensure VULKAN_SDK is set.")
-endif()
+  if (NOT GLSLC)
+    message(FATAL_ERROR "glslc not found. Install Vulkan SDK and ensure VULKAN_SDK is set.")
+  endif()
 
-file(MAKE_DIRECTORY ${SHADER_BINARY_DIR})
+  file(MAKE_DIRECTORY ${SHADER_BINARY_DIR})
 
-set(SHADER_SOURCES
-  ${SHADER_SOURCE_DIR}/cube.vert
-  ${SHADER_SOURCE_DIR}/ui.vert
-  ${SHADER_SOURCE_DIR}/cube.frag
-)
-
-set(SHADER_BINARIES
-  ${SHADER_BINARY_DIR}/cube.vert.spv
-  ${SHADER_BINARY_DIR}/ui.vert.spv
-  ${SHADER_BINARY_DIR}/cube.frag.spv
-)
-
-function(cubeos_add_shader SOURCE_PATH OUTPUT_PATH)
-  add_custom_command(
-    OUTPUT ${OUTPUT_PATH}
-    COMMAND "${GLSLC}" -o ${OUTPUT_PATH} ${SOURCE_PATH}
-    DEPENDS ${SOURCE_PATH}
-    VERBATIM
+  set(SHADER_SOURCES
+    ${SHADER_SOURCE_DIR}/cube.vert
+    ${SHADER_SOURCE_DIR}/ui.vert
+    ${SHADER_SOURCE_DIR}/cube.frag
   )
-endfunction()
 
-cubeos_add_shader(${SHADER_SOURCE_DIR}/cube.vert ${SHADER_BINARY_DIR}/cube.vert.spv)
-cubeos_add_shader(${SHADER_SOURCE_DIR}/ui.vert ${SHADER_BINARY_DIR}/ui.vert.spv)
-cubeos_add_shader(${SHADER_SOURCE_DIR}/cube.frag ${SHADER_BINARY_DIR}/cube.frag.spv)
+  set(SHADER_BINARIES
+    ${SHADER_BINARY_DIR}/cube.vert.spv
+    ${SHADER_BINARY_DIR}/ui.vert.spv
+    ${SHADER_BINARY_DIR}/cube.frag.spv
+  )
 
-add_custom_target(shaders ALL DEPENDS ${SHADER_BINARIES})
+  function(cubeos_add_shader SOURCE_PATH OUTPUT_PATH)
+    add_custom_command(
+      OUTPUT ${OUTPUT_PATH}
+      COMMAND "${GLSLC}" -o ${OUTPUT_PATH} ${SOURCE_PATH}
+      DEPENDS ${SOURCE_PATH}
+      VERBATIM
+    )
+  endfunction()
+
+  cubeos_add_shader(${SHADER_SOURCE_DIR}/cube.vert ${SHADER_BINARY_DIR}/cube.vert.spv)
+  cubeos_add_shader(${SHADER_SOURCE_DIR}/ui.vert ${SHADER_BINARY_DIR}/ui.vert.spv)
+  cubeos_add_shader(${SHADER_SOURCE_DIR}/cube.frag ${SHADER_BINARY_DIR}/cube.frag.spv)
+
+  add_custom_target(shaders ALL DEPENDS ${SHADER_BINARIES})
+endif()
 
 add_executable(cubeos_voxel
   src/main.cpp
@@ -108,7 +111,9 @@ target_include_directories(cubeos_voxel PRIVATE ${CUBEOS_VULKAN_INCLUDE_DIR})
 target_link_libraries(cubeos_voxel PRIVATE glfw volk::volk glm::glm Threads::Threads)
 target_compile_definitions(cubeos_voxel PRIVATE GLFW_INCLUDE_NONE)
 target_compile_definitions(cubeos_voxel PRIVATE GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
-add_dependencies(cubeos_voxel shaders)
+if (CUBEOS_BUILD_SHADERS)
+  add_dependencies(cubeos_voxel shaders)
+endif()
 
 if (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   target_link_options(cubeos_voxel PRIVATE
@@ -144,11 +149,13 @@ if (APPLE)
   endif()
 endif()
 
-add_custom_command(
-  TARGET cubeos_voxel POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:cubeos_voxel>/shaders
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SHADER_BINARIES} $<TARGET_FILE_DIR:cubeos_voxel>/shaders
-)
+if (CUBEOS_BUILD_SHADERS)
+  add_custom_command(
+    TARGET cubeos_voxel POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:cubeos_voxel>/shaders
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SHADER_BINARIES} $<TARGET_FILE_DIR:cubeos_voxel>/shaders
+  )
+endif()
 
 if (APPLE)
   add_custom_command(
