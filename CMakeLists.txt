@@ -17,6 +17,10 @@ option(CUBEOS_BUILD_SHADERS "Compile GLSL shaders during build" ON)
 
 include(FetchContent)
 
+set(CUBEOS_GLFW_GIT_TAG "3.3.8" CACHE STRING "glfw git tag to fetch")
+set(CUBEOS_GLM_GIT_TAG "0.9.9.8" CACHE STRING "glm git tag to fetch")
+set(CUBEOS_VOLK_GIT_TAG "1.4.304" CACHE STRING "volk git tag to fetch")
+
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -24,14 +28,14 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
   glfw
   GIT_REPOSITORY https://github.com/glfw/glfw.git
-  GIT_TAG 3.3.8
+  GIT_TAG ${CUBEOS_GLFW_GIT_TAG}
 )
 FetchContent_MakeAvailable(glfw)
 
 FetchContent_Declare(
   glm
   GIT_REPOSITORY https://github.com/g-truc/glm.git
-  GIT_TAG 0.9.9.8
+  GIT_TAG ${CUBEOS_GLM_GIT_TAG}
 )
 FetchContent_MakeAvailable(glm)
 
@@ -48,7 +52,7 @@ endif()
 FetchContent_Declare(
   volk
   GIT_REPOSITORY https://github.com/zeux/volk.git
-  GIT_TAG 1.4.304
+  GIT_TAG ${CUBEOS_VOLK_GIT_TAG}
 )
 FetchContent_MakeAvailable(volk)
 
