@@ -81,3 +81,8 @@ build/cubeos_voxel
 ## Notes
 - Validation layers are disabled by default (enable with `-DCUBEOS_ENABLE_VALIDATION=ON`).
 - Next steps will add chunked voxel world, greedy meshing, and a simple player controller.
+
+## Troubleshooting
+- `glslc not found`: install Vulkan SDK and ensure `VULKAN_SDK` is exported in your shell.
+- `Vulkan headers not found`: make sure Vulkan headers are installed, or pass include paths via CMake cache options.
+- Blank/black output after startup: verify shader `.spv` files exist next to the executable in `shaders/`.
