@@ -54,6 +54,12 @@ On macOS and other non-Windows builds:
 build/cubeos_voxel
 ```
 
+## Save data layout
+- `saves/*.bin`: world data files.
+- `saves/*.meta`: optional world display-name metadata.
+- `saves/*.player`: per-world player position/rotation state.
+- `settings.cfg`: user settings (graphics, controls sensitivity, language, etc.).
+
 ## Controls
 - WASD move, Space jump, Mouse look.
 - LMB remove block (adds to inventory), RMB place block (consumes from hotbar).
