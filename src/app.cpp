@@ -1428,7 +1428,7 @@ void App::setupGameplaySession() {
   renderLoadingFrame(1.0f, ruUi ? "Готово" : "Done");
   setScreenState(ScreenState::kPlaying);
 
-  world.save(currentWorldPath);
+  saveWorldWithWarning(world, currentWorldPath, "world session setup");
 }
 
 void App::processMenuInput(float deltaTime) {
@@ -4162,7 +4162,7 @@ void App::cleanup() {
        screenState == ScreenState::kLoadingWorld) &&
       !currentWorldPath.empty()) {
     saveCurrentPlayerState();
-    world.save(currentWorldPath);
+    saveWorldWithWarning(world, currentWorldPath, "app cleanup");
   }
   saveSettings();
   vk.cleanup();
