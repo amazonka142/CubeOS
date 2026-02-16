@@ -73,6 +73,7 @@ private:
   void onCharInput(unsigned int codepoint);
   void loadSettings();
   bool saveSettings() const;
+  void saveSettingsWithWarning(const char* reason) const;
   void applySettings(bool refreshWorldStreaming);
   void mainLoop();
   void processInput(float deltaTime);

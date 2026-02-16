@@ -1793,7 +1793,7 @@ void App::processMenuInput(float deltaTime) {
           settingsReturnState == ScreenState::kPlaying ||
           settingsReturnState == ScreenState::kPaused;
         applySettings(inGameContext);
-        saveSettings();
+        saveSettingsWithWarning("settings menu apply");
       } else if (settingsSelection == 6) {
         pendingSettings = UserSettings{};
         updateSettingsDirtyFlag();
@@ -1963,6 +1963,13 @@ bool App::saveSettings() const {
   out << "audio_volume=" << appliedSettings.audioVolume << "\n";
   out << "language=" << (appliedSettings.language == 1 ? "ru" : "en") << "\n";
   return true;
+}
+
+void App::saveSettingsWithWarning(const char* reason) const {
+  if (saveSettings()) {
+    return;
+  }
+  std::cerr << "Warning: failed to save settings (" << reason << "): " << kSettingsFilePath << "\n";
 }
 
 void App::applySettings(bool refreshWorldStreaming) {
@@ -4164,7 +4171,7 @@ void App::cleanup() {
     saveCurrentPlayerState();
     saveWorldWithWarning(world, currentWorldPath, "app cleanup");
   }
-  saveSettings();
+  saveSettingsWithWarning("app cleanup");
   vk.cleanup();
 
   if (window) {
