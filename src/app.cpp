@@ -42,6 +42,10 @@ constexpr float kDroppedItemHalfHeight = 0.19f;
 constexpr float kDroppedItemGravity = -16.5f;
 constexpr float kDroppedItemPickupRadius = 1.35f;
 constexpr float kDroppedItemMeshUpdateInterval = 1.0f / 30.0f;
+constexpr float kDayNightCycleDurationSec = 14.0f * 60.0f;
+constexpr float kWeatherMinDecisionSec = 38.0f;
+constexpr float kWeatherMaxDecisionSec = 110.0f;
+constexpr float kTau = 6.28318530718f;
 
 constexpr uint8_t kDigitMap[10][kDigitHeight] = {
   {0b111, 0b101, 0b101, 0b101, 0b111}, // 0
@@ -55,6 +59,18 @@ constexpr uint8_t kDigitMap[10][kDigitHeight] = {
   {0b111, 0b101, 0b111, 0b101, 0b111}, // 8
   {0b111, 0b101, 0b111, 0b001, 0b111}  // 9
 };
+
+float nextUnitRandom(uint32_t& state) {
+  state = state * 1664525u + 1013904223u;
+  return static_cast<float>((state >> 8) & 0x00FFFFFFu) / 16777215.0f;
+}
+
+float moveToward(float current, float target, float maxStep) {
+  if (current < target) {
+    return std::min(current + maxStep, target);
+  }
+  return std::max(current - maxStep, target);
+}
 
 constexpr int kGlyphWidth = 3;
 constexpr int kGlyphHeight = 5;
@@ -781,7 +797,7 @@ void App::updateWindowTitle() {
       : std::string(label);
   };
 
-  std::string title = "CubeOS v0.2.0";
+  std::string title = "CubeOS v0.2.1";
   switch (screenState) {
     case ScreenState::kMainMenu:
       title += " | " + loc("Menu: ", "Меню: ") + mark(mainMenuSelection, 0, loc("Start", "Начать")) + "  "
@@ -1077,6 +1093,7 @@ void App::setupGameplaySession() {
   droppedItemMeshUploaded = false;
   droppedItemMeshTimer = 0.0f;
   world.clearBreakOverlay();
+  resetEnvironmentForSession();
 
   int initialCx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int initialCz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
@@ -1165,7 +1182,40 @@ void App::setupGameplaySession() {
       int radius = 0;
     };
 
+    struct ProbeCacheEntry {
+      bool surfaceResolved = false;
+      bool surfaceFound = false;
+      int surfaceY = 0;
+      uint8_t surfaceGround = kAir;
+      bool waterResolved = false;
+      bool waterFound = false;
+      int waterY = 0;
+    };
+
+    auto probeKey = [](int x, int z) -> uint64_t {
+      return (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32) |
+             static_cast<uint64_t>(static_cast<uint32_t>(z));
+    };
+
+    std::unordered_map<uint64_t, ProbeCacheEntry> probeCache;
+    int searchDiameter = spawnSearchRadius * 2 + 1;
+    if (searchDiameter > 0) {
+      size_t searchArea = static_cast<size_t>(searchDiameter) * static_cast<size_t>(searchDiameter);
+      probeCache.reserve(searchArea / 2 + 1024);
+    }
+
     auto probeSurface = [&](int x, int z, int& outY, uint8_t& outGround) -> bool {
+      ProbeCacheEntry& cached = probeCache[probeKey(x, z)];
+      if (cached.surfaceResolved) {
+        if (!cached.surfaceFound) {
+          return false;
+        }
+        outY = cached.surfaceY;
+        outGround = cached.surfaceGround;
+        return true;
+      }
+
+      cached.surfaceResolved = true;
       for (int y = world.height() - 3; y >= 1; --y) {
         uint8_t ground = world.getBlock(x, y, z);
         uint8_t feet = world.getBlock(x, y + 1, z);
@@ -1186,6 +1236,9 @@ void App::setupGameplaySession() {
           continue;
         }
 
+        cached.surfaceFound = true;
+        cached.surfaceY = y;
+        cached.surfaceGround = ground;
         outY = y;
         outGround = ground;
         return true;
@@ -1194,12 +1247,24 @@ void App::setupGameplaySession() {
     };
 
     auto probeWaterSurface = [&](int x, int z, int& outWaterY) -> bool {
+      ProbeCacheEntry& cached = probeCache[probeKey(x, z)];
+      if (cached.waterResolved) {
+        if (!cached.waterFound) {
+          return false;
+        }
+        outWaterY = cached.waterY;
+        return true;
+      }
+
+      cached.waterResolved = true;
       for (int y = world.height() - 3; y >= 1; --y) {
         uint8_t waterBlock = world.getBlock(x, y, z);
         uint8_t above = world.getBlock(x, y + 1, z);
         if (!isWaterBlock(waterBlock) || above != kAir) {
           continue;
         }
+        cached.waterFound = true;
+        cached.waterY = y;
         outWaterY = y;
         return true;
       }
@@ -1244,8 +1309,59 @@ void App::setupGameplaySession() {
       return total;
     };
 
+    auto ledgeRisk = [&](const SpawnCandidate& c) -> int {
+      static constexpr int kRingOffsets[8][2] = {
+        {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+        {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
+      };
+      int risk = 0;
+      for (const auto& offset : kRingOffsets) {
+        int ny = 0;
+        uint8_t nGround = kAir;
+        if (!probeSurface(c.x + offset[0], c.z + offset[1], ny, nGround)) {
+          risk += 5;
+          continue;
+        }
+        int delta = std::abs(c.y - ny);
+        if (delta >= 3) {
+          risk += 4;
+        } else if (delta == 2) {
+          risk += 2;
+        }
+        if (!isSpawnGround(nGround)) {
+          risk += 3;
+        }
+      }
+      return risk;
+    };
+
+    auto waterExposure = [&](const SpawnCandidate& c) -> int {
+      static constexpr int kWaterOffsets[12][2] = {
+        {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+        {1, 1}, {1, -1}, {-1, 1}, {-1, -1},
+        {2, 0}, {-2, 0}, {0, 2}, {0, -2}
+      };
+      int exposure = 0;
+      for (const auto& offset : kWaterOffsets) {
+        int waterY = 0;
+        if (!probeWaterSurface(c.x + offset[0], c.z + offset[1], waterY)) {
+          continue;
+        }
+        int levelDelta = std::abs(c.y - waterY);
+        if (levelDelta <= 2) {
+          int ringDist = std::abs(offset[0]) + std::abs(offset[1]);
+          exposure += ringDist <= 1 ? 4 : 2;
+        }
+      }
+      return exposure;
+    };
+
     glm::vec3 bestPos{};
-    auto pickBest = [&](bool highBandOnly, bool preferredOnly, int maxRoughness) -> bool {
+    auto pickBest = [&](bool highBandOnly,
+                        bool preferredOnly,
+                        int maxRoughness,
+                        int maxLedgeRisk,
+                        int maxWaterExposure) -> bool {
       int bestScore = std::numeric_limits<int>::min();
       bool found = false;
       int highBandFloor = maxSurfaceY - 10;
@@ -1262,8 +1378,20 @@ void App::setupGameplaySession() {
         if (surfaceRoughness > maxRoughness) {
           continue;
         }
+        int localLedgeRisk = ledgeRisk(c);
+        if (localLedgeRisk > maxLedgeRisk) {
+          continue;
+        }
+        int localWaterExposure = waterExposure(c);
+        if (localWaterExposure > maxWaterExposure) {
+          continue;
+        }
 
-        int score = c.y * 140 - c.radius * 6 - surfaceRoughness * 12;
+        int score = c.y * 140
+                    - c.radius * 6
+                    - surfaceRoughness * 12
+                    - localLedgeRisk * 9
+                    - localWaterExposure * 7;
         if (isPreferredSpawnGround(c.ground)) {
           score += 260;
         }
@@ -1356,10 +1484,10 @@ void App::setupGameplaySession() {
               static_cast<float>(baseZ) + 0.5f};
     }
 
-    if (!pickBest(true, true, 8) &&
-        !pickBest(true, false, 10) &&
-        !pickBest(false, true, 14) &&
-        !pickBest(false, false, 20)) {
+    if (!pickBest(true, true, 8, 6, 8) &&
+        !pickBest(true, false, 10, 8, 10) &&
+        !pickBest(false, true, 14, 11, 14) &&
+        !pickBest(false, false, 20, 18, 20)) {
       const SpawnCandidate* fallback = &candidates.front();
       for (const SpawnCandidate& c : candidates) {
         if (c.y > fallback->y || (c.y == fallback->y && c.radius < fallback->radius)) {
@@ -2056,8 +2184,9 @@ void App::initVulkan() {
   world.setGenerationSettings(startupSettings);
   world.setSeed(1337);
   world.generate();
-  world.updateActiveChunks(0, 0, 3);
-  world.waitForChunkRegion(0, 0, 3, 2500);
+  constexpr int kMenuPreviewChunkRadius = 1;
+  world.updateActiveChunks(0, 0, kMenuPreviewChunkRadius);
+  world.waitForChunkRegion(0, 0, kMenuPreviewChunkRadius, 1800);
 
   pendingWorldSettings = startupSettings;
   pendingWorldName = "World";
@@ -2079,19 +2208,29 @@ void App::initVulkan() {
   pendingWorldChunkUploads.clear();
   pendingWorldChunkRemovals.clear();
   lastWorldChunkUploadTime = glfwGetTime();
+  dayLightFactor = computeDaylightFactor();
+  vk.setEnvironmentState(dayLightFactor, weatherIntensity, dayCycleTime);
 }
 
 void App::mainLoop() {
   constexpr double kWorldChunkUploadMinIntervalSec = 1.0 / 30.0; // Section uploads are cheap enough to stream at ~30 Hz.
   constexpr int kMeshRebuildTaskBudgetPerTick = 10;
   constexpr int kMeshUploadBudgetPerTick = 16;
-  constexpr double kMaxFrameRatePlaying = 120.0;
-  constexpr double kMaxFrameRateMenus = 60.0;
+  constexpr double kMaxFrameRatePlayingFocused = 72.0;
+  constexpr double kMaxFrameRatePlayingUnfocused = 30.0;
+  constexpr double kMaxFrameRateMenusFocused = 45.0;
+  constexpr double kMaxFrameRateMenusUnfocused = 24.0;
+  constexpr float kWaterSimTickFocusedSec = 0.24f;
+  constexpr float kWaterSimTickUnfocusedSec = 0.40f;
+  constexpr double kMenuUiTickFocusedSec = 1.0 / 24.0;
+  constexpr double kMenuUiTickUnfocusedSec = 1.0 / 12.0;
   double lastTime = glfwGetTime();
+  double menuUiTickAccumulator = 0.0;
   while (!glfwWindowShouldClose(window)) {
     double frameStart = glfwGetTime();
     double currentTime = glfwGetTime();
     float deltaTime = static_cast<float>(currentTime - lastTime);
+    deltaTime = std::clamp(deltaTime, 0.0f, 0.12f);
     lastTime = currentTime;
     float positiveDelta = std::max(0.0f, deltaTime);
     fpsSampleAccum += positiveDelta;
@@ -2108,19 +2247,40 @@ void App::mainLoop() {
     }
 
     glfwPollEvents();
+    bool windowFocused = glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE;
+    bool windowMinimized = glfwGetWindowAttrib(window, GLFW_ICONIFIED) == GLFW_TRUE ||
+                           width <= 0 || height <= 0;
+    if (windowMinimized) {
+      glfwWaitEventsTimeout(0.08);
+      lastTime = glfwGetTime();
+      continue;
+    }
+
     processInput(deltaTime);
+    updateEnvironment(deltaTime);
 
     if (selectedItemToastTimer > 0.0f) {
       selectedItemToastTimer = std::max(0.0f, selectedItemToastTimer - deltaTime);
       uiDirty = true;
     }
+    if (debugWorldgenOverlay && (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused)) {
+      uiDirty = true;
+    }
 
     if (screenState != ScreenState::kPlaying) {
-      if (menuIntro < 1.0f) {
-        menuIntro = std::min(1.0f, menuIntro + deltaTime * 3.2f);
+      menuUiTickAccumulator += static_cast<double>(deltaTime);
+      double menuUiTick = windowFocused ? kMenuUiTickFocusedSec : kMenuUiTickUnfocusedSec;
+      bool shouldTickMenuUi = menuUiTickAccumulator >= menuUiTick || menuIntro < 1.0f;
+      if (shouldTickMenuUi) {
+        if (menuIntro < 1.0f) {
+          menuIntro = std::min(1.0f, menuIntro + deltaTime * 3.2f);
+        }
+        menuUiTickAccumulator = 0.0;
+        // Menus have ambient animation, but throttled to reduce CPU load.
+        uiDirty = true;
       }
-      // Keep menu animated (focus pulse + subtle panel motion).
-      uiDirty = true;
+    } else {
+      menuUiTickAccumulator = 0.0;
     }
     if (screenState == ScreenState::kPlaying && !inventoryOpen) {
       updatePlayer(deltaTime);
@@ -2130,25 +2290,30 @@ void App::mainLoop() {
       updateStreaming();
       waterSimBoostTimer = std::max(0.0f, waterSimBoostTimer - deltaTime);
       waterSimAccumulator += deltaTime;
-      if (waterSimAccumulator > 0.6f) {
-        waterSimAccumulator = 0.6f;
+      float waterTickSec = windowFocused ? kWaterSimTickFocusedSec : kWaterSimTickUnfocusedSec;
+      if (waterSimAccumulator > waterTickSec * 3.0f) {
+        waterSimAccumulator = waterTickSec * 3.0f;
       }
-      while (waterSimAccumulator >= 0.24f) {
-        int px = static_cast<int>(std::floor(playerPos.x));
-        int pz = static_cast<int>(std::floor(playerPos.z));
-        bool nearWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.65f, 0.0f));
-        bool highActivity = waterSimBoostTimer > 0.0f;
-
+      int px = static_cast<int>(std::floor(playerPos.x));
+      int pz = static_cast<int>(std::floor(playerPos.z));
+      bool nearWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.65f, 0.0f));
+      bool highActivity = waterSimBoostTimer > 0.0f;
+      while (waterSimAccumulator >= waterTickSec) {
         // Keep background water work very small to avoid frame drops in ocean areas.
         if (highActivity || nearWater) {
-          int simRadius = highActivity ? 20 : 12;
-          int waterUpdates = highActivity ? 52 : 8;
-          int fallingUpdates = highActivity ? 44 : 10;
+          int simRadius = highActivity ? 18 : 11;
+          int waterUpdates = highActivity ? 36 : 7;
+          int fallingUpdates = highActivity ? 30 : 8;
+          if (!windowFocused) {
+            simRadius = std::max(8, simRadius - 4);
+            waterUpdates = std::max(4, static_cast<int>(std::lround(waterUpdates * 0.65f)));
+            fallingUpdates = std::max(4, static_cast<int>(std::lround(fallingUpdates * 0.65f)));
+          }
           world.simulateWater(px, pz, simRadius, waterUpdates);
           world.simulateFallingBlocks(px, pz, simRadius, fallingUpdates);
         }
 
-        waterSimAccumulator -= 0.24f;
+        waterSimAccumulator -= waterTickSec;
       }
     } else {
       waterSimBoostTimer = 0.0f;
@@ -2160,24 +2325,39 @@ void App::mainLoop() {
     }
     syncDroppedItemMesh(false);
 
-    std::vector<ChunkMeshUpload> chunkUpdates;
-    std::vector<uint64_t> removedChunkKeys;
-    bool hasChunkUpdateBatch = world.consumeChunkMeshUpdates(
-      chunkUpdates,
-      removedChunkKeys,
-      kMeshRebuildTaskBudgetPerTick,
-      kMeshUploadBudgetPerTick);
-    if (hasChunkUpdateBatch) {
-      for (uint64_t key : removedChunkKeys) {
-        pendingWorldChunkUploads.erase(key);
-        pendingWorldChunkRemovals.insert(key);
-      }
+    bool worldScreenActive = screenState == ScreenState::kPlaying ||
+                             screenState == ScreenState::kPaused ||
+                             screenState == ScreenState::kLoadingWorld;
+    if (worldScreenActive) {
+      bool hasWorldMeshWork = world.consumeMeshDirty();
+      if (hasWorldMeshWork) {
+        int meshBuildBudget = kMeshRebuildTaskBudgetPerTick;
+        int meshUploadBudget = kMeshUploadBudgetPerTick;
+        if (!windowFocused) {
+          meshBuildBudget = std::max(2, meshBuildBudget / 2);
+          meshUploadBudget = std::max(4, meshUploadBudget / 2);
+        }
 
-      std::vector<VulkanContext::WorldChunkMeshUpload> vkUpdates =
-        toVkChunkUploads(std::move(chunkUpdates));
-      for (VulkanContext::WorldChunkMeshUpload& update : vkUpdates) {
-        pendingWorldChunkRemovals.erase(update.key);
-        pendingWorldChunkUploads[update.key] = std::move(update);
+        std::vector<ChunkMeshUpload> chunkUpdates;
+        std::vector<uint64_t> removedChunkKeys;
+        bool hasChunkUpdateBatch = world.consumeChunkMeshUpdates(
+          chunkUpdates,
+          removedChunkKeys,
+          meshBuildBudget,
+          meshUploadBudget);
+        if (hasChunkUpdateBatch) {
+          for (uint64_t key : removedChunkKeys) {
+            pendingWorldChunkUploads.erase(key);
+            pendingWorldChunkRemovals.insert(key);
+          }
+
+          std::vector<VulkanContext::WorldChunkMeshUpload> vkUpdates =
+            toVkChunkUploads(std::move(chunkUpdates));
+          for (VulkanContext::WorldChunkMeshUpload& update : vkUpdates) {
+            pendingWorldChunkRemovals.erase(update.key);
+            pendingWorldChunkUploads[update.key] = std::move(update);
+          }
+        }
       }
     }
 
@@ -2231,13 +2411,17 @@ void App::mainLoop() {
                                       200.0f);
     proj[1][1] *= -1.0f;
 
+    vk.setEnvironmentState(dayLightFactor, weatherIntensity, dayCycleTime);
     vk.setCameraWorldState(eye, cameraInWater);
     vk.setCameraMatrices(view, proj);
     vk.drawFrame();
 
     double frameDuration = glfwGetTime() - frameStart;
     bool playingState = screenState == ScreenState::kPlaying;
-    double frameBudget = 1.0 / (playingState ? kMaxFrameRatePlaying : kMaxFrameRateMenus);
+    double targetFps = playingState
+      ? (windowFocused ? kMaxFrameRatePlayingFocused : kMaxFrameRatePlayingUnfocused)
+      : (windowFocused ? kMaxFrameRateMenusFocused : kMaxFrameRateMenusUnfocused);
+    double frameBudget = 1.0 / targetFps;
     if (frameDuration < frameBudget) {
       auto sleepTime = std::chrono::duration<double>(frameBudget - frameDuration);
       std::this_thread::sleep_for(std::chrono::duration_cast<std::chrono::microseconds>(sleepTime));
@@ -2247,11 +2431,75 @@ void App::mainLoop() {
   vk.waitIdle();
 }
 
+float App::computeDaylightFactor() const {
+  float cycle = dayCycleTime - std::floor(dayCycleTime);
+  float sun = std::sin((cycle - 0.25f) * kTau);
+  float daylight = std::clamp(sun * 0.53f + 0.47f, 0.0f, 1.0f);
+  daylight = daylight * daylight * (3.0f - 2.0f * daylight);
+  return std::max(0.08f, daylight);
+}
+
+void App::resetEnvironmentForSession() {
+  weatherRngState = static_cast<uint32_t>(world.getSeed()) ^ 0x9E3779B9u;
+  if (weatherRngState == 0u) {
+    weatherRngState = 0xA341316Cu;
+  }
+
+  float seedOffset = nextUnitRandom(weatherRngState);
+  dayCycleTime = std::fmod(0.19f + seedOffset * 0.55f, 1.0f);
+  weatherIntensity = 0.0f;
+  weatherTargetIntensity = 0.0f;
+  weatherDecisionTimer = 16.0f + 30.0f * nextUnitRandom(weatherRngState);
+  dayLightFactor = computeDaylightFactor();
+}
+
+void App::updateEnvironment(float deltaTime) {
+  float dt = std::max(0.0f, deltaTime);
+
+  if (screenState == ScreenState::kPlaying) {
+    dayCycleTime += dt / kDayNightCycleDurationSec;
+    dayCycleTime -= std::floor(dayCycleTime);
+
+    weatherDecisionTimer -= dt;
+    if (weatherDecisionTimer <= 0.0f) {
+      uint8_t biomeId = 0;
+      BiomeClimateSample climate{};
+      int wx = static_cast<int>(std::floor(playerPos.x));
+      int wz = static_cast<int>(std::floor(playerPos.z));
+      world.sampleBiomeClimateAt(wx, wz, biomeId, climate);
+      (void)biomeId;
+
+      float humidityFactor = std::clamp((climate.humidity - 0.15f) * 1.25f, 0.0f, 1.0f);
+      float rainChance = 0.16f + humidityFactor * 0.58f;
+      float decision = nextUnitRandom(weatherRngState);
+      if (decision < rainChance) {
+        float strength = 0.28f + 0.72f * nextUnitRandom(weatherRngState);
+        weatherTargetIntensity = std::clamp(strength * (0.55f + humidityFactor * 0.60f), 0.20f, 1.0f);
+      } else {
+        weatherTargetIntensity = 0.0f;
+      }
+
+      float intervalRand = nextUnitRandom(weatherRngState);
+      weatherDecisionTimer += kWeatherMinDecisionSec +
+                              (kWeatherMaxDecisionSec - kWeatherMinDecisionSec) * intervalRand;
+    }
+
+    float settleSpeed = (weatherTargetIntensity > weatherIntensity) ? 0.11f : 0.05f;
+    weatherIntensity = moveToward(weatherIntensity, weatherTargetIntensity, dt * settleSpeed);
+  }
+
+  dayLightFactor = computeDaylightFactor();
+}
+
 void App::processInput(float deltaTime) {
   if (screenState != ScreenState::kPlaying) {
     processMenuInput(deltaTime);
     escDown = false;
     tabDown = false;
+    debugToggleDown = false;
+    debugModeDown = false;
+    debugSliceUpDown = false;
+    debugSliceDownDown = false;
     mouseLeftDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     mouseRightDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
     return;
@@ -2279,6 +2527,39 @@ void App::processInput(float deltaTime) {
   } else if (!tabPressed) {
     tabDown = false;
   }
+
+  bool debugTogglePressed = glfwGetKey(window, GLFW_KEY_F3) == GLFW_PRESS;
+  if (debugTogglePressed && !debugToggleDown) {
+    debugWorldgenOverlay = !debugWorldgenOverlay;
+    uiDirty = true;
+  }
+  debugToggleDown = debugTogglePressed;
+
+  bool debugModePressed = glfwGetKey(window, GLFW_KEY_F4) == GLFW_PRESS;
+  if (debugModePressed && !debugModeDown) {
+    debugWorldgenOverlayMode = (debugWorldgenOverlayMode + 1) % 3;
+    debugWorldgenOverlay = true;
+    uiDirty = true;
+  }
+  debugModeDown = debugModePressed;
+
+  bool sliceUpPressed = glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS ||
+                        glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS;
+  if (sliceUpPressed && !debugSliceUpDown) {
+    debugDensitySliceOffset = std::clamp(debugDensitySliceOffset + 4, -48, 48);
+    debugWorldgenOverlay = true;
+    uiDirty = true;
+  }
+  debugSliceUpDown = sliceUpPressed;
+
+  bool sliceDownPressed = glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS ||
+                          glfwGetKey(window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
+  if (sliceDownPressed && !debugSliceDownDown) {
+    debugDensitySliceOffset = std::clamp(debugDensitySliceOffset - 4, -48, 48);
+    debugWorldgenOverlay = true;
+    uiDirty = true;
+  }
+  debugSliceDownDown = sliceDownPressed;
 
   int prevSlot = selectedSlot;
   for (int i = 0; i < static_cast<int>(hotbar.size()); ++i) {
@@ -2872,7 +3153,7 @@ void App::rebuildUiMesh() {
             40.0f,
             glm::vec3(0.16f, 0.19f, 0.24f),
             backgroundTile);
-    drawText("CUBEOS V0 2 0 BETA", panelX + panelWidth * 0.5f, panelY + 18.0f, 3.0f,
+    drawText("CUBEOS V0 2 1 BETA", panelX + panelWidth * 0.5f, panelY + 18.0f, 3.0f,
              glm::vec3(0.91f, 0.94f, 0.98f), true);
 
     auto drawMenuRow = [&](int index,
@@ -3436,6 +3717,125 @@ void App::rebuildUiMesh() {
     drawText(fpsText, 22.0f, 17.0f, fpsPixel, glm::vec3(0.92f, 0.95f, 0.99f), false);
   }
 
+  if (debugWorldgenOverlay && (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused)) {
+    auto toFixed = [](float value, int precision) {
+      std::ostringstream ss;
+      ss.setf(std::ios::fixed, std::ios::floatfield);
+      ss.precision(precision);
+      ss << value;
+      return ss.str();
+    };
+    auto formatClock = [](float cycle) {
+      float wrapped = cycle - std::floor(cycle);
+      int totalMinutes = static_cast<int>(std::lround(wrapped * 24.0f * 60.0f));
+      totalMinutes %= (24 * 60);
+      int hours = totalMinutes / 60;
+      int minutes = totalMinutes % 60;
+      std::ostringstream ss;
+      if (hours < 10) {
+        ss << '0';
+      }
+      ss << hours << ':';
+      if (minutes < 10) {
+        ss << '0';
+      }
+      ss << minutes;
+      return ss.str();
+    };
+    auto positiveMod = [](int value, int mod) {
+      int m = value % mod;
+      if (m < 0) {
+        m += mod;
+      }
+      return m;
+    };
+    auto biomeLabel = [&](uint8_t biome) -> std::string {
+      switch (biome) {
+        case 0:
+          return "OCEAN";
+        case 1:
+          return "BEACH";
+        case 2:
+          return "PLAINS";
+        case 3:
+          return "FOREST";
+        case 4:
+          return "DESERT";
+        case 5:
+          return "MOUNTAINS";
+        default:
+          return "UNKNOWN";
+      }
+    };
+
+    int worldX = static_cast<int>(std::floor(playerPos.x));
+    int worldY = static_cast<int>(std::floor(playerPos.y + 1.62f));
+    int worldZ = static_cast<int>(std::floor(playerPos.z));
+    int chunkX = static_cast<int>(std::floor(static_cast<float>(worldX) / static_cast<float>(kChunkSize)));
+    int chunkZ = static_cast<int>(std::floor(static_cast<float>(worldZ) / static_cast<float>(kChunkSize)));
+    int localX = positiveMod(worldX, kChunkSize);
+    int localZ = positiveMod(worldZ, kChunkSize);
+    int borderDistX = std::min(localX, (kChunkSize - 1) - localX);
+    int borderDistZ = std::min(localZ, (kChunkSize - 1) - localZ);
+
+    uint8_t biomeId = 0;
+    BiomeClimateSample climate{};
+    world.sampleBiomeClimateAt(worldX, worldZ, biomeId, climate);
+    int surfaceY = world.sampleSurfaceHeightAt(worldX, worldZ);
+    int aquiferY = world.sampleAquiferLevelAt(worldX, worldZ);
+    const WorldGenSettings& gen = world.getGenerationSettings();
+    int sampleY = std::clamp(worldY + debugDensitySliceOffset, gen.minY, gen.maxY);
+    float densityEye = world.sampleDensityAt(worldX, worldY, worldZ);
+    float densitySlice = world.sampleDensityAt(worldX, sampleY, worldZ);
+    float densitySliceUp = world.sampleDensityAt(worldX, std::clamp(sampleY + 8, gen.minY, gen.maxY), worldZ);
+    float densitySliceDown = world.sampleDensityAt(worldX, std::clamp(sampleY - 8, gen.minY, gen.maxY), worldZ);
+
+    std::vector<std::string> lines;
+    lines.push_back("WORLDGEN DEBUG");
+    lines.push_back("CHUNK " + std::to_string(chunkX) + " " + std::to_string(chunkZ) +
+                    " LOCAL " + std::to_string(localX) + " " + std::to_string(localZ));
+    lines.push_back("BORDER DIST " + std::to_string(borderDistX) + " " + std::to_string(borderDistZ));
+    lines.push_back("TIME " + formatClock(dayCycleTime) + " DAYL " + toFixed(dayLightFactor, 2));
+    lines.push_back("WEATHER " + toFixed(weatherIntensity, 2) +
+                    " TARGET " + toFixed(weatherTargetIntensity, 2));
+    lines.push_back("BIOME " + std::to_string(static_cast<int>(biomeId)) + " " + biomeLabel(biomeId));
+    lines.push_back("SURFACE Y " + std::to_string(surfaceY) + " AQ Y " + std::to_string(aquiferY));
+    if (debugWorldgenOverlayMode >= 1) {
+      lines.push_back("CL T " + toFixed(climate.temperature, 2) +
+                      " H " + toFixed(climate.humidity, 2) +
+                      " C " + toFixed(climate.continentalness, 2));
+      lines.push_back("CL E " + toFixed(climate.erosion, 2) +
+                      " D " + toFixed(climate.depth, 2) +
+                      " W " + toFixed(climate.weirdness, 2));
+    }
+    lines.push_back("DENS Y " + std::to_string(worldY) + " " + toFixed(densityEye, 2));
+    lines.push_back("SLICE Y " + std::to_string(sampleY) + " " + toFixed(densitySlice, 2));
+    if (debugWorldgenOverlayMode >= 2) {
+      lines.push_back("SLICE UP8 " + toFixed(densitySliceUp, 2) +
+                      " DOWN8 " + toFixed(densitySliceDown, 2));
+    }
+    lines.push_back("F3 TOGGLE F4 MODE PGUP/PGDN SLICE");
+
+    float textPixel = 1.9f;
+    float maxLineW = 0.0f;
+    for (const std::string& line : lines) {
+      maxLineW = std::max(maxLineW, measureTextWidth(line, textPixel));
+    }
+    float boxW = maxLineW + 20.0f;
+    float boxH = static_cast<float>(lines.size()) * (textPixel * static_cast<float>(kGlyphHeight) + 4.0f) + 14.0f;
+    float boxX = static_cast<float>(width) - boxW - 14.0f;
+    float boxY = 12.0f;
+    addQuad(boxX, boxY, boxW, boxH, glm::vec3(0.05f, 0.08f, 0.11f), backgroundTile);
+    float lineY = boxY + 7.0f;
+    for (size_t i = 0; i < lines.size(); ++i) {
+      glm::vec3 color = (i == 0)
+        ? glm::vec3(0.88f, 0.93f, 0.98f)
+        : glm::vec3(0.76f, 0.86f, 0.95f);
+      drawText(lines[i], boxX + 10.0f, lineY, textPixel, color, false);
+      lineY += textPixel * static_cast<float>(kGlyphHeight) + 4.0f;
+    }
+  }
+
   const float centerX = static_cast<float>(width) * 0.5f;
   const float centerY = static_cast<float>(height) * 0.5f;
   const float crossArm = 4.0f;
@@ -3506,6 +3906,7 @@ void App::renderLoadingFrame(float progress, const std::string& message) {
                                     0.1f,
                                     200.0f);
   proj[1][1] *= -1.0f;
+  vk.setEnvironmentState(dayLightFactor, weatherIntensity, dayCycleTime);
   vk.setCameraWorldState(eye, false);
   vk.setCameraMatrices(view, proj);
   vk.drawFrame();

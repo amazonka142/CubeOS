@@ -38,6 +38,7 @@ public:
                               const std::vector<uint64_t>& removedKeys);
   void setCameraMatrices(const glm::mat4& view, const glm::mat4& proj);
   void setCameraWorldState(const glm::vec3& eyePosition, bool underwater);
+  void setEnvironmentState(float daylight, float weatherIntensity, float dayCycleTime);
 
 private:
   struct QueueFamilyIndices {
@@ -131,6 +132,9 @@ private:
     VkBuffer indexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory indexMemory = VK_NULL_HANDLE;
     uint32_t indexCount = 0;
+    int chunkX = 0;
+    int chunkZ = 0;
+    bool alwaysVisible = false;
   };
   bool uploadChunkGpuMesh(const WorldChunkMeshUpload& upload, ChunkGpuMesh& outMesh);
   void destroyChunkGpuMesh(ChunkGpuMesh& mesh);
@@ -195,6 +199,9 @@ private:
   glm::mat4 cameraProj{1.0f};
   glm::vec3 cameraWorldPos{0.0f};
   bool cameraUnderwater = false;
+  float environmentDaylight = 1.0f;
+  float environmentWeatherIntensity = 0.0f;
+  float environmentDayCycleTime = 0.32f;
 
   std::vector<VkSemaphore> imageAvailableSemaphores;
   std::vector<VkSemaphore> renderFinishedSemaphores;

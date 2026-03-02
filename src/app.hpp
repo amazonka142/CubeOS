@@ -78,6 +78,9 @@ private:
   void mainLoop();
   void processInput(float deltaTime);
   void updatePlayer(float deltaTime);
+  void updateEnvironment(float deltaTime);
+  void resetEnvironmentForSession();
+  float computeDaylightFactor() const;
   void spawnDroppedItem(uint8_t type, const glm::ivec3& blockPos);
   void updateDroppedItems(float deltaTime);
   void syncDroppedItemMesh(bool force);
@@ -169,6 +172,12 @@ private:
   double lastWorldChunkUploadTime = 0.0;
   float waterSimAccumulator = 0.0f;
   float waterSimBoostTimer = 0.0f;
+  float dayCycleTime = 0.32f;
+  float dayLightFactor = 1.0f;
+  float weatherIntensity = 0.0f;
+  float weatherTargetIntensity = 0.0f;
+  float weatherDecisionTimer = 45.0f;
+  uint32_t weatherRngState = 0xA341316Cu;
   ScreenState screenState = ScreenState::kMainMenu;
   ScreenState settingsReturnState = ScreenState::kMainMenu;
   int mainMenuSelection = 0;
@@ -205,6 +214,13 @@ private:
   float fpsSampleAccum = 0.0f;
   int fpsSampleFrames = 0;
   int fpsDisplayValue = 0;
+  bool debugWorldgenOverlay = false;
+  int debugWorldgenOverlayMode = 0;
+  int debugDensitySliceOffset = 0;
+  bool debugToggleDown = false;
+  bool debugModeDown = false;
+  bool debugSliceUpDown = false;
+  bool debugSliceDownDown = false;
 
   float yaw = -90.0f;
   float pitch = 0.0f;

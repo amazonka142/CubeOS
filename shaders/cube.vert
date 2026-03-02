@@ -5,6 +5,8 @@ layout(binding = 0) uniform UBO {
   mat4 view;
   mat4 proj;
   vec4 params;
+  vec4 cameraData;
+  vec4 weatherData;
 } ubo;
 
 layout(location = 0) in vec3 inPos;

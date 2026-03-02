@@ -12,6 +12,7 @@ layout(binding = 0) uniform UBO {
   mat4 proj;
   vec4 params;
   vec4 cameraData;
+  vec4 weatherData;
 } ubo;
 
 layout(binding = 1) uniform sampler2D texSampler;
@@ -45,7 +46,20 @@ float fbm(vec2 p) {
   return sum;
 }
 
+float starField(vec2 domeUv, float time) {
+  vec2 starUv = domeUv * 128.0;
+  vec2 cell = floor(starUv);
+  float rnd = hash12(cell);
+  float star = step(0.9968, rnd);
+  float twinkle = 0.55 + 0.45 * sin(time * 3.4 + rnd * 71.0);
+  return star * twinkle;
+}
+
 void main() {
+  float daylight = clamp(ubo.params.w, 0.0, 1.0);
+  float weather = clamp(ubo.weatherData.x, 0.0, 1.0);
+  float cloudCover = clamp(max(ubo.weatherData.y, weather), 0.0, 1.0);
+
   if (vColor.g < -0.5 && vColor.r >= 0.0) {
     // Texture-free UI primitive path (text glyphs/markers).
     float green = clamp(-vColor.g - 1.0, 0.0, 1.0);
@@ -75,12 +89,37 @@ void main() {
 
     vec2 domeUv = worldDir.xz / max(worldDir.y, 0.08);
     vec2 wind = vec2(t * 0.020, t * 0.007);
-    float cloud = fbm(domeUv * 1.9 + wind);
-    float puffs = smoothstep(0.56, 0.72, cloud);
+    float cloud = fbm(domeUv * (1.7 + cloudCover * 0.6) + wind);
+    float threshold = mix(0.70, 0.50, cloudCover);
+    float puffs = smoothstep(threshold - 0.09, threshold + 0.09, cloud);
     float horizonFade = smoothstep(0.05, 0.22, worldDir.y);
-    float alpha = puffs * horizonFade * 0.46;
+    float cloudAlpha = puffs * horizonFade * mix(0.28, 0.78, cloudCover);
+    vec3 cloudColor = mix(vec3(0.15, 0.18, 0.28), vec3(0.95, 0.97, 1.0), daylight);
+    cloudColor = mix(cloudColor, vec3(0.46, 0.48, 0.53), weather * 0.72);
 
-    outColor = vec4(vec3(0.95, 0.97, 1.0), alpha);
+    float cycle = fract(ubo.weatherData.z);
+    float sunPhase = sin((cycle - 0.25) * 6.28318530718);
+    float twilight = smoothstep(0.20, 0.95, 1.0 - abs(sunPhase));
+    twilight *= (1.0 - smoothstep(0.15, 0.70, worldDir.y));
+    twilight *= (1.0 - weather * 0.65);
+    float twilightAlpha = twilight * 0.36;
+
+    float stars = starField(domeUv + vec2(cycle * 2.3, 0.0), t);
+    stars *= smoothstep(0.14, 0.74, worldDir.y);
+    stars *= pow(1.0 - daylight, 1.8);
+    stars *= (1.0 - cloudCover * 0.55) * (1.0 - weather);
+    float starAlpha = stars * 0.72;
+
+    float overlayAlpha = clamp(cloudAlpha + twilightAlpha + starAlpha, 0.0, 0.96);
+    vec3 overlayColor = vec3(0.0);
+    if (overlayAlpha > 0.0001) {
+      overlayColor += cloudColor * cloudAlpha;
+      overlayColor += vec3(0.96, 0.49, 0.19) * twilightAlpha;
+      overlayColor += vec3(0.86, 0.90, 1.0) * starAlpha;
+      overlayColor /= overlayAlpha;
+    }
+
+    outColor = vec4(overlayColor, overlayAlpha);
     return;
   }
 
@@ -115,6 +154,25 @@ void main() {
     }
   } else {
     outColor = vec4(vColor, 1.0) * texColor;
+  }
+
+  if (vUiPass < 0.5) {
+    float ambient = mix(0.24, 1.0, daylight);
+    ambient *= mix(1.0, 0.78, weather);
+    if (looksLikeWater) {
+      ambient = mix(ambient, min(1.12, ambient + 0.10), 0.45);
+    }
+    outColor.rgb *= ambient;
+  }
+
+  if (ubo.cameraData.w <= 0.5 && vUiPass < 0.5) {
+    float distToCamera = distance(vWorldPos, ubo.cameraData.xyz);
+    float rainFog = (1.0 - exp(-max(0.0, distToCamera - 5.0) * 0.06)) * weather;
+    float nightFog = (1.0 - exp(-max(0.0, distToCamera - 12.0) * 0.025)) * (1.0 - daylight) * 0.45;
+    float fog = clamp(rainFog + nightFog, 0.0, 0.82);
+    vec3 fogColor = mix(vec3(0.06, 0.08, 0.14), vec3(0.67, 0.75, 0.85), daylight);
+    fogColor = mix(fogColor, vec3(0.39, 0.42, 0.47), weather * 0.75);
+    outColor.rgb = mix(outColor.rgb, fogColor, fog);
   }
 
   if (ubo.cameraData.w > 0.5 && vUiPass < 0.5) {

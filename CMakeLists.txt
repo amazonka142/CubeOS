@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 # CMake 4.x dropped compatibility with <3.5. Keep deps like older GLM working.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
-set(CUBEOS_VERSION "0.2.0")
+set(CUBEOS_VERSION "0.2.1")
 set(CUBEOS_MACOS_APP_NAME "CubeOS v${CUBEOS_VERSION} Beta")
 
 project(cubeos_voxel VERSION ${CUBEOS_VERSION} LANGUAGES C CXX)
@@ -14,6 +14,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(CUBEOS_ENABLE_VALIDATION "Enable Vulkan validation layers" OFF)
 option(CUBEOS_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(CUBEOS_BUILD_SHADERS "Compile GLSL shaders during build" ON)
+option(CUBEOS_BUILD_WORLDGEN_REGRESSION "Build worldgen regression suite" ON)
 
 include(FetchContent)
 
@@ -170,6 +171,24 @@ if (APPLE)
       -DVULKAN_LIB="${CUBEOS_MACOS_VULKAN_LIB}"
       -DMOLTENVK_LIB="${CUBEOS_MACOS_MOLTENVK_LIB}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BundleMacOS.cmake"
+  )
+endif()
+
+if (CUBEOS_BUILD_WORLDGEN_REGRESSION)
+  enable_testing()
+
+  add_executable(cubeos_worldgen_regression
+    src/worldgen_regression.cpp
+    src/world.cpp
+  )
+  target_include_directories(cubeos_worldgen_regression PRIVATE src)
+  target_include_directories(cubeos_worldgen_regression PRIVATE ${CUBEOS_VULKAN_INCLUDE_DIR})
+  target_link_libraries(cubeos_worldgen_regression PRIVATE volk::volk glm::glm Threads::Threads)
+  target_compile_definitions(cubeos_worldgen_regression PRIVATE GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
+
+  add_test(
+    NAME cubeos_worldgen_regression
+    COMMAND cubeos_worldgen_regression
   )
 endif()
 

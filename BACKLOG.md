@@ -130,21 +130,25 @@
   - Scope: move biome selection to full climate vector workflow (temperature/humidity/continentalness/erosion/depth/weirdness) with stable parameter ranges.
   - Depends on: `CUBE-223`, `CUBE-224`.
   - Acceptance: biome transitions are coherent and deterministic across chunk borders.
+  - Status: `Done` (full climate-vector sampling with deterministic biome/climate maps across chunk borders).
 
 - `CUBE-229` Density-router terrain shaping.
   - Scope: replace simplified height blending with router-style density composition (continents, peaks/valleys, erosion, detail).
   - Depends on: `CUBE-228`.
   - Acceptance: terrain produces recognizable plains, plateaus, ridges, and mountain chains without water-world bias.
+  - Status: `Done` (router-style target height + density composition now drives terrain macro shape).
 
 - `CUBE-240` Aquifer and underground fluid rewrite.
   - Scope: local water table model and deep fluid thresholds tuned to avoid surface flooding while preserving cave lakes.
   - Depends on: `CUBE-229`.
   - Acceptance: caves contain aquifer water pockets; surface remains predominantly land where climate suggests land.
+  - Status: `Done` (aquifer level sampling now controls underground fluid fill with land-preserving clamps).
 
 - `CUBE-241` Region-anchored structure starts/references.
   - Scope: region-based deterministic structure placement (village/mineshaft/temple scaffolding) with chunk intersection placement.
   - Depends on: `CUBE-228`.
   - Acceptance: structures spawn predictably per seed and stitch correctly across chunk boundaries.
+  - Status: `Done` (structure starts are region-anchored and deterministic, with cross-chunk placement consistency).
 
 - `CUBE-242` In-game pause menu flow.
   - Scope: `Esc` opens pause menu with `Continue`, `Settings`, `Main Menu` instead of immediate menu exit.
@@ -163,32 +167,38 @@
   - Scope: define piece pools, placement constraints, and biome gating for structure variants.
   - Depends on: `CUBE-241`.
   - Acceptance: same structure type can appear in multiple valid layouts.
+  - Status: `Done` (piece variants and biome-aware assembly rules produce multiple valid layouts per structure family).
 
 - `CUBE-245` Carver event model parity.
   - Scope: deterministic worm/canyon event generation over regions with better continuity and thickness profiles.
   - Depends on: `CUBE-229`.
   - Acceptance: carvers travel naturally across multiple chunks without abrupt cutoff.
+  - Status: `Done` (regional deterministic carver events now drive cross-chunk worm/canyon continuity).
 
 - `CUBE-246` Surface rule graph.
   - Scope: configurable layered surface rules (coastline sand/gravel, snowline, mountain stone caps, desert depth rules).
   - Depends on: `CUBE-228`, `CUBE-229`.
   - Acceptance: biome-appropriate top/filler composition with less manual branching.
+  - Status: `Done` (surface rule node graph now applies layered coastline/arid/mountain/snowcap/default composition).
 
 - `CUBE-247` Feature pipeline enrichment.
   - Scope: per-biome feature sets for trees/vegetation/ores with weighted attempts and height logic closer to vanilla behavior.
   - Depends on: `CUBE-228`, `CUBE-246`.
   - Acceptance: each biome feels distinct in decoration and resource profile.
+  - Status: `Done` (feature stage now uses biome/climate-weighted placement for trees, vegetation, ores, and shoreline detail).
 
 ### P3
 - `CUBE-248` Worldgen debug overlays.
   - Scope: visual overlays for chunk borders, biome IDs, surface height, density slices, and aquifer level.
   - Depends on: `CUBE-228`..`CUBE-247`.
   - Acceptance: debugging tools can explain terrain outcomes in problematic seeds.
+  - Status: `Done` (F3/F4 debug overlay shows biome/climate, chunk/local border metrics, surface/aquifer, and density slices).
 
 - `CUBE-249` Seed parity and tuning pass.
   - Scope: run deterministic seed suite and tune thresholds toward Minecraft-like macro results.
   - Depends on: `CUBE-228`..`CUBE-248`.
   - Acceptance: no major regressions in spawn quality, terrain diversity, or structure distribution.
+  - Status: `Done` (deterministic worldgen regression suite added with seed metrics and threshold gates).
 
 ## v0.2.3 Issues (Coins + Upgrades)
 

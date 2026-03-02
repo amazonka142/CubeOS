@@ -154,6 +154,10 @@ public:
   bool inBounds(int x, int y, int z) const;
   uint8_t getBlock(int x, int y, int z) const;
   void setBlock(int x, int y, int z, uint8_t type);
+  bool sampleBiomeClimateAt(int x, int z, uint8_t& outBiome, BiomeClimateSample& outClimate) const;
+  int sampleSurfaceHeightAt(int x, int z) const;
+  float sampleDensityAt(int x, int y, int z) const;
+  int sampleAquiferLevelAt(int x, int z) const;
   void setSeed(int newSeed) { seed = newSeed; }
   int getSeed() const { return seed; }
   void setGenerationSettings(const WorldGenSettings& settings);
@@ -173,7 +177,7 @@ private:
   int sectionIndexForY(int y) const;
   Chunk* findChunk(int cx, int cz);
   const Chunk* findChunk(int cx, int cz) const;
-  Chunk& ensureChunk(int cx, int cz);
+  Chunk& ensureChunk(int cx, int cz, ChunkGenStatus targetStatus = ChunkGenStatus::kFull);
   void generateChunk(Chunk& chunk, ChunkGenStatus targetStatus = ChunkGenStatus::kFull);
   bool buildChunkSectionMeshNow(Chunk& chunk, int sectionY);
   void buildChunkMesh(Chunk& chunk);
@@ -259,6 +263,7 @@ private:
     bool modified = false;
     bool generating = false;
     uint32_t generationEpoch = 0;
+    ChunkGenStatus generationTargetStatus = ChunkGenStatus::kEmpty;
     std::array<uint8_t, kChunkColumnCount> biomeMap{};
     std::array<BiomeClimateSample, kChunkColumnCount> climateMap{};
     ChunkGenStatus generatedStatus = ChunkGenStatus::kEmpty;

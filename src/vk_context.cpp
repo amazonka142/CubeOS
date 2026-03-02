@@ -5,6 +5,7 @@
 #include <array>
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <cstring>
 #include <cstdlib>
 #include <fstream>
@@ -36,6 +37,12 @@
 namespace {
 
 constexpr int kMaxFramesInFlight = 2;
+constexpr int kChunkSizeBlocks = 16;
+constexpr int kSectionKeyCoordBits = 30;
+constexpr int64_t kSectionKeyCoordBias = static_cast<int64_t>(1) << (kSectionKeyCoordBits - 1);
+constexpr uint64_t kSectionKeyCoordMask = (static_cast<uint64_t>(1) << kSectionKeyCoordBits) - 1u;
+constexpr float kChunkDrawDistanceBlocks = 220.0f;
+constexpr float kChunkDrawDistanceBlocksSq = kChunkDrawDistanceBlocks * kChunkDrawDistanceBlocks;
 
 #ifdef CUBEOS_ENABLE_VALIDATION
 constexpr bool kEnableValidationLayers = true;
@@ -60,9 +67,25 @@ struct UniformBufferObject {
   glm::mat4 proj;
   glm::vec4 params{0.0f};
   glm::vec4 cameraData{0.0f};
+  glm::vec4 weatherData{0.0f};
 };
 
 const auto kStartTime = std::chrono::high_resolution_clock::now();
+
+bool unpackSectionKey(uint64_t key, int& outCx, int& outCz, int& outSectionY) {
+  uint64_t ux = (key >> 34) & kSectionKeyCoordMask;
+  uint64_t uz = (key >> 4) & kSectionKeyCoordMask;
+  uint64_t us = key & 0xFu;
+  outCx = static_cast<int>(static_cast<int64_t>(ux) - kSectionKeyCoordBias);
+  outCz = static_cast<int>(static_cast<int64_t>(uz) - kSectionKeyCoordBias);
+  outSectionY = static_cast<int>(us);
+  return outSectionY >= 0 && outSectionY < 16;
+}
+
+bool isSpecialWorldMeshKey(uint64_t key) {
+  // Reserve the top key range for non-chunk meshes (dropped items, debug overlays, etc).
+  return key >= (std::numeric_limits<uint64_t>::max() - 16ull);
+}
 
 void checkVk(VkResult result, const char* message) {
   if (result != VK_SUCCESS) {
@@ -506,6 +529,15 @@ void VulkanContext::updateMesh(const std::vector<Vertex>& vertices,
 }
 
 bool VulkanContext::uploadChunkGpuMesh(const WorldChunkMeshUpload& upload, ChunkGpuMesh& outMesh) {
+  outMesh.chunkX = 0;
+  outMesh.chunkZ = 0;
+  outMesh.alwaysVisible = isSpecialWorldMeshKey(upload.key);
+  if (!outMesh.alwaysVisible) {
+    int sectionY = 0;
+    unpackSectionKey(upload.key, outMesh.chunkX, outMesh.chunkZ, sectionY);
+    (void)sectionY;
+  }
+
   if (upload.vertices.empty() || upload.indices.empty()) {
     outMesh.indexCount = 0;
     return true;
@@ -613,6 +645,9 @@ void VulkanContext::setWorldChunkMeshes(const std::vector<WorldChunkMeshUpload>&
   for (const WorldChunkMeshUpload& upload : uploads) {
     ChunkGpuMesh mesh{};
     uploadChunkGpuMesh(upload, mesh);
+    if (mesh.indexCount == 0) {
+      continue;
+    }
     worldChunkMeshes[upload.key] = mesh;
     worldChunkDrawOrderIndex[upload.key] = worldChunkDrawOrder.size();
     worldChunkDrawOrder.push_back(upload.key);
@@ -665,6 +700,9 @@ void VulkanContext::updateWorldChunkMeshes(const std::vector<WorldChunkMeshUploa
 
     ChunkGpuMesh mesh{};
     uploadChunkGpuMesh(upload, mesh);
+    if (mesh.indexCount == 0) {
+      continue;
+    }
     worldChunkMeshes[upload.key] = mesh;
     worldChunkDrawOrderIndex[upload.key] = worldChunkDrawOrder.size();
     worldChunkDrawOrder.push_back(upload.key);
@@ -683,6 +721,16 @@ void VulkanContext::setCameraWorldState(const glm::vec3& eyePosition, bool under
   cameraUnderwater = underwater;
 }
 
+void VulkanContext::setEnvironmentState(float daylight, float weatherIntensity, float dayCycleTime) {
+  environmentDaylight = std::clamp(daylight, 0.0f, 1.0f);
+  environmentWeatherIntensity = std::clamp(weatherIntensity, 0.0f, 1.0f);
+  float wrappedDayCycle = dayCycleTime - std::floor(dayCycleTime);
+  if (wrappedDayCycle < 0.0f) {
+    wrappedDayCycle += 1.0f;
+  }
+  environmentDayCycleTime = wrappedDayCycle;
+}
+
 void VulkanContext::createInstance() {
   if (kEnableValidationLayers && !checkValidationLayerSupport()) {
     throw std::runtime_error("Validation layers requested, but not available.");
@@ -691,9 +739,9 @@ void VulkanContext::createInstance() {
   VkApplicationInfo appInfo{};
   appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   appInfo.pApplicationName = "CubeOS Voxel";
-  appInfo.applicationVersion = VK_MAKE_VERSION(0, 2, 0);
+  appInfo.applicationVersion = VK_MAKE_VERSION(0, 2, 1);
   appInfo.pEngineName = "CubeOS";
-  appInfo.engineVersion = VK_MAKE_VERSION(0, 2, 0);
+  appInfo.engineVersion = VK_MAKE_VERSION(0, 2, 1);
   appInfo.apiVersion = VK_API_VERSION_1_2;
 
   VkInstanceCreateInfo createInfo{};
@@ -1736,8 +1784,25 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
   checkVk(vkBeginCommandBuffer(commandBuffer, &beginInfo),
           "Failed to begin recording command buffer.");
 
+  float daylight = std::clamp(environmentDaylight, 0.0f, 1.0f);
+  float weather = std::clamp(environmentWeatherIntensity, 0.0f, 1.0f);
+  float cycle = environmentDayCycleTime - std::floor(environmentDayCycleTime);
+  if (cycle < 0.0f) {
+    cycle += 1.0f;
+  }
+  glm::vec3 clearNight = glm::vec3(0.02f, 0.03f, 0.09f);
+  glm::vec3 clearDay = glm::vec3(0.52f, 0.72f, 0.97f);
+  glm::vec3 clearStorm = glm::vec3(0.18f, 0.22f, 0.30f);
+  glm::vec3 clearColor = glm::mix(clearNight, clearDay, daylight);
+  float sunPhase = std::sin((cycle - 0.25f) * 6.28318530718f);
+  float twilight = std::clamp(1.0f - std::abs(sunPhase), 0.0f, 1.0f);
+  twilight = twilight * twilight * (3.0f - 2.0f * twilight);
+  twilight *= (1.0f - weather * 0.6f);
+  clearColor = glm::mix(clearColor, glm::vec3(0.84f, 0.45f, 0.22f), twilight * 0.25f);
+  clearColor = glm::mix(clearColor, clearStorm, weather * 0.72f);
+
   std::array<VkClearValue, 2> clearValues{};
-  clearValues[0].color = {{0.10f, 0.12f, 0.18f, 1.0f}};
+  clearValues[0].color = {{clearColor.r, clearColor.g, clearColor.b, 1.0f}};
   clearValues[1].depthStencil = {1.0f, 0};
 
   VkRenderPassBeginInfo renderPassInfo{};
@@ -1807,6 +1872,16 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
       if (mesh.vertexBuffer == VK_NULL_HANDLE || mesh.indexBuffer == VK_NULL_HANDLE || mesh.indexCount == 0) {
         continue;
       }
+      if (!mesh.alwaysVisible) {
+        float chunkCenterX = static_cast<float>(mesh.chunkX * kChunkSizeBlocks + kChunkSizeBlocks / 2);
+        float chunkCenterZ = static_cast<float>(mesh.chunkZ * kChunkSizeBlocks + kChunkSizeBlocks / 2);
+        float dx = chunkCenterX - cameraWorldPos.x;
+        float dz = chunkCenterZ - cameraWorldPos.z;
+        float distSq = dx * dx + dz * dz;
+        if (distSq > kChunkDrawDistanceBlocksSq) {
+          continue;
+        }
+      }
       vkCmdBindVertexBuffers(commandBuffer, 0, 1, &mesh.vertexBuffer, &offset);
       vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
       vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
@@ -1844,6 +1919,12 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
 void VulkanContext::updateUniformBuffer(uint32_t imageIndex) {
   auto currentTime = std::chrono::high_resolution_clock::now();
   float time = std::chrono::duration<float>(currentTime - kStartTime).count();
+  float daylight = std::clamp(environmentDaylight, 0.0f, 1.0f);
+  float weather = std::clamp(environmentWeatherIntensity, 0.0f, 1.0f);
+  float dayCycle = environmentDayCycleTime - std::floor(environmentDayCycleTime);
+  if (dayCycle < 0.0f) {
+    dayCycle += 1.0f;
+  }
 
   UniformBufferObject ubo{};
   ubo.model = glm::mat4(1.0f);
@@ -1852,8 +1933,12 @@ void VulkanContext::updateUniformBuffer(uint32_t imageIndex) {
   ubo.params = glm::vec4(time,
                          std::max(1.0f, static_cast<float>(swapchainExtent.width)),
                          std::max(1.0f, static_cast<float>(swapchainExtent.height)),
-                         0.0f);
+                         daylight);
   ubo.cameraData = glm::vec4(cameraWorldPos, cameraUnderwater ? 1.0f : 0.0f);
+  ubo.weatherData = glm::vec4(weather,
+                              std::clamp(0.22f + weather * 0.78f, 0.0f, 1.0f),
+                              dayCycle,
+                              0.0f);
 
   std::memcpy(uniformBuffersMapped[imageIndex], &ubo, sizeof(ubo));
 }

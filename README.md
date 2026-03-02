@@ -18,21 +18,29 @@ CubeOS is about exploring and shaping a procedural block world:
 Current scope is core sandbox gameplay and engine foundations, not a content-
 complete survival game yet.
 
-## Current Feature Set (v0.2.0)
+## Current Feature Set (v0.2.1)
 
 - Procedural chunked world generation.
+- Multi-noise climate sampling (`temperature/humidity/continentalness/erosion/depth/weirdness`) with deterministic biome mapping.
+- Router-style terrain shaping with stronger continents/peaks/valleys behavior.
+- Aquifer-driven underground fluid placement tuned to avoid surface flood bias.
+- Region-anchored deterministic structure placement with biome-aware variants.
+- Layered surface rules and biome/climate-weighted feature placement.
 - Runtime chunk streaming around player position.
 - Asynchronous chunk generation and mesh rebuild workers.
 - Voxel meshing with block atlas texturing.
 - Basic water and falling-sand simulation.
 - First-person movement, collision, and block raycast interaction.
 - Main menu, world creation, world selection, pause, and settings screens.
+- Worldgen debug overlay (`F3`/`F4` + density slice controls).
+- Deterministic worldgen regression suite target (`cubeos_worldgen_regression`).
+- CPU-load throttling for menus/unfocused state and conservative worker budgets.
 - Per-world saves and basic settings persistence.
 
 ## Known Limitation
 
-- CPU usage can be higher than desired in some gameplay scenarios on both
-  macOS and Windows. Optimization work is planned for upcoming updates.
+- CPU usage is reduced compared to earlier builds, but can still be higher than
+  desired in heavy world-streaming scenarios on macOS and Windows.
 
 ## Controls
 
@@ -45,6 +53,9 @@ complete survival game yet.
 - `1-9`: select hotbar slot
 - `Tab`: open/close inventory
 - `Esc`: close inventory or open pause menu
+- `F3`: toggle worldgen debug overlay
+- `F4`: cycle debug overlay detail mode
+- `PageUp` / `PageDown`: move density slice in debug overlay
 
 ## Build
 
@@ -88,6 +99,22 @@ cmake --preset release
 cmake --build --preset release
 ```
 
+### Worldgen Regression Suite
+
+The project includes a deterministic worldgen regression runner:
+
+```bash
+cmake -S . -B build
+cmake --build build --target cubeos_worldgen_regression
+ctest --test-dir build -R cubeos_worldgen_regression --output-on-failure
+```
+
+Disable building this suite with:
+
+```bash
+cmake -S . -B build -DCUBEOS_BUILD_WORLDGEN_REGRESSION=OFF
+```
+
 ## Run
 
 - Windows binary:
@@ -95,7 +122,7 @@ cmake --build --preset release
 - macOS binary:
   - `build/cubeos_voxel`
 - macOS app bundle (from this repo build setup):
-  - `build/CubeOS v0.2.0 Beta.app`
+  - `build/CubeOS v0.2.1 Beta.app`
 
 ## Save Data Layout
 

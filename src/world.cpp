@@ -1467,6 +1467,233 @@ enum class DebugBiomeId : uint8_t {
   kMountains = 5
 };
 
+constexpr int kStageSeaLevel = 32;
+constexpr int kCarverRegionSizeChunks = 8;
+constexpr int kStructureRegionSizeChunks = 32;
+
+struct ClimateAndBiomeSample {
+  uint8_t biome = static_cast<uint8_t>(DebugBiomeId::kPlains);
+  BiomeClimateSample climate{};
+};
+
+ClimateAndBiomeSample sampleClimateAndBiomeAt(int worldX,
+                                              int worldZ,
+                                              int seed,
+                                              const WorldGenSettings& settings) {
+  if (settings.preset == WorldPreset::kClassicFlat) {
+    ClimateAndBiomeSample flat{};
+    flat.biome = static_cast<uint8_t>(DebugBiomeId::kPlains);
+    flat.climate = {
+      0.58f, // temperature
+      0.52f, // humidity
+      0.62f, // continentalness
+      0.50f, // erosion
+      0.50f, // depth
+      0.50f  // weirdness
+    };
+    return flat;
+  }
+
+  const float seedF = static_cast<float>(seed);
+  float warpX = glm::perlin(glm::vec2(
+    (static_cast<float>(worldX) + seedF * 101.0f) * 0.0016f,
+    (static_cast<float>(worldZ) - seedF * 89.0f) * 0.0016f));
+  float warpZ = glm::perlin(glm::vec2(
+    (static_cast<float>(worldX) - seedF * 37.0f) * 0.0016f,
+    (static_cast<float>(worldZ) + seedF * 53.0f) * 0.0016f));
+  float wx = static_cast<float>(worldX) + warpX * 24.0f;
+  float wz = static_cast<float>(worldZ) + warpZ * 24.0f;
+
+  float temperature = 0.5f + 0.5f * glm::perlin(glm::vec2(
+    (wx + seedF * 17.0f) * 0.00095f,
+    (wz - seedF * 11.0f) * 0.00095f));
+  float humidity = 0.5f + 0.5f * glm::perlin(glm::vec2(
+    (wx - seedF * 7.0f) * 0.00105f,
+    (wz + seedF * 13.0f) * 0.00105f));
+  float continentalness = 0.5f + 0.5f * glm::perlin(glm::vec2(
+    (wx + static_cast<float>(seed) * 11.0f) * 0.00045f,
+    (wz - static_cast<float>(seed) * 13.0f) * 0.00045f));
+  float dxFromOrigin = static_cast<float>(worldX);
+  float dzFromOrigin = static_cast<float>(worldZ);
+  float distFromOrigin = std::sqrt(dxFromOrigin * dxFromOrigin + dzFromOrigin * dzFromOrigin);
+  float spawnLandBias = smooth01(1.0f - distFromOrigin / 768.0f) * 0.24f;
+  continentalness = std::clamp(continentalness + 0.10f + spawnLandBias, 0.0f, 1.0f);
+  float erosion = 0.5f + 0.5f * glm::perlin(glm::vec2(
+    (wx - seedF * 37.0f) * 0.00120f,
+    (wz + seedF * 23.0f) * 0.00120f));
+  float weirdness = 0.5f + 0.5f * glm::perlin(glm::vec2(
+    (wx + seedF * 61.0f) * 0.00185f,
+    (wz - seedF * 53.0f) * 0.00185f));
+  float depth = 0.5f + 0.5f * glm::perlin(glm::vec2(
+    (wx - seedF * 29.0f) * 0.00135f,
+    (wz + seedF * 31.0f) * 0.00135f));
+
+  DebugBiomeId biome = DebugBiomeId::kPlains;
+  if (continentalness < 0.18f) {
+    biome = DebugBiomeId::kOcean;
+  } else if (continentalness < 0.24f) {
+    biome = DebugBiomeId::kBeach;
+  } else if (temperature > 0.72f && humidity < 0.34f) {
+    biome = DebugBiomeId::kDesert;
+  } else if (weirdness > 0.67f && continentalness > 0.56f) {
+    biome = DebugBiomeId::kMountains;
+  } else if (humidity > 0.58f) {
+    biome = DebugBiomeId::kForest;
+  }
+
+  ClimateAndBiomeSample out{};
+  out.biome = static_cast<uint8_t>(biome);
+  out.climate = {
+    temperature,
+    humidity,
+    continentalness,
+    erosion,
+    depth,
+    weirdness
+  };
+  return out;
+}
+
+float computeRouterTargetHeight(int worldX,
+                                int worldZ,
+                                int seed,
+                                uint8_t biomeId,
+                                const BiomeClimateSample& climate,
+                                int minY,
+                                int maxY) {
+  const float seedF = static_cast<float>(seed);
+  float broad = glm::perlin(glm::vec2(
+    (static_cast<float>(worldX) + seedF * 23.0f) * 0.0017f,
+    (static_cast<float>(worldZ) - seedF * 19.0f) * 0.0017f));
+  float detail = fbmNoise(static_cast<float>(worldX), static_cast<float>(worldZ), seed);
+  float ridge = 1.0f - std::abs(glm::perlin(glm::vec2(
+    (static_cast<float>(worldX) - seedF * 73.0f) * 0.0023f,
+    (static_cast<float>(worldZ) + seedF * 67.0f) * 0.0023f)));
+  float peaks = std::max(0.0f, climate.weirdness - 0.50f);
+  float valleys = std::max(0.0f, 0.44f - climate.weirdness);
+  float erosionMask = 1.0f - climate.erosion;
+  float plateaus = smooth01((0.62f - climate.erosion) / 0.38f);
+  float depthRelief = (climate.depth - 0.5f) * 12.0f;
+
+  float targetHeight = static_cast<float>(kStageSeaLevel) - 9.0f +
+                       climate.continentalness * 54.0f +
+                       erosionMask * 8.0f +
+                       broad * 6.0f +
+                       detail * 3.5f +
+                       depthRelief;
+  targetHeight += peaks * peaks * (20.0f + 30.0f * plateaus);
+  targetHeight -= valleys * (12.0f + climate.erosion * 8.0f);
+  targetHeight += ridge * (3.0f + 8.0f * plateaus);
+
+  if (biomeId == static_cast<uint8_t>(DebugBiomeId::kOcean)) {
+    targetHeight = static_cast<float>(kStageSeaLevel) - 16.0f + broad * 3.5f + detail * 2.2f;
+  } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kBeach)) {
+    targetHeight = static_cast<float>(kStageSeaLevel) - 3.0f + broad * 2.2f;
+  } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kDesert)) {
+    targetHeight += 2.0f + std::max(0.0f, climate.depth - 0.55f) * 10.0f;
+  } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
+    targetHeight += 9.0f + peaks * peaks * 12.0f;
+  }
+
+  int heightClampMin = minY + 4;
+  int heightClampMax = maxY - 4;
+  if (heightClampMax < heightClampMin) {
+    heightClampMin = minY;
+    heightClampMax = maxY;
+  }
+  return std::clamp(targetHeight,
+                    static_cast<float>(heightClampMin),
+                    static_cast<float>(heightClampMax));
+}
+
+int computeAquiferLevelAt(int worldX,
+                          int worldZ,
+                          int seed,
+                          const BiomeClimateSample& climate,
+                          int minY,
+                          int maxY) {
+  const float seedF = static_cast<float>(seed);
+  float aqMacro = glm::perlin(glm::vec2(
+    (static_cast<float>(worldX) + seedF * 61.0f) * 0.0105f,
+    (static_cast<float>(worldZ) - seedF * 59.0f) * 0.0105f));
+  float aqLocal = glm::perlin(glm::vec2(
+    (static_cast<float>(worldX) - seedF * 17.0f) * 0.024f,
+    (static_cast<float>(worldZ) + seedF * 23.0f) * 0.024f));
+  float continentalLift = smooth01((climate.continentalness - 0.40f) / 0.42f);
+  float aquiferBase = static_cast<float>(kStageSeaLevel) - 5.0f +
+                      aqMacro * 8.0f +
+                      aqLocal * 3.0f -
+                      continentalLift * (5.0f + climate.depth * 6.0f);
+
+  if (climate.continentalness < 0.24f) {
+    aquiferBase = std::max(aquiferBase, static_cast<float>(kStageSeaLevel) - 1.0f);
+  } else {
+    aquiferBase = std::min(aquiferBase, static_cast<float>(kStageSeaLevel) - 2.0f);
+  }
+
+  int aquiferClampMin = minY + 2;
+  int aquiferClampMax = maxY - 2;
+  if (aquiferClampMax < aquiferClampMin) {
+    aquiferClampMin = minY;
+    aquiferClampMax = maxY;
+  }
+  int aquiferLevel = static_cast<int>(std::round(aquiferBase));
+  return std::clamp(aquiferLevel, aquiferClampMin, aquiferClampMax);
+}
+
+float sampleDensityRouterAt(int worldX,
+                            int y,
+                            int worldZ,
+                            int seed,
+                            const WorldGenSettings& settings,
+                            uint8_t biomeId,
+                            const BiomeClimateSample& climate,
+                            float targetHeight,
+                            int minY) {
+  const float seedF = static_cast<float>(seed);
+  float vertical = (targetHeight - static_cast<float>(y)) * 0.11f;
+  float macro3d = glm::perlin(glm::vec3(
+    (static_cast<float>(worldX) + seedF * 31.0f) * 0.041f,
+    (static_cast<float>(y) - seedF * 17.0f) * 0.048f,
+    (static_cast<float>(worldZ) - seedF * 29.0f) * 0.041f));
+  float micro3d = glm::perlin(glm::vec3(
+    (static_cast<float>(worldX) - seedF * 7.0f) * 0.089f,
+    (static_cast<float>(y) + seedF * 13.0f) * 0.098f,
+    (static_cast<float>(worldZ) + seedF * 11.0f) * 0.089f));
+  float ridge3d = 1.0f - std::abs(glm::perlin(glm::vec3(
+    (static_cast<float>(worldX) + seedF * 47.0f) * 0.027f,
+    (static_cast<float>(y) - seedF * 53.0f) * 0.031f,
+    (static_cast<float>(worldZ) - seedF * 43.0f) * 0.027f)));
+  float cheese = std::abs(glm::perlin(glm::vec3(
+    (static_cast<float>(worldX) + seedF * 41.0f) * 0.064f,
+    (static_cast<float>(y) - seedF * 37.0f) * 0.066f,
+    (static_cast<float>(worldZ) - seedF * 43.0f) * 0.064f)));
+  float spaghetti = 1.0f - std::abs(glm::perlin(glm::vec3(
+    (static_cast<float>(worldX) - seedF * 13.0f) * 0.023f,
+    (static_cast<float>(y) + seedF * 29.0f) * 0.031f,
+    (static_cast<float>(worldZ) + seedF * 17.0f) * 0.023f)));
+
+  float caveSignal = std::max(1.0f - cheese * 1.28f, spaghetti * 0.84f);
+  float caveThreshold = std::clamp(0.79f - settings.caveDensity * 0.10f, 0.46f, 0.79f);
+  float rawCaveCut = caveSignal > caveThreshold
+    ? (caveSignal - caveThreshold) * 15.5f
+    : 0.0f;
+  float depthFactor = smooth01((static_cast<float>(kStageSeaLevel + 18 - y)) / 62.0f);
+  float belowSurface = targetHeight - static_cast<float>(y);
+  float surfaceFactor = std::clamp(belowSurface / 6.0f, 0.0f, 1.0f);
+  float caveCut = rawCaveCut * depthFactor * surfaceFactor;
+  float ridgeBoost = ridge3d * 0.22f * (0.35f + (1.0f - climate.erosion));
+  if (biomeId == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
+    ridgeBoost *= 1.55f;
+  }
+
+  float density = vertical + macro3d * 0.86f + micro3d * 0.34f + ridgeBoost - caveCut;
+  if (y < minY + 2) {
+    density += 2.4f;
+  }
+  return density;
+}
+
 void computeBiomeClimateMaps(int cx,
                              int cz,
                              int seed,
@@ -1478,93 +1705,17 @@ void computeBiomeClimateMaps(int cx,
 
   int baseX = cx * kChunkSize;
   int baseZ = cz * kChunkSize;
-  const float seedF = static_cast<float>(seed);
-
-  auto columnIndex = [](int lx, int lz) {
-    return static_cast<size_t>(lx + lz * kChunkSize);
-  };
-
   for (int lz = 0; lz < kChunkSize; ++lz) {
     for (int lx = 0; lx < kChunkSize; ++lx) {
       int worldX = baseX + lx;
       int worldZ = baseZ + lz;
-      size_t idx = columnIndex(lx, lz);
-
-      if (settings.preset == WorldPreset::kClassicFlat) {
-        outBiomeMap[idx] = static_cast<uint8_t>(DebugBiomeId::kPlains);
-        outClimateMap[idx] = {
-          0.58f, // temperature
-          0.52f, // humidity
-          0.62f, // continentalness
-          0.50f, // erosion
-          0.50f, // depth
-          0.50f  // weirdness
-        };
-        continue;
-      }
-
-      float warpX = glm::perlin(glm::vec2(
-        (static_cast<float>(worldX) + seedF * 101.0f) * 0.0016f,
-        (static_cast<float>(worldZ) - seedF * 89.0f) * 0.0016f));
-      float warpZ = glm::perlin(glm::vec2(
-        (static_cast<float>(worldX) - seedF * 37.0f) * 0.0016f,
-        (static_cast<float>(worldZ) + seedF * 53.0f) * 0.0016f));
-      float wx = static_cast<float>(worldX) + warpX * 24.0f;
-      float wz = static_cast<float>(worldZ) + warpZ * 24.0f;
-
-      float temperature = 0.5f + 0.5f * glm::perlin(glm::vec2(
-        (wx + seedF * 17.0f) * 0.00095f,
-        (wz - seedF * 11.0f) * 0.00095f));
-      float humidity = 0.5f + 0.5f * glm::perlin(glm::vec2(
-        (wx - seedF * 7.0f) * 0.00105f,
-        (wz + seedF * 13.0f) * 0.00105f));
-      float continentalness = 0.5f + 0.5f * glm::perlin(glm::vec2(
-        (wx + static_cast<float>(seed) * 11.0f) * 0.00045f,
-        (wz - static_cast<float>(seed) * 13.0f) * 0.00045f));
-      float dxFromOrigin = static_cast<float>(worldX);
-      float dzFromOrigin = static_cast<float>(worldZ);
-      float distFromOrigin = std::sqrt(dxFromOrigin * dxFromOrigin + dzFromOrigin * dzFromOrigin);
-      float spawnLandBias = smooth01(1.0f - distFromOrigin / 768.0f) * 0.24f;
-      continentalness = std::clamp(continentalness + 0.10f + spawnLandBias, 0.0f, 1.0f);
-      float erosion = 0.5f + 0.5f * glm::perlin(glm::vec2(
-        (wx - seedF * 37.0f) * 0.00120f,
-        (wz + seedF * 23.0f) * 0.00120f));
-      float weirdness = 0.5f + 0.5f * glm::perlin(glm::vec2(
-        (wx + seedF * 61.0f) * 0.00185f,
-        (wz - seedF * 53.0f) * 0.00185f));
-      float depth = 0.5f + 0.5f * glm::perlin(glm::vec2(
-        (wx - seedF * 29.0f) * 0.00135f,
-        (wz + seedF * 31.0f) * 0.00135f));
-
-      DebugBiomeId biome = DebugBiomeId::kPlains;
-      if (continentalness < 0.18f) {
-        biome = DebugBiomeId::kOcean;
-      } else if (continentalness < 0.24f) {
-        biome = DebugBiomeId::kBeach;
-      } else if (temperature > 0.72f && humidity < 0.34f) {
-        biome = DebugBiomeId::kDesert;
-      } else if (weirdness > 0.67f && continentalness > 0.56f) {
-        biome = DebugBiomeId::kMountains;
-      } else if (humidity > 0.58f) {
-        biome = DebugBiomeId::kForest;
-      }
-
-      outBiomeMap[idx] = static_cast<uint8_t>(biome);
-      outClimateMap[idx] = {
-        temperature,
-        humidity,
-        continentalness,
-        erosion,
-        depth,
-        weirdness
-      };
+      size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+      ClimateAndBiomeSample sample = sampleClimateAndBiomeAt(worldX, worldZ, seed, settings);
+      outBiomeMap[idx] = sample.biome;
+      outClimateMap[idx] = sample.climate;
     }
   }
 }
-
-constexpr int kStageSeaLevel = 32;
-constexpr int kCarverRegionSizeChunks = 8;
-constexpr int kStructureRegionSizeChunks = 32;
 
 void applyHeightRangeMask(std::vector<uint8_t>& blocks, int minY, int maxY) {
   minY = std::clamp(minY, 0, kChunkHeight - 1);
@@ -1594,7 +1745,6 @@ void runNoiseStage(int cx,
   outBlocks.assign(static_cast<size_t>(kChunkSize * kChunkSize * kChunkHeight), kAir);
   int baseX = cx * kChunkSize;
   int baseZ = cz * kChunkSize;
-  const float seedF = static_cast<float>(seed);
   int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
   int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
 
@@ -1632,74 +1782,19 @@ void runNoiseStage(int cx,
       int worldZ = baseZ + lz;
       const BiomeClimateSample& climate = climateMap[column];
       uint8_t biomeId = biomeMap[column];
-
-      float continentalness = climate.continentalness;
-      float erosion = climate.erosion;
-      float weirdness = climate.weirdness;
-      float mountainLift = std::max(0.0f, weirdness - 0.55f);
-      float broad = glm::perlin(glm::vec2(
-        (static_cast<float>(worldX) + seedF * 23.0f) * 0.0017f,
-        (static_cast<float>(worldZ) - seedF * 19.0f) * 0.0017f));
-      float detail = fbmNoise(static_cast<float>(worldX), static_cast<float>(worldZ), seed);
-
-      float targetHeight = static_cast<float>(kStageSeaLevel) - 8.0f +
-                           continentalness * 56.0f +
-                           (1.0f - erosion) * 10.0f +
-                           mountainLift * 40.0f +
-                           broad * 7.0f +
-                           detail * 4.0f;
-      if (biomeId == static_cast<uint8_t>(DebugBiomeId::kOcean)) {
-        targetHeight -= 12.0f;
-      } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kBeach)) {
-        targetHeight -= 4.0f;
-      } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kDesert)) {
-        targetHeight += 2.0f;
-      } else if (biomeId == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
-        targetHeight += 12.0f;
-      }
-      int heightClampMin = minY + 4;
-      int heightClampMax = maxY - 4;
-      if (heightClampMax < heightClampMin) {
-        heightClampMin = minY;
-        heightClampMax = maxY;
-      }
-      targetHeight = std::clamp(targetHeight,
-                                static_cast<float>(heightClampMin),
-                                static_cast<float>(heightClampMax));
+      float targetHeight =
+        computeRouterTargetHeight(worldX, worldZ, seed, biomeId, climate, minY, maxY);
 
       for (int y = minY; y <= maxY; ++y) {
-        float vertical = (targetHeight - static_cast<float>(y)) * 0.11f;
-        float macro3d = glm::perlin(glm::vec3(
-          (static_cast<float>(worldX) + seedF * 31.0f) * 0.041f,
-          (static_cast<float>(y) - seedF * 17.0f) * 0.048f,
-          (static_cast<float>(worldZ) - seedF * 29.0f) * 0.041f));
-        float micro3d = glm::perlin(glm::vec3(
-          (static_cast<float>(worldX) - seedF * 7.0f) * 0.089f,
-          (static_cast<float>(y) + seedF * 13.0f) * 0.098f,
-          (static_cast<float>(worldZ) + seedF * 11.0f) * 0.089f));
-        float cheese = std::abs(glm::perlin(glm::vec3(
-          (static_cast<float>(worldX) + seedF * 41.0f) * 0.064f,
-          (static_cast<float>(y) - seedF * 37.0f) * 0.066f,
-          (static_cast<float>(worldZ) - seedF * 43.0f) * 0.064f)));
-        float spaghetti = 1.0f - std::abs(glm::perlin(glm::vec3(
-          (static_cast<float>(worldX) - seedF * 13.0f) * 0.023f,
-          (static_cast<float>(y) + seedF * 29.0f) * 0.031f,
-          (static_cast<float>(worldZ) + seedF * 17.0f) * 0.023f)));
-
-        float caveSignal = std::max(1.0f - cheese * 1.28f, spaghetti * 0.84f);
-        float caveThreshold = std::clamp(0.78f - settings.caveDensity * 0.10f, 0.48f, 0.78f);
-        float rawCaveCut = caveSignal > caveThreshold
-          ? (caveSignal - caveThreshold) * 16.0f
-          : 0.0f;
-        float depthFactor = smooth01((static_cast<float>(kStageSeaLevel + 16 - y)) / 56.0f);
-        float belowSurface = targetHeight - static_cast<float>(y);
-        float surfaceFactor = std::clamp(belowSurface / 6.0f, 0.0f, 1.0f);
-        float caveCut = rawCaveCut * depthFactor * surfaceFactor;
-
-        float density = vertical + macro3d * 0.86f + micro3d * 0.34f - caveCut;
-        if (y < minY + 2) {
-          density += 2.4f;
-        }
+        float density = sampleDensityRouterAt(worldX,
+                                              y,
+                                              worldZ,
+                                              seed,
+                                              settings,
+                                              biomeId,
+                                              climate,
+                                              targetHeight,
+                                              minY);
         if (density > 0.0f) {
           setLocalBlock(lx, y, lz, kStone);
         } else {
@@ -1707,22 +1802,7 @@ void runNoiseStage(int cx,
         }
       }
 
-      float aqNoise = glm::perlin(glm::vec2(
-        (static_cast<float>(worldX) + seedF * 61.0f) * 0.0105f,
-        (static_cast<float>(worldZ) - seedF * 59.0f) * 0.0105f));
-      int aquiferLevel = kStageSeaLevel - 4 + static_cast<int>(std::round(aqNoise * 8.0f));
-      if (continentalness < 0.24f) {
-        aquiferLevel = std::max(aquiferLevel, kStageSeaLevel);
-      } else {
-        aquiferLevel = std::min(aquiferLevel, kStageSeaLevel - 2);
-      }
-      int aquiferClampMin = minY + 2;
-      int aquiferClampMax = maxY - 2;
-      if (aquiferClampMax < aquiferClampMin) {
-        aquiferClampMin = minY;
-        aquiferClampMax = maxY;
-      }
-      aquiferLevel = std::clamp(aquiferLevel, aquiferClampMin, aquiferClampMax);
+      int aquiferLevel = computeAquiferLevelAt(worldX, worldZ, seed, climate, minY, maxY);
 
       for (int y = minY; y <= maxY; ++y) {
         uint8_t current = getLocalBlock(lx, y, lz);
@@ -1730,7 +1810,7 @@ void runNoiseStage(int cx,
           continue;
         }
 
-        int fluidFillTopY = std::min(aquiferLevel, kStageSeaLevel);
+        int fluidFillTopY = std::min(aquiferLevel, kStageSeaLevel - 1);
         if (y <= fluidFillTopY) {
           setLocalBlock(lx, y, lz, kWater);
         }
@@ -1782,6 +1862,68 @@ void runSurfaceStage(int cx,
     }
   }
 
+  std::array<int, kChunkColumnCount> coastDistance{};
+  coastDistance.fill(6);
+  std::array<int, kChunkColumnCount> slopeMap{};
+  slopeMap.fill(0);
+
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+      int topY = topHeights[idx];
+      if (topY < minY || topY > maxY) {
+        continue;
+      }
+
+      int bestCoast = 6;
+      int maxSlope = 0;
+      for (int oz = -3; oz <= 3; ++oz) {
+        for (int ox = -3; ox <= 3; ++ox) {
+          int nx = lx + ox;
+          int nz = lz + oz;
+          if (nx < 0 || nx >= kChunkSize || nz < 0 || nz >= kChunkSize) {
+            continue;
+          }
+          size_t nIdx = static_cast<size_t>(nx + nz * kChunkSize);
+          int nTop = topHeights[nIdx];
+          if (nTop < minY || nTop > maxY) {
+            continue;
+          }
+
+          maxSlope = std::max(maxSlope, std::abs(nTop - topY));
+          uint8_t nBiome = biomeMap[nIdx];
+          bool nearWaterBand =
+            nTop <= kStageSeaLevel + 1 ||
+            nBiome == static_cast<uint8_t>(DebugBiomeId::kOcean) ||
+            nBiome == static_cast<uint8_t>(DebugBiomeId::kBeach);
+          if (nearWaterBand) {
+            int dist = std::max(std::abs(ox), std::abs(oz));
+            bestCoast = std::min(bestCoast, dist);
+          }
+        }
+      }
+
+      if (topY <= kStageSeaLevel + 1) {
+        bestCoast = 0;
+      }
+      coastDistance[idx] = bestCoast;
+      slopeMap[idx] = maxSlope;
+    }
+  }
+
+  struct SurfaceRuleResult {
+    uint8_t top = kGrass;
+    uint8_t filler = kDirt;
+    int fillerDepth = 3;
+  };
+  enum class SurfaceRuleNode : uint8_t {
+    kDefault = 0,
+    kCoastline = 1,
+    kArid = 2,
+    kMountain = 3,
+    kSnowCap = 4
+  };
+
   for (int lz = 0; lz < kChunkSize; ++lz) {
     for (int lx = 0; lx < kChunkSize; ++lx) {
       size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
@@ -1792,43 +1934,77 @@ void runSurfaceStage(int cx,
 
       uint8_t biome = biomeMap[idx];
       const BiomeClimateSample& climate = climateMap[idx];
-      uint8_t top = kGrass;
-      uint8_t filler = kDirt;
-      int fillerDepth = 3;
+      int localSlope = slopeMap[idx];
+      int coastDist = coastDistance[idx];
+      bool biomeWater = biome == static_cast<uint8_t>(DebugBiomeId::kOcean) ||
+                        biome == static_cast<uint8_t>(DebugBiomeId::kBeach);
+      bool nearCoastline = coastDist <= 1 || topY <= kStageSeaLevel + 1;
+      bool broadCoastBand = coastDist <= 2 || biomeWater;
 
-      if (biome == static_cast<uint8_t>(DebugBiomeId::kOcean) ||
-          biome == static_cast<uint8_t>(DebugBiomeId::kBeach)) {
-        top = kSand;
-        filler = kSand;
-        fillerDepth = 4;
-      } else if (biome == static_cast<uint8_t>(DebugBiomeId::kDesert)) {
-        top = kSand;
-        filler = kSand;
-        fillerDepth = 5;
-      } else if (biome == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
-        if (topY > kStageSeaLevel + 30) {
-          top = kStone;
-          filler = kStone;
-          fillerDepth = 2;
-        } else {
-          top = kGravel;
-          filler = kStone;
-          fillerDepth = 3;
+      int snowLine = kStageSeaLevel + 20 +
+                     static_cast<int>(std::round((0.36f - climate.temperature) * 34.0f +
+                                                 (0.50f - climate.erosion) * 8.0f));
+      snowLine = std::clamp(snowLine, kStageSeaLevel + 14, maxY - 2);
+
+      SurfaceRuleNode node = SurfaceRuleNode::kDefault;
+      if ((biomeWater && broadCoastBand) || nearCoastline) {
+        node = SurfaceRuleNode::kCoastline;
+      } else if (biome == static_cast<uint8_t>(DebugBiomeId::kDesert) ||
+                 (climate.temperature > 0.72f && climate.humidity < 0.36f)) {
+        node = SurfaceRuleNode::kArid;
+      } else if (biome == static_cast<uint8_t>(DebugBiomeId::kMountains) ||
+                 (climate.weirdness > 0.62f && topY > kStageSeaLevel + 18)) {
+        node = SurfaceRuleNode::kMountain;
+      }
+      if (topY >= snowLine && climate.temperature < 0.50f) {
+        node = SurfaceRuleNode::kSnowCap;
+      }
+
+      SurfaceRuleResult rule{};
+      switch (node) {
+        case SurfaceRuleNode::kCoastline: {
+          rule.top = kSand;
+          if (!biomeWater && coastDist >= 2 && topY >= kStageSeaLevel) {
+            rule.top = (climate.temperature > 0.66f) ? kSand : kGrass;
+          }
+          rule.filler = (climate.erosion < 0.30f || coastDist == 0) ? kGravel : kSand;
+          float coastDepth = 2.0f +
+                             std::max(0, 2 - coastDist) +
+                             (1.0f - climate.erosion) * 1.8f;
+          rule.fillerDepth = std::clamp(static_cast<int>(std::round(coastDepth)), 2, 6);
+          break;
         }
+        case SurfaceRuleNode::kArid:
+          rule.top = kSand;
+          rule.filler = (climate.erosion < 0.25f) ? kGravel : kSand;
+          rule.fillerDepth = std::clamp(4 + static_cast<int>(std::round(climate.depth * 2.2f)), 4, 8);
+          break;
+        case SurfaceRuleNode::kMountain:
+          if (topY > kStageSeaLevel + 30 || climate.weirdness > 0.72f) {
+            rule.top = kStone;
+            rule.filler = kStone;
+            rule.fillerDepth = 2 + (localSlope > 5 ? 1 : 0);
+          } else {
+            rule.top = kGravel;
+            rule.filler = kStone;
+            rule.fillerDepth = 3 + (localSlope > 6 ? 1 : 0);
+          }
+          break;
+        case SurfaceRuleNode::kSnowCap:
+          rule.top = kStone;
+          rule.filler = (localSlope > 6) ? kGravel : kStone;
+          rule.fillerDepth = std::clamp(2 + static_cast<int>(std::round((1.0f - climate.erosion) * 2.0f)), 2, 4);
+          break;
+        case SurfaceRuleNode::kDefault:
+        default:
+          rule.top = kGrass;
+          rule.filler = (climate.erosion < 0.35f && climate.continentalness > 0.52f) ? kGravel : kDirt;
+          rule.fillerDepth = std::clamp(3 + static_cast<int>(std::round(climate.depth * 1.8f)), 3, 6);
+          break;
       }
 
-      if (topY <= kStageSeaLevel + 1) {
-        top = kSand;
-        filler = kSand;
-        fillerDepth = std::max(fillerDepth, 3);
-      }
-      if (climate.temperature < 0.28f && topY > kStageSeaLevel + 20) {
-        top = kStone;
-        filler = kStone;
-      }
-
-      setLocalBlock(lx, topY, lz, top);
-      for (int d = 1; d <= fillerDepth; ++d) {
+      setLocalBlock(lx, topY, lz, rule.top);
+      for (int d = 1; d <= rule.fillerDepth; ++d) {
         int y = topY - d;
         if (y < minY) {
           break;
@@ -1838,12 +2014,12 @@ void runSurfaceStage(int cx,
           break;
         }
         if (current == kStone || current == kDirt || current == kGrass || current == kSand || current == kGravel) {
-          setLocalBlock(lx, y, lz, filler);
+          setLocalBlock(lx, y, lz, rule.filler);
         }
       }
 
-      if (top == kSand && fillerDepth >= 4) {
-        for (int d = fillerDepth + 1; d <= fillerDepth + 3; ++d) {
+      if (rule.top == kSand && rule.fillerDepth >= 4) {
+        for (int d = rule.fillerDepth + 1; d <= rule.fillerDepth + 3; ++d) {
           int y = topY - d;
           if (y < minY) {
             break;
@@ -1851,6 +2027,29 @@ void runSurfaceStage(int cx,
           uint8_t current = getLocalBlock(lx, y, lz);
           if (current == kStone) {
             setLocalBlock(lx, y, lz, kSand);
+          }
+        }
+      } else if (node == SurfaceRuleNode::kDefault || node == SurfaceRuleNode::kMountain) {
+        int deepLayers = std::clamp(1 + localSlope / 4, 1, 3);
+        for (int d = rule.fillerDepth + 1; d <= rule.fillerDepth + deepLayers; ++d) {
+          int y = topY - d;
+          if (y < minY) {
+            break;
+          }
+          uint8_t current = getLocalBlock(lx, y, lz);
+          if (current == kStone || current == kDirt || current == kGrass || current == kGravel) {
+            setLocalBlock(lx, y, lz, (node == SurfaceRuleNode::kDefault && localSlope <= 3) ? kDirt : kStone);
+          }
+        }
+      } else if (node == SurfaceRuleNode::kSnowCap) {
+        for (int d = rule.fillerDepth + 1; d <= rule.fillerDepth + 2; ++d) {
+          int y = topY - d;
+          if (y < minY) {
+            break;
+          }
+          uint8_t current = getLocalBlock(lx, y, lz);
+          if (current == kStone || current == kGravel || current == kDirt) {
+            setLocalBlock(lx, y, lz, kStone);
           }
         }
       }
@@ -1872,6 +2071,11 @@ struct CarverEvent {
   float yaw = 0.0f;
   float pitch = 0.0f;
   float baseRadius = 2.0f;
+  float verticalScale = 0.90f;
+  float yawJitter = 0.12f;
+  float pitchJitter = 0.07f;
+  float radiusJitter = 0.18f;
+  float branchChance = 0.0f;
   int length = 0;
   bool liquid = false;
 };
@@ -1879,23 +2083,30 @@ struct CarverEvent {
 void collectCarverEvents(int chunkX,
                          int chunkZ,
                          int seed,
+                         const WorldGenSettings& settings,
                          bool liquid,
                          std::vector<CarverEvent>& outEvents) {
   outEvents.clear();
 
-  int minRegionX = floorDiv(chunkX - 2, kCarverRegionSizeChunks);
-  int maxRegionX = floorDiv(chunkX + 2, kCarverRegionSizeChunks);
-  int minRegionZ = floorDiv(chunkZ - 2, kCarverRegionSizeChunks);
-  int maxRegionZ = floorDiv(chunkZ + 2, kCarverRegionSizeChunks);
+  float ravineScale = std::clamp(settings.ravineFrequency, 0.25f, 2.5f);
+  int minRegionX = floorDiv(chunkX - 3, kCarverRegionSizeChunks);
+  int maxRegionX = floorDiv(chunkX + 3, kCarverRegionSizeChunks);
+  int minRegionZ = floorDiv(chunkZ - 3, kCarverRegionSizeChunks);
+  int maxRegionZ = floorDiv(chunkZ + 3, kCarverRegionSizeChunks);
 
   constexpr float kPi = 3.14159265358979323846f;
   for (int rz = minRegionZ; rz <= maxRegionZ; ++rz) {
     for (int rx = minRegionX; rx <= maxRegionX; ++rx) {
       uint32_t state = static_cast<uint32_t>(
         hashChunkSeed(seed, rx, rz, liquid ? 0x1A11u : 0xCA11u));
-      int attempts = liquid ? 2 : 3;
+      int attempts = liquid
+        ? std::clamp(static_cast<int>(std::lround(1.0f + ravineScale)), 1, 4)
+        : std::clamp(static_cast<int>(std::lround(2.0f + ravineScale * 1.8f)), 2, 6);
       for (int i = 0; i < attempts; ++i) {
-        float chance = liquid ? 0.32f : 0.58f;
+        float chance = liquid
+          ? (0.18f * (0.72f + ravineScale * 0.38f))
+          : (0.34f * (0.66f + ravineScale * 0.48f));
+        chance = std::clamp(chance, 0.08f, liquid ? 0.46f : 0.74f);
         if (rand01(state) > chance) {
           continue;
         }
@@ -1904,18 +2115,55 @@ void collectCarverEvents(int chunkX,
         int startChunkZ = rz * kCarverRegionSizeChunks + randIntInclusive(state, 0, kCarverRegionSizeChunks - 1);
         float startX = static_cast<float>(startChunkX * kChunkSize + randIntInclusive(state, 0, kChunkSize - 1));
         float startZ = static_cast<float>(startChunkZ * kChunkSize + randIntInclusive(state, 0, kChunkSize - 1));
+        bool canyonStyle = !liquid && rand01(state) < (0.22f + 0.10f * ravineScale);
         float startY = liquid
-          ? static_cast<float>(randIntInclusive(state, 2, 18))
-          : static_cast<float>(randIntInclusive(state, 10, kChunkHeight - 20));
+          ? static_cast<float>(randIntInclusive(state, 3, 24))
+          : static_cast<float>(randIntInclusive(state,
+                                                canyonStyle ? 18 : 10,
+                                                canyonStyle ? (kChunkHeight - 14) : (kChunkHeight - 20)));
         float yaw = rand01(state) * 2.0f * kPi;
-        float pitch = (rand01(state) - 0.5f) * (liquid ? 0.45f : 0.30f);
+        float pitch = (rand01(state) - 0.5f) * (liquid ? 0.36f : (canyonStyle ? 0.22f : 0.30f));
         float radius = liquid
-          ? (1.4f + rand01(state) * 2.2f)
-          : (1.7f + rand01(state) * 3.4f);
+          ? (1.4f + rand01(state) * 2.0f)
+          : (canyonStyle ? (2.4f + rand01(state) * 2.4f)
+                         : (1.6f + rand01(state) * 2.8f));
         int length = liquid
-          ? randIntInclusive(state, 26, 72)
-          : randIntInclusive(state, 36, 128);
-        outEvents.push_back({startX, startY, startZ, yaw, pitch, radius, length, liquid});
+          ? randIntInclusive(state, 22, std::clamp(static_cast<int>(72.0f * ravineScale), 28, 110))
+          : randIntInclusive(state,
+                             canyonStyle ? 52 : 36,
+                             canyonStyle ? std::clamp(static_cast<int>(154.0f * ravineScale), 68, 220)
+                                         : std::clamp(static_cast<int>(116.0f * ravineScale), 52, 168));
+        float verticalScale = liquid
+          ? (0.68f + rand01(state) * 0.22f)
+          : (canyonStyle ? (0.46f + rand01(state) * 0.18f)
+                         : (0.74f + rand01(state) * 0.22f));
+        float yawJitter = liquid
+          ? (0.16f + rand01(state) * 0.12f)
+          : (canyonStyle ? (0.09f + rand01(state) * 0.08f)
+                         : (0.11f + rand01(state) * 0.11f));
+        float pitchJitter = liquid
+          ? (0.08f + rand01(state) * 0.05f)
+          : (canyonStyle ? (0.04f + rand01(state) * 0.05f)
+                         : (0.06f + rand01(state) * 0.05f));
+        float radiusJitter = canyonStyle
+          ? (0.22f + rand01(state) * 0.20f)
+          : (0.12f + rand01(state) * 0.16f);
+        float branchChance = liquid
+          ? 0.0f
+          : std::clamp((canyonStyle ? 0.18f : 0.10f) * ravineScale, 0.06f, 0.32f);
+        outEvents.push_back({startX,
+                             startY,
+                             startZ,
+                             yaw,
+                             pitch,
+                             radius,
+                             verticalScale,
+                             yawJitter,
+                             pitchJitter,
+                             radiusJitter,
+                             branchChance,
+                             length,
+                             liquid});
       }
     }
   }
@@ -1947,7 +2195,23 @@ void runCarverStage(int chunkX,
   };
 
   std::vector<CarverEvent> events;
-  collectCarverEvents(chunkX, chunkZ, seed, liquidPass, events);
+  collectCarverEvents(chunkX, chunkZ, seed, settings, liquidPass, events);
+
+  std::array<int, kChunkColumnCount> aquiferTopByColumn{};
+  aquiferTopByColumn.fill(kStageSeaLevel - 1);
+  if (liquidPass) {
+    for (int lz = 0; lz < kChunkSize; ++lz) {
+      for (int lx = 0; lx < kChunkSize; ++lx) {
+        int worldX = baseX + lx;
+        int worldZ = baseZ + lz;
+        ClimateAndBiomeSample climateSample =
+          sampleClimateAndBiomeAt(worldX, worldZ, seed, settings);
+        int aq = computeAquiferLevelAt(worldX, worldZ, seed, climateSample.climate, minY, maxY);
+        aquiferTopByColumn[static_cast<size_t>(lx + lz * kChunkSize)] =
+          std::min(aq, kStageSeaLevel - 1);
+      }
+    }
+  }
 
   constexpr float kPi = 3.14159265358979323846f;
   for (size_t eventIndex = 0; eventIndex < events.size(); ++eventIndex) {
@@ -1966,15 +2230,18 @@ void runCarverStage(int chunkX,
 
     for (int step = 0; step < event.length; ++step) {
       float t = (event.length <= 1) ? 0.0f : static_cast<float>(step) / static_cast<float>(event.length - 1);
-      float radiusWave = 0.75f + 0.45f * std::sin(t * kPi);
-      float radius = std::max(1.1f, event.baseRadius * radiusWave);
+      float profile = std::sin(t * kPi);
+      float localShape = 0.82f + profile * 0.76f;
+      float localJitter = (rand01(state) * 2.0f - 1.0f) * event.radiusJitter;
+      float radius = std::max(1.05f, event.baseRadius * std::max(0.35f, localShape + localJitter));
+      float verticalRadius = std::max(0.85f, radius * event.verticalScale);
 
       int minWX = static_cast<int>(std::floor(x - radius)) - 1;
       int maxWX = static_cast<int>(std::floor(x + radius)) + 1;
       int minWZ = static_cast<int>(std::floor(z - radius)) - 1;
       int maxWZ = static_cast<int>(std::floor(z + radius)) + 1;
-      int minWY = std::max(minY, static_cast<int>(std::floor(y - radius)) - 1);
-      int maxWY = std::min(maxY, static_cast<int>(std::floor(y + radius)) + 1);
+      int minWY = std::max(minY, static_cast<int>(std::floor(y - verticalRadius)) - 1);
+      int maxWY = std::min(maxY, static_cast<int>(std::floor(y + verticalRadius)) + 1);
 
       if (maxWX >= baseX && minWX <= baseX + kChunkSize - 1 &&
           maxWZ >= baseZ && minWZ <= baseZ + kChunkSize - 1 &&
@@ -1990,10 +2257,14 @@ void runCarverStage(int chunkX,
               }
 
               float nx = (static_cast<float>(wx) + 0.5f - x) / radius;
-              float ny = (static_cast<float>(wy) + 0.5f - y) / (radius * 0.9f);
+              float ny = (static_cast<float>(wy) + 0.5f - y) / verticalRadius;
               float nz = (static_cast<float>(wz) + 0.5f - z) / radius;
               float dist = nx * nx + ny * ny + nz * nz;
               if (dist >= 1.0f) {
+                continue;
+              }
+              float shell = 1.0f - dist;
+              if (!liquidPass && shell < 0.07f && rand01(state) < 0.22f) {
                 continue;
               }
 
@@ -2005,8 +2276,11 @@ void runCarverStage(int chunkX,
               }
 
               if (liquidPass) {
-                uint8_t fluid = kWater;
-                setLocal(lx, wy, lz, fluid);
+                size_t colIndex = static_cast<size_t>(lx + lz * kChunkSize);
+                int aquiferTop = aquiferTopByColumn[colIndex];
+                if (wy <= aquiferTop) {
+                  setLocal(lx, wy, lz, kWater);
+                }
               } else {
                 setLocal(lx, wy, lz, kAir);
               }
@@ -2015,12 +2289,23 @@ void runCarverStage(int chunkX,
         }
       }
 
-      float speed = liquidPass ? 1.25f : 1.55f;
+      float speed = liquidPass ? 1.12f : 1.45f;
       x += std::cos(yaw) * std::cos(pitch) * speed;
       y += std::sin(pitch) * speed;
       z += std::sin(yaw) * std::cos(pitch) * speed;
-      yaw += (rand01(state) - 0.5f) * (liquidPass ? 0.19f : 0.13f);
-      pitch = std::clamp(pitch + (rand01(state) - 0.5f) * (liquidPass ? 0.11f : 0.07f), -0.65f, 0.65f);
+      float bend = 0.45f + 0.55f * profile;
+      yaw += (rand01(state) - 0.5f) * event.yawJitter * bend;
+      pitch = std::clamp(pitch + (rand01(state) - 0.5f) * event.pitchJitter * bend, -0.65f, 0.65f);
+
+      if (!liquidPass &&
+          event.branchChance > 0.0f &&
+          step > event.length / 4 &&
+          step < (event.length * 3) / 4 &&
+          rand01(state) < event.branchChance * 0.035f) {
+        float turn = (rand01(state) < 0.5f ? -1.0f : 1.0f) * (0.42f + rand01(state) * 0.60f);
+        yaw += turn;
+        pitch *= 0.45f;
+      }
     }
   }
 
@@ -2106,6 +2391,7 @@ void placeTreeFeatures(int cx,
                        int seed,
                        const WorldGenSettings& settings,
                        const std::array<uint8_t, kChunkColumnCount>& biomeMap,
+                       const std::array<BiomeClimateSample, kChunkColumnCount>& climateMap,
                        std::vector<uint8_t>& ioBlocks) {
   int baseX = cx * kChunkSize;
   int baseZ = cz * kChunkSize;
@@ -2158,6 +2444,7 @@ void placeTreeFeatures(int cx,
     }
 
     uint8_t biome = biomeMap[idx];
+    const BiomeClimateSample& climate = climateMap[idx];
     float chance = 0.10f;
     if (biome == static_cast<uint8_t>(DebugBiomeId::kForest)) {
       chance = 0.34f;
@@ -2170,12 +2457,25 @@ void placeTreeFeatures(int cx,
     } else if (biome == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
       chance = 0.05f;
     }
+    chance *= (0.68f + climate.humidity * 0.64f);
+    chance *= (0.74f + (1.0f - climate.erosion) * 0.42f);
+    if (climate.temperature > 0.80f && climate.humidity < 0.34f) {
+      chance *= 0.32f;
+    }
+    chance = std::clamp(chance, 0.0f, 0.62f);
 
     if (rand01(state) > chance) {
       continue;
     }
 
     int trunkHeight = randIntInclusive(state, 4, 6);
+    if (climate.humidity > 0.64f && climate.temperature > 0.36f) {
+      trunkHeight += 1;
+    }
+    if (climate.erosion < 0.34f) {
+      trunkHeight += 1;
+    }
+    trunkHeight = std::clamp(trunkHeight, 4, 7);
     bool clear = true;
     for (int y = topY + 1; y <= topY + trunkHeight + 2; ++y) {
       if (getLocal(lx, y, lz) != kAir) {
@@ -2349,6 +2649,196 @@ void placeUnderwaterPlantFeatures(int cx,
   }
 }
 
+void placeRockOutcropFeatures(int cx,
+                              int cz,
+                              int seed,
+                              const WorldGenSettings& settings,
+                              const std::array<uint8_t, kChunkColumnCount>& biomeMap,
+                              const std::array<BiomeClimateSample, kChunkColumnCount>& climateMap,
+                              std::vector<uint8_t>& ioBlocks) {
+  int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
+  int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+
+  auto getLocal = [&](int lx, int y, int lz) -> uint8_t {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return kAir;
+    }
+    return ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))];
+  };
+
+  auto setLocal = [&](int lx, int y, int lz, uint8_t type) {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return;
+    }
+    ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+  };
+
+  std::array<int, kChunkColumnCount> topHeights{};
+  topHeights.fill(minY - 1);
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+      for (int y = maxY; y >= minY; --y) {
+        uint8_t t = getLocal(lx, y, lz);
+        if (t != kAir && !isWaterBlock(t) && !isUnderwaterPlantBlock(t)) {
+          topHeights[idx] = y;
+          break;
+        }
+      }
+    }
+  }
+
+  uint32_t state = static_cast<uint32_t>(hashChunkSeed(seed, cx, cz, 0xB04Du));
+  int attempts = 9;
+  for (int i = 0; i < attempts; ++i) {
+    int lx = randIntInclusive(state, 2, kChunkSize - 3);
+    int lz = randIntInclusive(state, 2, kChunkSize - 3);
+    size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+    int topY = topHeights[idx];
+    if (topY < minY + 1 || topY > maxY - 5) {
+      continue;
+    }
+
+    uint8_t biome = biomeMap[idx];
+    const BiomeClimateSample& climate = climateMap[idx];
+    float chance = 0.04f;
+    if (biome == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
+      chance = 0.30f;
+    } else if (biome == static_cast<uint8_t>(DebugBiomeId::kDesert)) {
+      chance = 0.12f;
+    } else if (biome == static_cast<uint8_t>(DebugBiomeId::kPlains)) {
+      chance = 0.05f;
+    }
+    chance *= (0.70f + (1.0f - climate.erosion) * 0.75f);
+    chance = std::clamp(chance, 0.0f, 0.52f);
+    if (rand01(state) > chance) {
+      continue;
+    }
+
+    uint8_t ground = getLocal(lx, topY, lz);
+    if (ground == kAir || isWaterBlock(ground) || isUnderwaterPlantBlock(ground)) {
+      continue;
+    }
+
+    int radius = randIntInclusive(state, 1, biome == static_cast<uint8_t>(DebugBiomeId::kMountains) ? 3 : 2);
+    int height = randIntInclusive(state, 1, 2 + radius);
+    for (int oy = 0; oy <= height; ++oy) {
+      for (int oz = -radius; oz <= radius; ++oz) {
+        for (int ox = -radius; ox <= radius; ++ox) {
+          int tx = lx + ox;
+          int tz = lz + oz;
+          int ty = topY + oy;
+          if (tx < 0 || tx >= kChunkSize || tz < 0 || tz >= kChunkSize || ty > maxY) {
+            continue;
+          }
+
+          float nx = static_cast<float>(ox) / static_cast<float>(std::max(1, radius));
+          float nz = static_cast<float>(oz) / static_cast<float>(std::max(1, radius));
+          float ny = static_cast<float>(oy) / static_cast<float>(std::max(1, height));
+          float dist = nx * nx + nz * nz + ny * ny * 1.3f;
+          float rough = rand01(state) * 0.22f;
+          if (dist > 1.0f + rough) {
+            continue;
+          }
+
+          uint8_t cur = getLocal(tx, ty, tz);
+          if (cur == kAir || isWaterBlock(cur) || cur == kLeaves || cur == kWood ||
+              cur == kGrass || cur == kDirt || cur == kSand || cur == kGravel || cur == kStone) {
+            uint8_t type = (rand01(state) < 0.24f) ? kGravel : kStone;
+            setLocal(tx, ty, tz, type);
+          }
+        }
+      }
+    }
+  }
+}
+
+void placeShorelineDriftFeatures(int cx,
+                                 int cz,
+                                 int seed,
+                                 const WorldGenSettings& settings,
+                                 const std::array<uint8_t, kChunkColumnCount>& biomeMap,
+                                 std::vector<uint8_t>& ioBlocks) {
+  int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
+  int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+
+  auto getLocal = [&](int lx, int y, int lz) -> uint8_t {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return kAir;
+    }
+    return ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))];
+  };
+
+  auto setLocal = [&](int lx, int y, int lz, uint8_t type) {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return;
+    }
+    ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+  };
+
+  std::array<int, kChunkColumnCount> topHeights{};
+  topHeights.fill(minY - 1);
+  for (int lz = 0; lz < kChunkSize; ++lz) {
+    for (int lx = 0; lx < kChunkSize; ++lx) {
+      size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+      for (int y = maxY; y >= minY; --y) {
+        uint8_t t = getLocal(lx, y, lz);
+        if (t != kAir && !isWaterBlock(t) && !isUnderwaterPlantBlock(t)) {
+          topHeights[idx] = y;
+          break;
+        }
+      }
+    }
+  }
+
+  uint32_t state = static_cast<uint32_t>(hashChunkSeed(seed, cx, cz, 0xD12Fu));
+  int attempts = 7;
+  for (int i = 0; i < attempts; ++i) {
+    int lx = randIntInclusive(state, 1, kChunkSize - 2);
+    int lz = randIntInclusive(state, 1, kChunkSize - 2);
+    size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+    int topY = topHeights[idx];
+    if (topY < minY + 1 || topY > maxY - 3) {
+      continue;
+    }
+
+    if (topY < kStageSeaLevel - 2 || topY > kStageSeaLevel + 2) {
+      continue;
+    }
+
+    uint8_t biome = biomeMap[idx];
+    float chance = 0.02f;
+    if (biome == static_cast<uint8_t>(DebugBiomeId::kBeach)) {
+      chance = 0.22f;
+    } else if (biome == static_cast<uint8_t>(DebugBiomeId::kOcean)) {
+      chance = 0.10f;
+    }
+    if (rand01(state) > chance) {
+      continue;
+    }
+
+    uint8_t ground = getLocal(lx, topY, lz);
+    if (ground != kSand && ground != kGravel && ground != kDirt) {
+      continue;
+    }
+
+    bool alongX = rand01(state) < 0.5f;
+    int length = randIntInclusive(state, 2, 4);
+    for (int t = 0; t < length; ++t) {
+      int tx = lx + (alongX ? t : 0);
+      int tz = lz + (alongX ? 0 : t);
+      if (tx < 0 || tx >= kChunkSize || tz < 0 || tz >= kChunkSize) {
+        break;
+      }
+      uint8_t at = getLocal(tx, topY + 1, tz);
+      if (at != kAir && !isWaterBlock(at)) {
+        continue;
+      }
+      setLocal(tx, topY + 1, tz, kWood);
+    }
+  }
+}
+
 void placeRegionalStructureFeatures(int cx,
                                     int cz,
                                     int seed,
@@ -2371,12 +2861,22 @@ void placeRegionalStructureFeatures(int cx,
     ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
   };
 
+  auto pickMasonry = [&](uint32_t& state) {
+    return rand01(state) < 0.28f ? kGravel : kStone;
+  };
+
+  enum class StructureType : uint8_t {
+    kRuinRing = 0,
+    kPillarSanctum = 1,
+    kWatchtowerRemnant = 2
+  };
+
   int regionX = floorDiv(cx, kStructureRegionSizeChunks);
   int regionZ = floorDiv(cz, kStructureRegionSizeChunks);
   for (int rz = regionZ - 1; rz <= regionZ + 1; ++rz) {
     for (int rx = regionX - 1; rx <= regionX + 1; ++rx) {
       uint32_t state = static_cast<uint32_t>(hashChunkSeed(seed, rx, rz, 0x5EEDu));
-      if (rand01(state) > 0.22f) {
+      if (rand01(state) > 0.24f) {
         continue;
       }
 
@@ -2392,30 +2892,348 @@ void placeRegionalStructureFeatures(int cx,
         continue;
       }
 
+      ClimateAndBiomeSample sample = sampleClimateAndBiomeAt(centerX, centerZ, seed, settings);
+      if (sample.biome == static_cast<uint8_t>(DebugBiomeId::kOcean)) {
+        continue;
+      }
+
       int foundationMinY = minY + 2;
-      int foundationMaxY = maxY - 8;
+      int foundationMaxY = maxY - 12;
       if (foundationMaxY < foundationMinY) {
         continue;
       }
-      int foundationY = randIntInclusive(state, foundationMinY, foundationMaxY);
-      for (int oz = -3; oz <= 3; ++oz) {
-        for (int ox = -3; ox <= 3; ++ox) {
-          int wx = centerX + ox;
-          int wz = centerZ + oz;
-          setWorldIfInChunk(wx, foundationY, wz, kStone);
-          if (std::abs(ox) == 3 || std::abs(oz) == 3) {
-            setWorldIfInChunk(wx, foundationY + 1, wz, kStone);
+      float targetSurface = computeRouterTargetHeight(centerX,
+                                                      centerZ,
+                                                      seed,
+                                                      sample.biome,
+                                                      sample.climate,
+                                                      minY,
+                                                      maxY);
+      int foundationY = static_cast<int>(std::round(targetSurface)) - 1 + randIntInclusive(state, -1, 1);
+      foundationY = std::clamp(foundationY, foundationMinY, foundationMaxY);
+
+      StructureType type = static_cast<StructureType>(randIntInclusive(state, 0, 2));
+      if (sample.biome == static_cast<uint8_t>(DebugBiomeId::kBeach)) {
+        type = StructureType::kRuinRing;
+      } else if (sample.biome == static_cast<uint8_t>(DebugBiomeId::kDesert)) {
+        type = (rand01(state) < 0.72f) ? StructureType::kWatchtowerRemnant : StructureType::kRuinRing;
+      } else if (sample.biome == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
+        type = (rand01(state) < 0.65f) ? StructureType::kPillarSanctum : StructureType::kRuinRing;
+      }
+
+      auto placeFoundation = [&](int radius) {
+        for (int oz = -radius; oz <= radius; ++oz) {
+          for (int ox = -radius; ox <= radius; ++ox) {
+            float dist = std::sqrt(static_cast<float>(ox * ox + oz * oz));
+            if (dist > static_cast<float>(radius) + 0.40f) {
+              continue;
+            }
+            int wx = centerX + ox;
+            int wz = centerZ + oz;
+            uint8_t floorType = pickMasonry(state);
+            if (dist > static_cast<float>(radius) - 0.35f && rand01(state) < 0.24f) {
+              floorType = kGravel;
+            }
+            setWorldIfInChunk(wx, foundationY, wz, floorType);
           }
+        }
+      };
+
+      auto placePillar = [&](int ox, int oz, int minH, int maxH, uint8_t material) {
+        int h = randIntInclusive(state, minH, maxH);
+        for (int y = 1; y <= h; ++y) {
+          setWorldIfInChunk(centerX + ox, foundationY + y, centerZ + oz, material);
+        }
+        return h;
+      };
+
+      placeFoundation(4);
+      for (int dz = -4; dz <= 4; ++dz) {
+        for (int dx = -4; dx <= 4; ++dx) {
+          if (std::abs(dx) != 4 && std::abs(dz) != 4) {
+            continue;
+          }
+          if (rand01(state) < 0.14f) {
+            continue;
+          }
+          setWorldIfInChunk(centerX + dx, foundationY + 1, centerZ + dz, pickMasonry(state));
         }
       }
 
-      std::array<std::pair<int, int>, 4> corners = {{
-        {-2, -2}, {2, -2}, {-2, 2}, {2, 2}
-      }};
-      for (const auto& [ox, oz] : corners) {
-        int pillarH = randIntInclusive(state, 3, 6);
-        for (int y = 1; y <= pillarH; ++y) {
-          setWorldIfInChunk(centerX + ox, foundationY + y, centerZ + oz, kStone);
+      if (type == StructureType::kRuinRing) {
+        int ruinVariant = randIntInclusive(state, 0, 2);
+        if (sample.biome == static_cast<uint8_t>(DebugBiomeId::kBeach) && ruinVariant == 2) {
+          ruinVariant = 1;
+        }
+
+        if (ruinVariant == 0) {
+          int doorwaySide = randIntInclusive(state, 0, 3);
+          auto isDoor = [&](int ox, int oz) {
+            if (doorwaySide == 0) {
+              return oz == -3 && std::abs(ox) <= 1;
+            }
+            if (doorwaySide == 1) {
+              return oz == 3 && std::abs(ox) <= 1;
+            }
+            if (doorwaySide == 2) {
+              return ox == -3 && std::abs(oz) <= 1;
+            }
+            return ox == 3 && std::abs(oz) <= 1;
+          };
+          for (int oz = -3; oz <= 3; ++oz) {
+            for (int ox = -3; ox <= 3; ++ox) {
+              if ((std::abs(ox) != 3 && std::abs(oz) != 3) || isDoor(ox, oz)) {
+                continue;
+              }
+              int height = randIntInclusive(state, 1, 3);
+              for (int y = 1; y <= height; ++y) {
+                if (rand01(state) < 0.14f) {
+                  continue;
+                }
+                setWorldIfInChunk(centerX + ox, foundationY + y, centerZ + oz, pickMasonry(state));
+              }
+            }
+          }
+          for (int oz = -1; oz <= 1; ++oz) {
+            for (int ox = -1; ox <= 1; ++ox) {
+              setWorldIfInChunk(centerX + ox, foundationY + 1, centerZ + oz, kStone);
+            }
+          }
+        } else if (ruinVariant == 1) {
+          bool openNorthSouth = rand01(state) < 0.5f;
+          for (int oz = -3; oz <= 3; ++oz) {
+            for (int ox = -3; ox <= 3; ++ox) {
+              bool border = std::abs(ox) == 3 || std::abs(oz) == 3;
+              if (!border) {
+                continue;
+              }
+              bool opening = openNorthSouth
+                ? (std::abs(ox) <= 1 && (oz == -3 || oz == 3))
+                : (std::abs(oz) <= 1 && (ox == -3 || ox == 3));
+              if (opening) {
+                continue;
+              }
+              int height = randIntInclusive(state, 2, 4);
+              for (int y = 1; y <= height; ++y) {
+                if (y > 2 && rand01(state) < 0.24f) {
+                  continue;
+                }
+                setWorldIfInChunk(centerX + ox, foundationY + y, centerZ + oz, pickMasonry(state));
+              }
+            }
+          }
+          for (const auto& corner : std::array<std::pair<int, int>, 4>{{{-3, -3}, {3, -3}, {-3, 3}, {3, 3}}}) {
+            int h = randIntInclusive(state, 3, 5);
+            for (int y = 1; y <= h; ++y) {
+              setWorldIfInChunk(centerX + corner.first, foundationY + y, centerZ + corner.second, kStone);
+            }
+          }
+          for (int oz = -1; oz <= 1; ++oz) {
+            for (int ox = -1; ox <= 1; ++ox) {
+              if (rand01(state) < 0.18f) {
+                continue;
+              }
+              setWorldIfInChunk(centerX + ox, foundationY + 1, centerZ + oz, kStone);
+            }
+          }
+        } else {
+          for (int t = -4; t <= 4; ++t) {
+            if (t % 2 != 0) {
+              continue;
+            }
+            if (rand01(state) < 0.10f) {
+              continue;
+            }
+            int h = randIntInclusive(state, 2, 4);
+            for (int y = 1; y <= h; ++y) {
+              setWorldIfInChunk(centerX + t, foundationY + y, centerZ - 4, pickMasonry(state));
+              setWorldIfInChunk(centerX + t, foundationY + y, centerZ + 4, pickMasonry(state));
+              setWorldIfInChunk(centerX - 4, foundationY + y, centerZ + t, pickMasonry(state));
+              setWorldIfInChunk(centerX + 4, foundationY + y, centerZ + t, pickMasonry(state));
+            }
+          }
+          for (int t = -2; t <= 2; ++t) {
+            if (rand01(state) < 0.28f) {
+              continue;
+            }
+            setWorldIfInChunk(centerX + t, foundationY + 1, centerZ, kStone);
+            setWorldIfInChunk(centerX, foundationY + 1, centerZ + t, kStone);
+          }
+          int altarOx = randIntInclusive(state, -1, 1);
+          int altarOz = randIntInclusive(state, -1, 1);
+          setWorldIfInChunk(centerX + altarOx, foundationY + 1, centerZ + altarOz, kStone);
+          setWorldIfInChunk(centerX + altarOx, foundationY + 2, centerZ + altarOz,
+                            rand01(state) < 0.30f ? kWater : kStone);
+        }
+      } else if (type == StructureType::kPillarSanctum) {
+        int sanctumVariant = randIntInclusive(state, 0, 2);
+        if (sanctumVariant == 0) {
+          int hNW = placePillar(-2, -2, 4, 7, kStone);
+          int hNE = placePillar(2, -2, 4, 7, kStone);
+          int hSW = placePillar(-2, 2, 4, 7, kStone);
+          int hSE = placePillar(2, 2, 4, 7, kStone);
+          int bridgeY = foundationY + std::max({hNW, hNE, hSW, hSE}) - 1;
+          for (int t = -2; t <= 2; ++t) {
+            if (rand01(state) < 0.22f) {
+              continue;
+            }
+            setWorldIfInChunk(centerX + t, bridgeY, centerZ - 2, kStone);
+            setWorldIfInChunk(centerX + t, bridgeY, centerZ + 2, kStone);
+            setWorldIfInChunk(centerX - 2, bridgeY, centerZ + t, kStone);
+            setWorldIfInChunk(centerX + 2, bridgeY, centerZ + t, kStone);
+          }
+          setWorldIfInChunk(centerX, foundationY + 1, centerZ, kStone);
+          setWorldIfInChunk(centerX, foundationY + 2, centerZ, rand01(state) < 0.32f ? kWater : kStone);
+        } else if (sanctumVariant == 1) {
+          std::array<std::pair<int, int>, 8> ring = {{
+            {-3, -1}, {-3, 1}, {3, -1}, {3, 1},
+            {-1, -3}, {1, -3}, {-1, 3}, {1, 3}
+          }};
+          int topY = foundationY + 3;
+          for (const auto& [ox, oz] : ring) {
+            int h = randIntInclusive(state, 3, 6);
+            for (int y = 1; y <= h; ++y) {
+              setWorldIfInChunk(centerX + ox, foundationY + y, centerZ + oz, kStone);
+            }
+            topY = std::max(topY, foundationY + h);
+          }
+          for (int oz = -1; oz <= 1; ++oz) {
+            for (int ox = -1; ox <= 1; ++ox) {
+              setWorldIfInChunk(centerX + ox, foundationY + 1, centerZ + oz, kStone);
+              if (rand01(state) < 0.78f) {
+                setWorldIfInChunk(centerX + ox, topY, centerZ + oz, kStone);
+              }
+            }
+          }
+          setWorldIfInChunk(centerX, foundationY + 2, centerZ, rand01(state) < 0.38f ? kWater : kStone);
+        } else {
+          for (int oz = -3; oz <= 3; oz += 3) {
+            for (int ox = -2; ox <= 2; ox += 2) {
+              int h = randIntInclusive(state, 4, 6);
+              for (int y = 1; y <= h; ++y) {
+                if (y > 2 && rand01(state) < 0.12f) {
+                  continue;
+                }
+                setWorldIfInChunk(centerX + ox, foundationY + y, centerZ + oz, kStone);
+              }
+            }
+          }
+          int roofY = foundationY + randIntInclusive(state, 5, 7);
+          for (int oz = -3; oz <= 3; ++oz) {
+            for (int ox = -2; ox <= 2; ++ox) {
+              if (std::abs(ox) != 2 && std::abs(oz) != 3) {
+                continue;
+              }
+              if (rand01(state) < 0.32f) {
+                continue;
+              }
+              setWorldIfInChunk(centerX + ox, roofY, centerZ + oz, kStone);
+            }
+          }
+          for (int oz = -1; oz <= 1; ++oz) {
+            for (int ox = -1; ox <= 1; ++ox) {
+              setWorldIfInChunk(centerX + ox, foundationY + 1, centerZ + oz, kStone);
+            }
+          }
+        }
+      } else {
+        uint8_t support = (sample.biome == static_cast<uint8_t>(DebugBiomeId::kDesert))
+          ? kStone
+          : kWood;
+        int towerVariant = randIntInclusive(state, 0, 2);
+        if (towerVariant == 0) {
+          int towerH = randIntInclusive(state, 5, 8);
+          std::array<std::pair<int, int>, 4> corners = {{
+            {-2, -2}, {2, -2}, {-2, 2}, {2, 2}
+          }};
+          for (const auto& [ox, oz] : corners) {
+            for (int y = 1; y <= towerH; ++y) {
+              if (rand01(state) < 0.08f && y > 2) {
+                continue;
+              }
+              setWorldIfInChunk(centerX + ox, foundationY + y, centerZ + oz, support);
+            }
+          }
+          for (int level = 2; level <= towerH; level += 2) {
+            for (int oz = -1; oz <= 1; ++oz) {
+              for (int ox = -1; ox <= 1; ++ox) {
+                if (rand01(state) < 0.18f) {
+                  continue;
+                }
+                setWorldIfInChunk(centerX + ox, foundationY + level, centerZ + oz,
+                                  (rand01(state) < 0.30f) ? kStone : support);
+              }
+            }
+          }
+          if (towerH > 4) {
+            for (int oz = -2; oz <= 2; ++oz) {
+              for (int ox = -2; ox <= 2; ++ox) {
+                if (std::abs(ox) != 2 && std::abs(oz) != 2) {
+                  continue;
+                }
+                if (rand01(state) < 0.22f) {
+                  continue;
+                }
+                setWorldIfInChunk(centerX + ox, foundationY + towerH, centerZ + oz, kLeaves);
+              }
+            }
+          }
+        } else if (towerVariant == 1) {
+          int leftH = randIntInclusive(state, 4, 7);
+          int rightH = randIntInclusive(state, 4, 7);
+          for (int y = 1; y <= leftH; ++y) {
+            setWorldIfInChunk(centerX - 2, foundationY + y, centerZ, support);
+            setWorldIfInChunk(centerX - 1, foundationY + y, centerZ - 1, support);
+            setWorldIfInChunk(centerX - 1, foundationY + y, centerZ + 1, support);
+          }
+          for (int y = 1; y <= rightH; ++y) {
+            setWorldIfInChunk(centerX + 2, foundationY + y, centerZ, support);
+            setWorldIfInChunk(centerX + 1, foundationY + y, centerZ - 1, support);
+            setWorldIfInChunk(centerX + 1, foundationY + y, centerZ + 1, support);
+          }
+          int bridgeY = foundationY + std::min(leftH, rightH) - 1;
+          for (int x = -1; x <= 1; ++x) {
+            if (rand01(state) < 0.16f) {
+              continue;
+            }
+            setWorldIfInChunk(centerX + x, bridgeY, centerZ, kStone);
+          }
+          for (int x = -2; x <= 2; ++x) {
+            setWorldIfInChunk(centerX + x, foundationY + 1, centerZ, kStone);
+          }
+        } else {
+          int wallH = randIntInclusive(state, 3, 5);
+          int doorSide = randIntInclusive(state, 0, 3);
+          for (int oz = -2; oz <= 2; ++oz) {
+            for (int ox = -2; ox <= 2; ++ox) {
+              bool edge = std::abs(ox) == 2 || std::abs(oz) == 2;
+              if (!edge) {
+                continue;
+              }
+              bool doorway = (doorSide == 0 && oz == -2 && std::abs(ox) <= 0) ||
+                             (doorSide == 1 && oz == 2 && std::abs(ox) <= 0) ||
+                             (doorSide == 2 && ox == -2 && std::abs(oz) <= 0) ||
+                             (doorSide == 3 && ox == 2 && std::abs(oz) <= 0);
+              for (int y = 1; y <= wallH; ++y) {
+                if (doorway && y <= 2) {
+                  continue;
+                }
+                if (y == wallH && rand01(state) < 0.26f) {
+                  continue;
+                }
+                setWorldIfInChunk(centerX + ox, foundationY + y, centerZ + oz,
+                                  rand01(state) < 0.24f ? kGravel : support);
+              }
+            }
+          }
+          for (int oz = -1; oz <= 1; ++oz) {
+            for (int ox = -1; ox <= 1; ++ox) {
+              if (rand01(state) < 0.20f) {
+                continue;
+              }
+              setWorldIfInChunk(centerX + ox, foundationY + 1, centerZ + oz, kStone);
+            }
+          }
         }
       }
     }
@@ -2427,13 +3245,16 @@ void runFeatureStage(int cx,
                      int seed,
                      const WorldGenSettings& settings,
                      const std::array<uint8_t, kChunkColumnCount>& biomeMap,
+                     const std::array<BiomeClimateSample, kChunkColumnCount>& climateMap,
                      std::vector<uint8_t>& ioBlocks) {
   placeOreFeatures(cx, cz, seed, settings, ioBlocks);
+  placeRockOutcropFeatures(cx, cz, seed, settings, biomeMap, climateMap, ioBlocks);
   if (settings.generateStructures) {
     placeRegionalStructureFeatures(cx, cz, seed, settings, ioBlocks);
   }
-  placeTreeFeatures(cx, cz, seed, settings, biomeMap, ioBlocks);
+  placeTreeFeatures(cx, cz, seed, settings, biomeMap, climateMap, ioBlocks);
   placeUnderwaterPlantFeatures(cx, cz, seed, settings, biomeMap, ioBlocks);
+  placeShorelineDriftFeatures(cx, cz, seed, settings, biomeMap, ioBlocks);
   applyHeightRangeMask(ioBlocks, settings.minY, settings.maxY);
 }
 
@@ -2506,7 +3327,7 @@ GeneratedChunkData generateChunkDataToStatus(int cx,
   if (targetStatus < ChunkGenStatus::kFeatures) {
     return out;
   }
-  runFeatureStage(cx, cz, seed, settings, out.biomeMap, out.blocks);
+  runFeatureStage(cx, cz, seed, settings, out.biomeMap, out.climateMap, out.blocks);
   out.status = ChunkGenStatus::kFeatures;
 
   if (targetStatus >= ChunkGenStatus::kLight) {
@@ -3097,6 +3918,7 @@ void World::pumpChunkGeneration() {
     chunk.biomeMap = result.biomeMap;
     chunk.climateMap = result.climateMap;
     chunk.generatedStatus = result.status;
+    chunk.generationTargetStatus = result.status;
     chunk.generating = false;
     markChunkSectionsDirty(chunk, true);
     markNeighborChunksDirty(chunk.cx, chunk.cz);
@@ -3104,10 +3926,23 @@ void World::pumpChunkGeneration() {
   }
 }
 
-World::Chunk& World::ensureChunk(int cx, int cz) {
+World::Chunk& World::ensureChunk(int cx, int cz, ChunkGenStatus targetStatus) {
   uint64_t key = chunkKey(cx, cz);
   auto it = chunks.find(key);
   if (it != chunks.end()) {
+    Chunk& existing = it->second;
+    ChunkGenStatus clampedTarget =
+      std::clamp(targetStatus, ChunkGenStatus::kNoise, ChunkGenStatus::kFull);
+    if (!existing.generating && existing.generatedStatus < clampedTarget) {
+      existing.generating = true;
+      existing.generationEpoch = generationEpoch++;
+      existing.generationTargetStatus = clampedTarget;
+      queueChunkGeneration(cx, cz, existing.generationEpoch, clampedTarget);
+    } else if (existing.generating && existing.generationTargetStatus < clampedTarget) {
+      existing.generationEpoch = generationEpoch++;
+      existing.generationTargetStatus = clampedTarget;
+      queueChunkGeneration(cx, cz, existing.generationEpoch, clampedTarget);
+    }
     return it->second;
   }
 
@@ -3124,15 +3959,20 @@ World::Chunk& World::ensureChunk(int cx, int cz) {
     chunk.blocks = savedIt->second;
     chunk.modified = true;
     chunk.generatedStatus = ChunkGenStatus::kFull;
+    chunk.generationTargetStatus = ChunkGenStatus::kFull;
     savedChunks.erase(savedIt);
   } else {
     chunk.generating = true;
     chunk.generationEpoch = generationEpoch;
+    chunk.generationTargetStatus = std::clamp(targetStatus, ChunkGenStatus::kNoise, ChunkGenStatus::kFull);
   }
 
   auto insertResult = chunks.emplace(key, std::move(chunk));
   if (insertResult.first->second.generating) {
-    queueChunkGeneration(cx, cz, insertResult.first->second.generationEpoch, ChunkGenStatus::kFull);
+    queueChunkGeneration(cx,
+                         cz,
+                         insertResult.first->second.generationEpoch,
+                         insertResult.first->second.generationTargetStatus);
   } else {
     markChunkSectionsDirty(insertResult.first->second, true);
     markNeighborChunksDirty(cx, cz);
@@ -3148,6 +3988,7 @@ void World::generateChunk(World::Chunk& chunk, ChunkGenStatus targetStatus) {
   chunk.biomeMap = generated.biomeMap;
   chunk.climateMap = generated.climateMap;
   chunk.generatedStatus = generated.status;
+  chunk.generationTargetStatus = generated.status;
   chunk.generating = false;
   chunk.generationEpoch = generationEpoch;
 }
@@ -3174,6 +4015,70 @@ uint8_t World::getBlock(int x, int y, int z) const {
     return kAir;
   }
   return chunk->blocks[static_cast<size_t>(localIndex(lx, y, lz))];
+}
+
+bool World::sampleBiomeClimateAt(int x, int z, uint8_t& outBiome, BiomeClimateSample& outClimate) const {
+  int cx = floorDiv(x, kChunkSize);
+  int cz = floorDiv(z, kChunkSize);
+  int lx = positiveMod(x, kChunkSize);
+  int lz = positiveMod(z, kChunkSize);
+  const Chunk* chunk = findChunk(cx, cz);
+  if (chunk &&
+      !chunk->generating &&
+      chunk->generatedStatus >= ChunkGenStatus::kBiomes) {
+    size_t idx = static_cast<size_t>(lx + lz * kChunkSize);
+    outBiome = chunk->biomeMap[idx];
+    outClimate = chunk->climateMap[idx];
+    return true;
+  }
+
+  ClimateAndBiomeSample sampled = sampleClimateAndBiomeAt(x, z, seed, genSettings);
+  outBiome = sampled.biome;
+  outClimate = sampled.climate;
+  return false;
+}
+
+int World::sampleSurfaceHeightAt(int x, int z) const {
+  int minY = genSettings.minY;
+  int maxY = genSettings.maxY;
+  for (int y = maxY; y >= minY; --y) {
+    uint8_t t = getBlock(x, y, z);
+    if (t != kAir && !isWaterBlock(t) && !isUnderwaterPlantBlock(t)) {
+      return y;
+    }
+  }
+
+  uint8_t biome = static_cast<uint8_t>(DebugBiomeId::kPlains);
+  BiomeClimateSample climate{};
+  sampleBiomeClimateAt(x, z, biome, climate);
+  float target = computeRouterTargetHeight(x, z, seed, biome, climate, minY, maxY);
+  return std::clamp(static_cast<int>(std::round(target)), minY, maxY);
+}
+
+float World::sampleDensityAt(int x, int y, int z) const {
+  int minY = genSettings.minY;
+  int maxY = genSettings.maxY;
+  int sampleY = std::clamp(y, minY, maxY);
+  uint8_t biome = static_cast<uint8_t>(DebugBiomeId::kPlains);
+  BiomeClimateSample climate{};
+  sampleBiomeClimateAt(x, z, biome, climate);
+  float target = computeRouterTargetHeight(x, z, seed, biome, climate, minY, maxY);
+  return sampleDensityRouterAt(x,
+                               sampleY,
+                               z,
+                               seed,
+                               genSettings,
+                               biome,
+                               climate,
+                               target,
+                               minY);
+}
+
+int World::sampleAquiferLevelAt(int x, int z) const {
+  uint8_t biome = static_cast<uint8_t>(DebugBiomeId::kPlains);
+  BiomeClimateSample climate{};
+  sampleBiomeClimateAt(x, z, biome, climate);
+  return computeAquiferLevelAt(x, z, seed, climate, genSettings.minY, genSettings.maxY);
 }
 
 void World::setBlock(int x, int y, int z, uint8_t type) {
@@ -3238,10 +4143,19 @@ void World::updateActiveChunks(int centerChunkX, int centerChunkZ, int radius) {
   // are still generating near the view boundary.
   const int loadRadius = radius + 1;
   const int unloadRadius = radius + 2;
+  const int fullGenRadius = std::max(3, radius / 2);
+  const int featureGenRadius = std::max(fullGenRadius + 1, radius - 1);
 
   for (int cz = centerChunkZ - loadRadius; cz <= centerChunkZ + loadRadius; ++cz) {
     for (int cx = centerChunkX - loadRadius; cx <= centerChunkX + loadRadius; ++cx) {
-      (void)ensureChunk(cx, cz);
+      int dist = std::max(std::abs(cx - centerChunkX), std::abs(cz - centerChunkZ));
+      ChunkGenStatus targetStatus = ChunkGenStatus::kSurface;
+      if (dist <= fullGenRadius) {
+        targetStatus = ChunkGenStatus::kFull;
+      } else if (dist <= featureGenRadius) {
+        targetStatus = ChunkGenStatus::kFeatures;
+      }
+      (void)ensureChunk(cx, cz, targetStatus);
     }
   }
 
