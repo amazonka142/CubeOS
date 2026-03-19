@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -68,6 +69,139 @@ constexpr float kStreamingProbeBlocks = 9.0f;
 constexpr int kStreamingWarmRadius = 1;
 constexpr float kTorchLightRefreshMoveThreshold = 0.55f;
 constexpr float kTorchLightRefreshForwardDot = 0.992f;
+
+std::filesystem::path defaultUserHomeDirectory() {
+#if defined(_WIN32)
+  const char* userProfile = std::getenv("USERPROFILE");
+  if (userProfile && userProfile[0] != '\0') {
+    return std::filesystem::path(userProfile);
+  }
+#endif
+  const char* home = std::getenv("HOME");
+  if (home && home[0] != '\0') {
+    return std::filesystem::path(home);
+  }
+  return {};
+}
+
+std::filesystem::path cubeosUserDataDir() {
+#if defined(_WIN32)
+  const char* appData = std::getenv("APPDATA");
+  if (appData && appData[0] != '\0') {
+    return std::filesystem::path(appData) / "CubeOS";
+  }
+  std::filesystem::path home = defaultUserHomeDirectory();
+  if (!home.empty()) {
+    return home / "AppData" / "Roaming" / "CubeOS";
+  }
+#elif defined(__APPLE__)
+  std::filesystem::path home = defaultUserHomeDirectory();
+  if (!home.empty()) {
+    return home / "Library" / "Application Support" / "CubeOS";
+  }
+#else
+  const char* xdgDataHome = std::getenv("XDG_DATA_HOME");
+  if (xdgDataHome && xdgDataHome[0] != '\0') {
+    return std::filesystem::path(xdgDataHome) / "CubeOS";
+  }
+  std::filesystem::path home = defaultUserHomeDirectory();
+  if (!home.empty()) {
+    return home / ".local" / "share" / "CubeOS";
+  }
+#endif
+
+  std::error_code ec;
+  std::filesystem::path cwd = std::filesystem::current_path(ec);
+  if (ec || cwd.empty()) {
+    return std::filesystem::path("CubeOSData");
+  }
+  return cwd / "CubeOSData";
+}
+
+std::filesystem::path cubeosSettingsPath() {
+  return cubeosUserDataDir() / kSettingsFilePath;
+}
+
+std::filesystem::path cubeosSavesDir() {
+  return cubeosUserDataDir() / "saves";
+}
+
+bool pathsResolveToSameLocation(const std::filesystem::path& a, const std::filesystem::path& b) {
+  std::error_code aec;
+  std::error_code bec;
+  std::filesystem::path absA = std::filesystem::absolute(a, aec);
+  std::filesystem::path absB = std::filesystem::absolute(b, bec);
+  return !aec && !bec && absA == absB;
+}
+
+void copyDirectoryContentsIfMissing(const std::filesystem::path& sourceDir,
+                                    const std::filesystem::path& targetDir) {
+  std::error_code ec;
+  if (!std::filesystem::exists(sourceDir, ec) || ec) {
+    return;
+  }
+  if (pathsResolveToSameLocation(sourceDir, targetDir)) {
+    return;
+  }
+
+  std::filesystem::create_directories(targetDir, ec);
+  ec.clear();
+
+  for (std::filesystem::recursive_directory_iterator it(sourceDir, ec), end; !ec && it != end; it.increment(ec)) {
+    const std::filesystem::directory_entry& entry = *it;
+    std::filesystem::path relativePath = std::filesystem::relative(entry.path(), sourceDir, ec);
+    if (ec) {
+      ec.clear();
+      continue;
+    }
+
+    std::filesystem::path targetPath = targetDir / relativePath;
+    if (entry.is_directory(ec)) {
+      std::filesystem::create_directories(targetPath, ec);
+      ec.clear();
+      continue;
+    }
+    if (!entry.is_regular_file(ec)) {
+      ec.clear();
+      continue;
+    }
+
+    std::filesystem::create_directories(targetPath.parent_path(), ec);
+    ec.clear();
+    std::filesystem::copy_file(entry.path(),
+                               targetPath,
+                               std::filesystem::copy_options::skip_existing,
+                               ec);
+    ec.clear();
+  }
+}
+
+void preparePersistentStorage() {
+  std::filesystem::path userDataDir = cubeosUserDataDir();
+  std::filesystem::path settingsPath = cubeosSettingsPath();
+  std::filesystem::path savesPath = cubeosSavesDir();
+
+  std::error_code ec;
+  std::filesystem::create_directories(userDataDir, ec);
+  ec.clear();
+  std::filesystem::create_directories(savesPath, ec);
+  ec.clear();
+
+  std::filesystem::path legacySettingsPath(kSettingsFilePath);
+  if (!pathsResolveToSameLocation(legacySettingsPath, settingsPath) &&
+      std::filesystem::exists(legacySettingsPath, ec) &&
+      !ec) {
+    std::filesystem::copy_file(legacySettingsPath,
+                               settingsPath,
+                               std::filesystem::copy_options::skip_existing,
+                               ec);
+    ec.clear();
+  } else {
+    ec.clear();
+  }
+
+  copyDirectoryContentsIfMissing(std::filesystem::path("saves"), savesPath);
+}
 
 int maxTorchLightsForQuality(int quality) {
   static constexpr int kQualityToMaxTorchLights[3] = {6, 10, 16};
@@ -1793,7 +1927,7 @@ std::string playerStatePathForWorld(const std::string& worldPath) {
 }
 
 std::string uniqueWorldPathForName(const std::string& worldName, std::string* outDisplayName) {
-  std::filesystem::path savesDir("saves");
+  std::filesystem::path savesDir = cubeosSavesDir();
   std::error_code ec;
   std::filesystem::create_directories(savesDir, ec);
 
@@ -1911,7 +2045,7 @@ struct DiskWorldEntry {
 
 std::vector<DiskWorldEntry> collectWorldSelectEntries() {
   std::vector<DiskWorldEntry> result;
-  std::filesystem::path savesDir("saves");
+  std::filesystem::path savesDir = cubeosSavesDir();
   std::error_code ec;
   if (!std::filesystem::exists(savesDir, ec)) {
     return result;
@@ -3954,7 +4088,8 @@ void App::onCharInput(unsigned int codepoint) {
 void App::loadSettings() {
   appliedSettings = UserSettings{};
   bool hasRenderDistance = false;
-  std::ifstream in(kSettingsFilePath);
+  std::filesystem::path settingsPath = cubeosSettingsPath();
+  std::ifstream in(settingsPath);
   if (in.is_open()) {
     std::string line;
     while (std::getline(in, line)) {
@@ -4018,7 +4153,10 @@ void App::loadSettings() {
 }
 
 bool App::saveSettings() const {
-  std::ofstream out(kSettingsFilePath, std::ios::trunc);
+  std::filesystem::path settingsPath = cubeosSettingsPath();
+  std::error_code ec;
+  std::filesystem::create_directories(settingsPath.parent_path(), ec);
+  std::ofstream out(settingsPath, std::ios::trunc);
   if (!out.is_open()) {
     return false;
   }
@@ -4036,7 +4174,8 @@ void App::saveSettingsWithWarning(const char* reason) const {
   if (saveSettings()) {
     return;
   }
-  std::cerr << "Warning: failed to save settings (" << reason << "): " << kSettingsFilePath << "\n";
+  std::cerr << "Warning: failed to save settings (" << reason << "): "
+            << cubeosSettingsPath().string() << "\n";
 }
 
 void App::applySettings(bool refreshWorldStreaming) {
@@ -4101,6 +4240,7 @@ void App::initWindow() {
   glfwSetCursorPosCallback(window, App::mouseCallback);
   glfwSetCharCallback(window, App::charCallback);
   glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+  preparePersistentStorage();
   loadSettings();
   if (!audio.init()) {
     std::cerr << "Warning: failed to initialize audio.\n";
