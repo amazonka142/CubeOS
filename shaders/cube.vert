@@ -4,9 +4,13 @@ layout(binding = 0) uniform UBO {
   mat4 model;
   mat4 view;
   mat4 proj;
+  mat4 invView;
+  mat4 invProj;
   vec4 params;
   vec4 cameraData;
   vec4 weatherData;
+  vec4 torchMeta;
+  vec4 torchLights[16];
 } ubo;
 
 layout(location = 0) in vec3 inPos;

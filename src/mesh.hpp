@@ -7,7 +7,7 @@
 
 constexpr int kAtlasTileSize = 16;
 constexpr int kAtlasCols = 4;
-constexpr int kAtlasRows = 6;
+constexpr int kAtlasRows = 52;
 
 constexpr int kTileGrassTop = 0;
 constexpr int kTileGrassSide = 1;
@@ -26,6 +26,21 @@ constexpr int kTileIronOre = 19;
 constexpr int kTileGoldOre = 20;
 constexpr int kTileSeagrass = 21;
 constexpr int kTileCoral = 22;
+constexpr int kTileDiamondOre = 23;
+constexpr int kTileWorkbench = 24;
+constexpr int kTilePlanks = 25;
+constexpr int kTileStick = 26;
+constexpr int kTileIronIngot = 27;
+constexpr int kTileDiamond = 28;
+constexpr int kTileWoodPickaxe = 29;
+constexpr int kTileStonePickaxe = 30;
+constexpr int kTileIronPickaxe = 31;
+constexpr int kTileTorch = 32;
+constexpr int kTileFurnace = 33;
+constexpr int kTileFurnaceFront = 34;
+constexpr int kTileLootCache = 35;
+constexpr int kTileWoodTop = 36;
+constexpr int kUiFontTileBase = 37;
 
 struct Vertex {
   glm::vec3 pos;

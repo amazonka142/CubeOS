@@ -25,6 +25,9 @@
 #endif
 #include <windows.h>
 #elif defined(__APPLE__)
+#include <CoreGraphics/CoreGraphics.h>
+#include <CoreText/CoreText.h>
+#include <ImageIO/ImageIO.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <limits.h>
@@ -65,9 +68,13 @@ struct UniformBufferObject {
   glm::mat4 model;
   glm::mat4 view;
   glm::mat4 proj;
+  glm::mat4 invView;
+  glm::mat4 invProj;
   glm::vec4 params{0.0f};
   glm::vec4 cameraData{0.0f};
   glm::vec4 weatherData{0.0f};
+  glm::vec4 torchMeta{0.0f};
+  glm::vec4 torchLights[16]{};
 };
 
 const auto kStartTime = std::chrono::high_resolution_clock::now();
@@ -80,6 +87,50 @@ bool unpackSectionKey(uint64_t key, int& outCx, int& outCz, int& outSectionY) {
   outCz = static_cast<int>(static_cast<int64_t>(uz) - kSectionKeyCoordBias);
   outSectionY = static_cast<int>(us);
   return outSectionY >= 0 && outSectionY < 16;
+}
+
+glm::vec4 matrixRow(const glm::mat4& m, int row) {
+  return glm::vec4(m[0][row], m[1][row], m[2][row], m[3][row]);
+}
+
+std::array<glm::vec4, 6> extractFrustumPlanes(const glm::mat4& viewProj) {
+  glm::vec4 row0 = matrixRow(viewProj, 0);
+  glm::vec4 row1 = matrixRow(viewProj, 1);
+  glm::vec4 row2 = matrixRow(viewProj, 2);
+  glm::vec4 row3 = matrixRow(viewProj, 3);
+
+  std::array<glm::vec4, 6> planes = {
+    row3 + row0,
+    row3 - row0,
+    row3 + row1,
+    row3 - row1,
+    row3 + row2,
+    row3 - row2
+  };
+
+  for (glm::vec4& plane : planes) {
+    float len = glm::length(glm::vec3(plane));
+    if (len > 0.0001f) {
+      plane /= len;
+    }
+  }
+  return planes;
+}
+
+bool aabbIntersectsFrustum(const std::array<glm::vec4, 6>& planes,
+                           const glm::vec3& aabbMin,
+                           const glm::vec3& aabbMax) {
+  for (const glm::vec4& plane : planes) {
+    glm::vec3 positive{
+      plane.x >= 0.0f ? aabbMax.x : aabbMin.x,
+      plane.y >= 0.0f ? aabbMax.y : aabbMin.y,
+      plane.z >= 0.0f ? aabbMax.z : aabbMin.z
+    };
+    if (glm::dot(glm::vec3(plane), positive) + plane.w < 0.0f) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool isSpecialWorldMeshKey(uint64_t key) {
@@ -219,6 +270,420 @@ std::string buildShaderPath(const char* filename) {
   }
   return path;
 }
+
+std::string buildTexturePath(const char* relativePath) {
+  const char* envDir = std::getenv("CUBEOS_TEXTURE_DIR");
+  if (envDir && envDir[0] != '\0') {
+    std::string envPath = std::string(envDir) + "/" + relativePath;
+    std::ifstream envFile(envPath, std::ios::binary);
+    if (envFile.is_open()) {
+      return envPath;
+    }
+  }
+
+  std::string base = getExecutableDir();
+  std::array<std::string, 4> candidates = {
+    base + "/textures/" + relativePath,
+    base + "/../textures/" + relativePath,
+    "./assets/textures/" + std::string(relativePath),
+    "./textures/" + std::string(relativePath)
+  };
+  for (const std::string& path : candidates) {
+    std::ifstream file(path, std::ios::binary);
+    if (file.is_open()) {
+      return path;
+    }
+  }
+  return candidates.front();
+}
+
+struct LoadedImageRgba {
+  int width = 0;
+  int height = 0;
+  std::vector<uint8_t> pixels;
+};
+
+#ifdef __APPLE__
+bool loadImageRgba(const std::string& path, LoadedImageRgba& outImage) {
+  CFStringRef pathString = CFStringCreateWithCString(nullptr,
+                                                     path.c_str(),
+                                                     kCFStringEncodingUTF8);
+  if (!pathString) {
+    return false;
+  }
+  CFURLRef url = CFURLCreateWithFileSystemPath(nullptr,
+                                               pathString,
+                                               kCFURLPOSIXPathStyle,
+                                               false);
+  CFRelease(pathString);
+  if (!url) {
+    return false;
+  }
+
+  CGImageSourceRef imageSource = CGImageSourceCreateWithURL(url, nullptr);
+  CFRelease(url);
+  if (!imageSource) {
+    return false;
+  }
+
+  CGImageRef image = CGImageSourceCreateImageAtIndex(imageSource, 0, nullptr);
+  CFRelease(imageSource);
+  if (!image) {
+    return false;
+  }
+
+  const size_t width = CGImageGetWidth(image);
+  const size_t height = CGImageGetHeight(image);
+  if (width == 0 || height == 0) {
+    CGImageRelease(image);
+    return false;
+  }
+
+  outImage.width = static_cast<int>(width);
+  outImage.height = static_cast<int>(height);
+  outImage.pixels.assign(width * height * 4, 0);
+
+  CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+  CGContextRef context = CGBitmapContextCreate(outImage.pixels.data(),
+                                               width,
+                                               height,
+                                               8,
+                                               width * 4,
+                                               colorSpace,
+                                               static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+                                                 static_cast<uint32_t>(kCGBitmapByteOrder32Big));
+  CGColorSpaceRelease(colorSpace);
+  if (!context) {
+    outImage = {};
+    CGImageRelease(image);
+    return false;
+  }
+
+  CGContextClearRect(context, CGRectMake(0.0, 0.0, width, height));
+  CGContextTranslateCTM(context, 0.0, static_cast<CGFloat>(height));
+  CGContextScaleCTM(context, 1.0, -1.0);
+  CGContextDrawImage(context,
+                     CGRectMake(0.0, 0.0, width, height),
+                     image);
+  CGContextRelease(context);
+  CGImageRelease(image);
+  return true;
+}
+#else
+bool loadImageRgba(const std::string& path, LoadedImageRgba& outImage) {
+  (void)path;
+  outImage = {};
+  return false;
+}
+#endif
+
+void blitImageRegionToAtlas(std::vector<uint8_t>& atlasPixels,
+                            int atlasWidth,
+                            int /*atlasHeight*/,
+                            const LoadedImageRgba& image,
+                            int tileIndex,
+                            int srcX = 0,
+                            int srcY = 0,
+                            int srcWidth = kAtlasTileSize,
+                            int srcHeight = kAtlasTileSize) {
+  if (image.width <= 0 || image.height <= 0 || image.pixels.empty()) {
+    return;
+  }
+
+  int copyWidth = std::min({srcWidth, kAtlasTileSize, image.width - srcX});
+  int copyHeight = std::min({srcHeight, kAtlasTileSize, image.height - srcY});
+  if (copyWidth <= 0 || copyHeight <= 0) {
+    return;
+  }
+
+  int tilePixelX = (tileIndex % kAtlasCols) * kAtlasTileSize;
+  int tilePixelY = (tileIndex / kAtlasCols) * kAtlasTileSize;
+  for (int y = 0; y < copyHeight; ++y) {
+    for (int x = 0; x < copyWidth; ++x) {
+      size_t srcIndex = static_cast<size_t>(((srcY + y) * image.width + (srcX + x)) * 4);
+      size_t dstIndex = static_cast<size_t>(((tilePixelY + y) * atlasWidth + (tilePixelX + x)) * 4);
+      atlasPixels[dstIndex + 0] = image.pixels[srcIndex + 0];
+      atlasPixels[dstIndex + 1] = image.pixels[srcIndex + 1];
+      atlasPixels[dstIndex + 2] = image.pixels[srcIndex + 2];
+      atlasPixels[dstIndex + 3] = image.pixels[srcIndex + 3];
+    }
+  }
+}
+
+void copyAtlasTile(std::vector<uint8_t>& atlasPixels,
+                   int atlasWidth,
+                   int srcTileIndex,
+                   int dstTileIndex) {
+  int srcTileX = (srcTileIndex % kAtlasCols) * kAtlasTileSize;
+  int srcTileY = (srcTileIndex / kAtlasCols) * kAtlasTileSize;
+  int dstTileX = (dstTileIndex % kAtlasCols) * kAtlasTileSize;
+  int dstTileY = (dstTileIndex / kAtlasCols) * kAtlasTileSize;
+
+  for (int y = 0; y < kAtlasTileSize; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      size_t srcIndex = static_cast<size_t>(((srcTileY + y) * atlasWidth + (srcTileX + x)) * 4);
+      size_t dstIndex = static_cast<size_t>(((dstTileY + y) * atlasWidth + (dstTileX + x)) * 4);
+      atlasPixels[dstIndex + 0] = atlasPixels[srcIndex + 0];
+      atlasPixels[dstIndex + 1] = atlasPixels[srcIndex + 1];
+      atlasPixels[dstIndex + 2] = atlasPixels[srcIndex + 2];
+      atlasPixels[dstIndex + 3] = atlasPixels[srcIndex + 3];
+    }
+  }
+}
+
+void blendImageRegionToAtlas(std::vector<uint8_t>& atlasPixels,
+                             int atlasWidth,
+                             const LoadedImageRgba& image,
+                             int tileIndex,
+                             int srcX = 0,
+                             int srcY = 0,
+                             int srcWidth = kAtlasTileSize,
+                             int srcHeight = kAtlasTileSize) {
+  if (image.width <= 0 || image.height <= 0 || image.pixels.empty()) {
+    return;
+  }
+
+  int copyWidth = std::min({srcWidth, kAtlasTileSize, image.width - srcX});
+  int copyHeight = std::min({srcHeight, kAtlasTileSize, image.height - srcY});
+  if (copyWidth <= 0 || copyHeight <= 0) {
+    return;
+  }
+
+  int tilePixelX = (tileIndex % kAtlasCols) * kAtlasTileSize;
+  int tilePixelY = (tileIndex / kAtlasCols) * kAtlasTileSize;
+  for (int y = 0; y < copyHeight; ++y) {
+    for (int x = 0; x < copyWidth; ++x) {
+      size_t srcIndex = static_cast<size_t>(((srcY + y) * image.width + (srcX + x)) * 4);
+      size_t dstIndex = static_cast<size_t>(((tilePixelY + y) * atlasWidth + (tilePixelX + x)) * 4);
+
+      float srcAlpha = static_cast<float>(image.pixels[srcIndex + 3]) / 255.0f;
+      if (srcAlpha <= 0.0f) {
+        continue;
+      }
+
+      float invAlpha = 1.0f - srcAlpha;
+      atlasPixels[dstIndex + 0] = static_cast<uint8_t>(std::clamp(
+        static_cast<int>(std::lround(static_cast<float>(image.pixels[srcIndex + 0]) * srcAlpha +
+                                     static_cast<float>(atlasPixels[dstIndex + 0]) * invAlpha)),
+        0,
+        255));
+      atlasPixels[dstIndex + 1] = static_cast<uint8_t>(std::clamp(
+        static_cast<int>(std::lround(static_cast<float>(image.pixels[srcIndex + 1]) * srcAlpha +
+                                     static_cast<float>(atlasPixels[dstIndex + 1]) * invAlpha)),
+        0,
+        255));
+      atlasPixels[dstIndex + 2] = static_cast<uint8_t>(std::clamp(
+        static_cast<int>(std::lround(static_cast<float>(image.pixels[srcIndex + 2]) * srcAlpha +
+                                     static_cast<float>(atlasPixels[dstIndex + 2]) * invAlpha)),
+        0,
+        255));
+      atlasPixels[dstIndex + 3] = 255;
+    }
+  }
+}
+
+#ifdef __APPLE__
+constexpr float kUiFontBaseSizePx = 14.0f;
+
+std::vector<uint32_t> buildUiFontCodepoints() {
+  std::vector<uint32_t> codepoints;
+  codepoints.reserve(95 + 66);
+  for (uint32_t cp = 32; cp <= 126; ++cp) {
+    codepoints.push_back(cp);
+  }
+  codepoints.push_back(0x401u);
+  for (uint32_t cp = 0x410u; cp <= 0x44Fu; ++cp) {
+    codepoints.push_back(cp);
+  }
+  codepoints.push_back(0x451u);
+  return codepoints;
+}
+
+bool encodeCodepointToUtf16(uint32_t codepoint, std::array<UniChar, 2>& outChars, CFIndex& outCount) {
+  if (codepoint <= 0xFFFFu) {
+    outChars[0] = static_cast<UniChar>(codepoint);
+    outCount = 1;
+    return true;
+  }
+  if (codepoint > 0x10FFFFu) {
+    outCount = 0;
+    return false;
+  }
+  uint32_t value = codepoint - 0x10000u;
+  outChars[0] = static_cast<UniChar>(0xD800u + (value >> 10));
+  outChars[1] = static_cast<UniChar>(0xDC00u + (value & 0x3FFu));
+  outCount = 2;
+  return true;
+}
+
+void populateUiFontAtlas(std::vector<uint8_t>& pixels,
+                         int texWidth,
+                         int texHeight,
+                         std::unordered_map<uint32_t, VulkanContext::UiGlyphInfo>& outGlyphs,
+                         float& outLineHeight,
+                         float& outAscent) {
+  outGlyphs.clear();
+  outLineHeight = 0.0f;
+  outAscent = 0.0f;
+
+  CTFontRef font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, kUiFontBaseSizePx, nullptr);
+  if (!font) {
+    font = CTFontCreateWithName(CFSTR("Helvetica"), kUiFontBaseSizePx, nullptr);
+  }
+  if (!font) {
+    return;
+  }
+
+  outAscent = std::ceil(static_cast<float>(CTFontGetAscent(font)));
+  outLineHeight = std::ceil(std::max(static_cast<float>(CTFontGetAscent(font) +
+                                                         CTFontGetDescent(font) +
+                                                         CTFontGetLeading(font)),
+                                     kUiFontBaseSizePx));
+
+  CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+  if (!colorSpace) {
+    CFRelease(font);
+    return;
+  }
+
+  constexpr size_t kGlyphBitmapBytes = static_cast<size_t>(kAtlasTileSize * kAtlasTileSize * 4);
+  const float atlasWidth = static_cast<float>(texWidth);
+  const float atlasHeight = static_cast<float>(texHeight);
+  int nextTile = kUiFontTileBase;
+
+  for (uint32_t codepoint : buildUiFontCodepoints()) {
+    if (nextTile >= kAtlasCols * kAtlasRows) {
+      break;
+    }
+
+    std::array<UniChar, 2> utf16Chars{};
+    CFIndex utf16Count = 0;
+    if (!encodeCodepointToUtf16(codepoint, utf16Chars, utf16Count)) {
+      continue;
+    }
+
+    CGGlyph glyph = 0;
+    bool haveGlyph = utf16Count == 1 && CTFontGetGlyphsForCharacters(font, utf16Chars.data(), &glyph, 1);
+
+    CGSize advanceSize{};
+    if (haveGlyph) {
+      CTFontGetAdvancesForGlyphs(font, kCTFontOrientationHorizontal, &glyph, &advanceSize, 1);
+    } else if (codepoint == static_cast<uint32_t>(' ')) {
+      advanceSize.width = kUiFontBaseSizePx * 0.38f;
+    } else {
+      advanceSize.width = kUiFontBaseSizePx * 0.54f;
+    }
+
+    VulkanContext::UiGlyphInfo info{};
+    info.advance = std::max(static_cast<float>(advanceSize.width), 1.0f);
+
+    if (haveGlyph && codepoint != static_cast<uint32_t>(' ')) {
+      CGRect bbox = CTFontGetBoundingRectsForGlyphs(font, kCTFontOrientationHorizontal, &glyph, nullptr, 1);
+      int left = static_cast<int>(std::floor(bbox.origin.x));
+
+      if (bbox.size.width > 0.0 && bbox.size.height > 0.0) {
+        std::array<uint8_t, kGlyphBitmapBytes> glyphPixels{};
+        CGBitmapInfo bitmapInfo = static_cast<CGBitmapInfo>(
+          static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+          static_cast<uint32_t>(kCGBitmapByteOrder32Big));
+        CGContextRef glyphContext = CGBitmapContextCreate(glyphPixels.data(),
+                                                          kAtlasTileSize,
+                                                          kAtlasTileSize,
+                                                          8,
+                                                          kAtlasTileSize * 4,
+                                                          colorSpace,
+                                                          bitmapInfo);
+        if (glyphContext) {
+          CGContextSetShouldAntialias(glyphContext, true);
+          CGContextSetAllowsAntialiasing(glyphContext, true);
+          CGContextSetShouldSmoothFonts(glyphContext, true);
+          CGContextSetTextDrawingMode(glyphContext, kCGTextFill);
+          CGContextSetTextMatrix(glyphContext, CGAffineTransformIdentity);
+          CGContextSetRGBFillColor(glyphContext, 1.0, 1.0, 1.0, 1.0);
+
+          CGPoint position{
+            static_cast<CGFloat>(1 - left),
+            static_cast<CGFloat>(1.0 - bbox.origin.y)
+          };
+          CTFontDrawGlyphs(font, &glyph, &position, 1, glyphContext);
+          CGContextFlush(glyphContext);
+
+          int minX = kAtlasTileSize;
+          int minY = kAtlasTileSize;
+          int maxX = -1;
+          int maxY = -1;
+          for (int y = 0; y < kAtlasTileSize; ++y) {
+            for (int x = 0; x < kAtlasTileSize; ++x) {
+              size_t srcIndex = static_cast<size_t>((y * kAtlasTileSize + x) * 4);
+              if (glyphPixels[srcIndex + 3] == 0) {
+                continue;
+              }
+              minX = std::min(minX, x);
+              minY = std::min(minY, y);
+              maxX = std::max(maxX, x);
+              maxY = std::max(maxY, y);
+            }
+          }
+
+          if (maxX >= minX && maxY >= minY) {
+            int glyphWidth = maxX - minX + 1;
+            int glyphHeight = maxY - minY + 1;
+            int tilePixelX = (nextTile % kAtlasCols) * kAtlasTileSize;
+            int tilePixelY = (nextTile / kAtlasCols) * kAtlasTileSize;
+            for (int y = minY; y <= maxY; ++y) {
+              for (int x = minX; x <= maxX; ++x) {
+                size_t srcIndex = static_cast<size_t>((y * kAtlasTileSize + x) * 4);
+                uint8_t alpha = glyphPixels[srcIndex + 3];
+                if (alpha == 0) {
+                  continue;
+                }
+                int packedX = tilePixelX + 1 + (x - minX);
+                int packedY = tilePixelY + 1 + (y - minY);
+                size_t dstIndex = static_cast<size_t>(((packedY) * texWidth + packedX) * 4);
+                pixels[dstIndex + 0] = 255;
+                pixels[dstIndex + 1] = 255;
+                pixels[dstIndex + 2] = 255;
+                pixels[dstIndex + 3] = alpha;
+              }
+            }
+
+            float x0 = static_cast<float>(tilePixelX + 1);
+            float y0 = static_cast<float>(tilePixelY + 1);
+            float x1 = x0 + static_cast<float>(glyphWidth);
+            float y1 = y0 + static_cast<float>(glyphHeight);
+            if (glyphWidth > 1) {
+              x0 += 0.35f;
+              x1 -= 0.35f;
+            }
+            if (glyphHeight > 1) {
+              y0 += 0.35f;
+              y1 -= 0.35f;
+            }
+
+            info.uMin = x0 / atlasWidth;
+            info.vMin = y0 / atlasHeight;
+            info.uMax = x1 / atlasWidth;
+            info.vMax = y1 / atlasHeight;
+            info.bearingX = static_cast<float>(minX);
+            info.bearingTop = static_cast<float>(minY);
+            info.width = static_cast<float>(glyphWidth);
+            info.height = static_cast<float>(glyphHeight);
+            info.advance = std::max(info.advance, static_cast<float>(glyphWidth + 1));
+          }
+
+          CGContextRelease(glyphContext);
+        }
+      }
+    }
+
+    outGlyphs[codepoint] = info;
+    ++nextTile;
+  }
+
+  CGColorSpaceRelease(colorSpace);
+  CFRelease(font);
+}
+#endif
 
 #ifdef __APPLE__
 void* gBundledVulkanLibHandle = nullptr;
@@ -716,8 +1181,15 @@ void VulkanContext::setCameraMatrices(const glm::mat4& view, const glm::mat4& pr
   cameraProj = proj;
 }
 
-void VulkanContext::setCameraWorldState(const glm::vec3& eyePosition, bool underwater) {
+void VulkanContext::setCameraWorldState(const glm::vec3& eyePosition,
+                                        const glm::vec3& forwardDirection,
+                                        bool underwater) {
   cameraWorldPos = eyePosition;
+  if (glm::dot(forwardDirection, forwardDirection) > 0.0001f) {
+    cameraForward = glm::normalize(forwardDirection);
+  } else {
+    cameraForward = glm::vec3(0.0f, 0.0f, 1.0f);
+  }
   cameraUnderwater = underwater;
 }
 
@@ -731,6 +1203,38 @@ void VulkanContext::setEnvironmentState(float daylight, float weatherIntensity, 
   environmentDayCycleTime = wrappedDayCycle;
 }
 
+void VulkanContext::setTorchLights(const std::vector<glm::vec4>& lights) {
+  environmentTorchLightCount = static_cast<uint32_t>(
+    std::min(lights.size(), environmentTorchLights.size()));
+  for (size_t i = 0; i < environmentTorchLights.size(); ++i) {
+    environmentTorchLights[i] = (i < environmentTorchLightCount) ? lights[i] : glm::vec4(0.0f);
+  }
+}
+
+VulkanContext::RenderStats VulkanContext::getLastRenderStats() const {
+  return lastRenderStats;
+}
+
+const VulkanContext::UiGlyphInfo* VulkanContext::findUiGlyph(uint32_t codepoint) const {
+  auto it = uiGlyphs.find(codepoint);
+  if (it == uiGlyphs.end()) {
+    return nullptr;
+  }
+  return &it->second;
+}
+
+float VulkanContext::uiFontLineHeight() const {
+  return uiFontLineHeightPx;
+}
+
+float VulkanContext::uiFontAscent() const {
+  return uiFontAscentPx;
+}
+
+bool VulkanContext::hasUiFont() const {
+  return uiFontLineHeightPx > 0.0f && uiFontAscentPx > 0.0f && !uiGlyphs.empty();
+}
+
 void VulkanContext::createInstance() {
   if (kEnableValidationLayers && !checkValidationLayerSupport()) {
     throw std::runtime_error("Validation layers requested, but not available.");
@@ -739,9 +1243,9 @@ void VulkanContext::createInstance() {
   VkApplicationInfo appInfo{};
   appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   appInfo.pApplicationName = "CubeOS Voxel";
-  appInfo.applicationVersion = VK_MAKE_VERSION(0, 2, 1);
+  appInfo.applicationVersion = VK_MAKE_VERSION(0, 2, 2);
   appInfo.pEngineName = "CubeOS";
-  appInfo.engineVersion = VK_MAKE_VERSION(0, 2, 1);
+  appInfo.engineVersion = VK_MAKE_VERSION(0, 2, 2);
   appInfo.apiVersion = VK_API_VERSION_1_2;
 
   VkInstanceCreateInfo createInfo{};
@@ -1414,6 +1918,28 @@ void VulkanContext::createTextureImage() {
     }
   }
 
+  // Wood top tile: simple growth rings fallback for log ends.
+  const int woodTopTileIndex = kTileWoodTop;
+  const int woodTopTileX = (woodTopTileIndex % kAtlasCols) * kAtlasTileSize;
+  const int woodTopTileY = (woodTopTileIndex / kAtlasCols) * kAtlasTileSize;
+  for (int y = 0; y < kAtlasTileSize; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      int dx = std::abs(x - (kAtlasTileSize / 2));
+      int dy = std::abs(y - (kAtlasTileSize / 2));
+      int ring = std::max(dx, dy);
+      int shade = (ring % 3 == 0) ? 16 : ((ring % 3 == 1) ? -10 : 4);
+      int r = 122 + shade;
+      int g = 94 + shade;
+      int b = 52 + shade;
+      putPixel(woodTopTileX + x,
+               woodTopTileY + y,
+               static_cast<uint8_t>(std::clamp(r, 0, 255)),
+               static_cast<uint8_t>(std::clamp(g, 0, 255)),
+               static_cast<uint8_t>(std::clamp(b, 0, 255)),
+               255);
+    }
+  }
+
   // Leaves tile: rich green with mottled highlights.
   const int leavesTileIndex = kTileLeaves;
   const int leavesTileX = (leavesTileIndex % kAtlasCols) * kAtlasTileSize;
@@ -1542,6 +2068,188 @@ void VulkanContext::createTextureImage() {
   drawOreTile(kTileCoalOre, 42, 42, 42, 181);
   drawOreTile(kTileIronOre, 184, 128, 92, 191);
   drawOreTile(kTileGoldOre, 214, 176, 52, 201);
+  drawOreTile(kTileDiamondOre, 70, 222, 232, 211);
+
+  auto fillSolidTile = [&](int tileIndex, uint8_t r, uint8_t g, uint8_t b) {
+    int tileX = (tileIndex % kAtlasCols) * kAtlasTileSize;
+    int tileY = (tileIndex / kAtlasCols) * kAtlasTileSize;
+    for (int y = 0; y < kAtlasTileSize; ++y) {
+      for (int x = 0; x < kAtlasTileSize; ++x) {
+        putPixel(tileX + x, tileY + y, r, g, b, 255);
+      }
+    }
+  };
+
+  auto drawRect = [&](int tileIndex,
+                      int x0,
+                      int y0,
+                      int w,
+                      int h,
+                      uint8_t r,
+                      uint8_t g,
+                      uint8_t b) {
+    int tileX = (tileIndex % kAtlasCols) * kAtlasTileSize;
+    int tileY = (tileIndex / kAtlasCols) * kAtlasTileSize;
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        int px = std::clamp(x0 + x, 0, kAtlasTileSize - 1);
+        int py = std::clamp(y0 + y, 0, kAtlasTileSize - 1);
+        putPixel(tileX + px, tileY + py, r, g, b, 255);
+      }
+    }
+  };
+
+  fillSolidTile(kTileWorkbench, 102, 74, 44);
+  for (int y = 0; y < 6; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      uint8_t shade = ((x / 2 + y) & 1) ? 18 : 0;
+      putPixel((kTileWorkbench % kAtlasCols) * kAtlasTileSize + x,
+               (kTileWorkbench / kAtlasCols) * kAtlasTileSize + y,
+               static_cast<uint8_t>(150 + shade),
+               static_cast<uint8_t>(112 + shade / 2),
+               static_cast<uint8_t>(68 + shade / 3),
+               255);
+    }
+  }
+  drawRect(kTileWorkbench, 2, 2, 12, 2, 84, 58, 30);
+  drawRect(kTileWorkbench, 7, 0, 2, 6, 84, 58, 30);
+  drawRect(kTileWorkbench, 3, 8, 10, 2, 70, 48, 28);
+  drawRect(kTileWorkbench, 3, 12, 10, 2, 70, 48, 28);
+
+  fillSolidTile(kTilePlanks, 168, 126, 76);
+  for (int y = 3; y < kAtlasTileSize; y += 4) {
+    drawRect(kTilePlanks, 0, y, kAtlasTileSize, 1, 128, 92, 54);
+  }
+  for (int x = 2; x < kAtlasTileSize; x += 5) {
+    drawRect(kTilePlanks, x, 0, 1, kAtlasTileSize, 142, 104, 60);
+  }
+
+  clearTileAlpha(kTileStick);
+  drawRect(kTileStick, 7, 3, 2, 10, 190, 152, 96);
+  drawRect(kTileStick, 6, 4, 4, 2, 206, 168, 108);
+  drawRect(kTileStick, 6, 10, 4, 2, 168, 132, 82);
+
+  clearTileAlpha(kTileIronIngot);
+  drawRect(kTileIronIngot, 3, 5, 10, 6, 214, 220, 228);
+  drawRect(kTileIronIngot, 4, 6, 8, 4, 236, 240, 244);
+  drawRect(kTileIronIngot, 5, 7, 6, 2, 248, 250, 252);
+
+  clearTileAlpha(kTileDiamond);
+  drawRect(kTileDiamond, 7, 2, 2, 2, 132, 248, 255);
+  drawRect(kTileDiamond, 5, 4, 6, 2, 102, 236, 248);
+  drawRect(kTileDiamond, 4, 6, 8, 4, 64, 214, 236);
+  drawRect(kTileDiamond, 5, 10, 6, 2, 92, 236, 244);
+  drawRect(kTileDiamond, 6, 12, 4, 2, 132, 248, 255);
+
+  auto drawPickaxeTile = [&](int tileIndex, uint8_t headR, uint8_t headG, uint8_t headB) {
+    clearTileAlpha(tileIndex);
+    drawRect(tileIndex, 2, 3, 12, 3, headR, headG, headB);
+    drawRect(tileIndex, 3, 6, 3, 2, headR, headG, headB);
+    drawRect(tileIndex, 10, 6, 3, 2, headR, headG, headB);
+    drawRect(tileIndex, 7, 5, 2, 8, 186, 142, 86);
+    drawRect(tileIndex, 6, 11, 4, 2, 166, 126, 76);
+  };
+
+  drawPickaxeTile(kTileWoodPickaxe, 156, 108, 66);
+  drawPickaxeTile(kTileStonePickaxe, 158, 158, 164);
+  drawPickaxeTile(kTileIronPickaxe, 220, 224, 232);
+
+  clearTileAlpha(kTileTorch);
+  drawRect(kTileTorch, 7, 5, 2, 8, 186, 142, 84);
+  drawRect(kTileTorch, 6, 4, 4, 2, 206, 166, 104);
+  drawRect(kTileTorch, 6, 2, 4, 3, 226, 104, 44);
+  drawRect(kTileTorch, 5, 1, 6, 2, 246, 194, 92);
+  drawRect(kTileTorch, 6, 0, 4, 1, 255, 236, 150);
+
+  auto drawFurnaceBody = [&](int tileIndex) {
+    fillSolidTile(tileIndex, 98, 100, 108);
+    for (int y = 0; y < kAtlasTileSize; ++y) {
+      for (int x = 0; x < kAtlasTileSize; ++x) {
+        uint32_t h = hash(x, y, 421);
+        int grain = static_cast<int>(h % 18u) - 9;
+        putPixel((tileIndex % kAtlasCols) * kAtlasTileSize + x,
+                 (tileIndex / kAtlasCols) * kAtlasTileSize + y,
+                 static_cast<uint8_t>(std::clamp(108 + grain, 0, 255)),
+                 static_cast<uint8_t>(std::clamp(110 + grain, 0, 255)),
+                 static_cast<uint8_t>(std::clamp(118 + grain, 0, 255)),
+                 255);
+      }
+    }
+    drawRect(tileIndex, 1, 1, 14, 14, 82, 84, 92);
+    drawRect(tileIndex, 2, 2, 12, 12, 126, 128, 136);
+  };
+
+  drawFurnaceBody(kTileFurnace);
+  drawFurnaceBody(kTileFurnaceFront);
+  drawRect(kTileFurnaceFront, 4, 4, 8, 6, 52, 52, 58);
+  drawRect(kTileFurnaceFront, 5, 5, 6, 4, 26, 28, 34);
+  drawRect(kTileFurnaceFront, 4, 11, 8, 2, 74, 76, 84);
+  drawRect(kTileFurnaceFront, 6, 11, 4, 2, 138, 94, 42);
+
+  fillSolidTile(kTileLootCache, 86, 56, 30);
+  drawRect(kTileLootCache, 1, 2, 14, 5, 162, 110, 54);
+  drawRect(kTileLootCache, 1, 7, 14, 8, 136, 84, 40);
+  drawRect(kTileLootCache, 1, 6, 14, 1, 90, 58, 28);
+  drawRect(kTileLootCache, 3, 2, 1, 13, 104, 68, 30);
+  drawRect(kTileLootCache, 12, 2, 1, 13, 104, 68, 30);
+  drawRect(kTileLootCache, 7, 2, 2, 13, 96, 62, 28);
+  drawRect(kTileLootCache, 6, 6, 4, 5, 214, 180, 86);
+  drawRect(kTileLootCache, 7, 7, 2, 3, 78, 56, 24);
+
+  // Prefer bundled CC0 texture assets when present, while keeping the
+  // procedural atlas as a fallback for missing files or unsupported platforms.
+  auto applyExternalTile = [&](int tileIndex, const char* relativePath) {
+    LoadedImageRgba image;
+    if (loadImageRgba(buildTexturePath(relativePath), image)) {
+      blitImageRegionToAtlas(pixels, texWidth, texHeight, image, tileIndex);
+    }
+  };
+
+  auto blendExternalTile = [&](int tileIndex, const char* relativePath) {
+    LoadedImageRgba image;
+    if (loadImageRgba(buildTexturePath(relativePath), image)) {
+      blendImageRegionToAtlas(pixels, texWidth, image, tileIndex);
+    }
+  };
+
+  applyExternalTile(kTileGrassTop, "oga/blocks/old_grass_top.png");
+  applyExternalTile(kTileGrassSide, "oga/blocks/old_grass_side.png");
+  applyExternalTile(kTileDirt, "oga/blocks/old_dirt.png");
+  applyExternalTile(kTileStone, "oga/blocks/stone.png");
+  applyExternalTile(kTileSand, "oga/blocks/sand.png");
+  applyExternalTile(kTileGravel, "oga/blocks/gravel.png");
+  applyExternalTile(kTileWood, "oga/blocks/Snakewood_side.png");
+  applyExternalTile(kTileWoodTop, "oga/blocks/Snakewood_top.png");
+  // Leaves are solid blocks, so keep the opaque procedural foliage base and
+  // layer the leaf sprite over it instead of copying transparent holes through.
+  blendExternalTile(kTileLeaves, "oga/blocks/ginkgo_leaves.png");
+
+  LoadedImageRgba torchSheet;
+  if (loadImageRgba(buildTexturePath("oga/torch/torch_anim.png"), torchSheet)) {
+    blitImageRegionToAtlas(pixels, texWidth, texHeight, torchSheet, kTileTorch, 0, 0);
+  }
+
+  LoadedImageRgba oreSheet;
+  if (loadImageRgba(buildTexturePath("oga/ores/Stone_ore_gems.png"), oreSheet)) {
+    auto applyOreBlockTile = [&](int tileIndex, int srcY) {
+      copyAtlasTile(pixels, texWidth, kTileStone, tileIndex);
+      blendImageRegionToAtlas(pixels, texWidth, oreSheet, tileIndex, 0, srcY);
+    };
+
+    applyOreBlockTile(kTileDiamondOre, 0);
+    applyOreBlockTile(kTileCoalOre, 16 * 4);
+    applyOreBlockTile(kTileGoldOre, 16 * 5);
+    applyOreBlockTile(kTileIronOre, 16 * 6);
+    blitImageRegionToAtlas(pixels, texWidth, texHeight, oreSheet, kTileDiamond, 16 * 5, 0);
+    blitImageRegionToAtlas(pixels, texWidth, texHeight, oreSheet, kTileIronIngot, 16 * 6, 16 * 6);
+  }
+
+  uiGlyphs.clear();
+  uiFontLineHeightPx = 0.0f;
+  uiFontAscentPx = 0.0f;
+#ifdef __APPLE__
+  populateUiFontAtlas(pixels, texWidth, texHeight, uiGlyphs, uiFontLineHeightPx, uiFontAscentPx);
+#endif
 
   VkDeviceSize imageSize = static_cast<VkDeviceSize>(pixels.size());
 
@@ -1778,6 +2486,8 @@ void VulkanContext::createCommandBuffers() {
 }
 
 void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+  RenderStats renderStats{};
+  renderStats.worldMeshesTracked = static_cast<uint32_t>(worldChunkDrawOrder.size());
   VkCommandBufferBeginInfo beginInfo{};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
@@ -1847,6 +2557,8 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
                               0,
                               nullptr);
       vkCmdDrawIndexed(commandBuffer, skyIndexCount, 1, 0, 0, 0);
+      renderStats.uiDrawCalls += 1;
+      renderStats.totalDrawCalls += 1;
     }
 
   }
@@ -1862,6 +2574,7 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
                             0,
                             nullptr);
 
+    std::array<glm::vec4, 6> frustumPlanes = extractFrustumPlanes(cameraProj * cameraView);
     VkDeviceSize offset = 0;
     for (uint64_t key : worldChunkDrawOrder) {
       auto it = worldChunkMeshes.find(key);
@@ -1872,6 +2585,9 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
       if (mesh.vertexBuffer == VK_NULL_HANDLE || mesh.indexBuffer == VK_NULL_HANDLE || mesh.indexCount == 0) {
         continue;
       }
+      if (mesh.alwaysVisible) {
+        renderStats.worldSpecialMeshes += 1;
+      }
       if (!mesh.alwaysVisible) {
         float chunkCenterX = static_cast<float>(mesh.chunkX * kChunkSizeBlocks + kChunkSizeBlocks / 2);
         float chunkCenterZ = static_cast<float>(mesh.chunkZ * kChunkSizeBlocks + kChunkSizeBlocks / 2);
@@ -1879,12 +2595,32 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
         float dz = chunkCenterZ - cameraWorldPos.z;
         float distSq = dx * dx + dz * dz;
         if (distSq > kChunkDrawDistanceBlocksSq) {
+          renderStats.worldDistanceCulled += 1;
+          continue;
+        }
+
+        int sectionY = 0;
+        int decodedChunkX = mesh.chunkX;
+        int decodedChunkZ = mesh.chunkZ;
+        if (!unpackSectionKey(key, decodedChunkX, decodedChunkZ, sectionY)) {
+          continue;
+        }
+        glm::vec3 sectionMin(decodedChunkX * kChunkSizeBlocks,
+                             sectionY * kChunkSizeBlocks,
+                             decodedChunkZ * kChunkSizeBlocks);
+        glm::vec3 sectionMax = sectionMin + glm::vec3(static_cast<float>(kChunkSizeBlocks));
+        if (!aabbIntersectsFrustum(frustumPlanes, sectionMin, sectionMax)) {
+          renderStats.worldFrustumCulled += 1;
           continue;
         }
       }
       vkCmdBindVertexBuffers(commandBuffer, 0, 1, &mesh.vertexBuffer, &offset);
       vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
       vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+      renderStats.worldMeshesDrawn += 1;
+      renderStats.worldDrawCalls += 1;
+      renderStats.totalDrawCalls += 1;
+      renderStats.worldIndicesDrawn += mesh.indexCount;
     }
   }
 
@@ -1909,8 +2645,12 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
                      skyIndexCount + worldIndexCount,
                      0,
                      0);
+    renderStats.uiDrawCalls += 1;
+    renderStats.totalDrawCalls += 1;
   }
   vkCmdEndRenderPass(commandBuffer);
+
+  lastRenderStats = renderStats;
 
   checkVk(vkEndCommandBuffer(commandBuffer),
           "Failed to record command buffer.");
@@ -1930,6 +2670,8 @@ void VulkanContext::updateUniformBuffer(uint32_t imageIndex) {
   ubo.model = glm::mat4(1.0f);
   ubo.view = cameraView;
   ubo.proj = cameraProj;
+  ubo.invView = glm::inverse(cameraView);
+  ubo.invProj = glm::inverse(cameraProj);
   ubo.params = glm::vec4(time,
                          std::max(1.0f, static_cast<float>(swapchainExtent.width)),
                          std::max(1.0f, static_cast<float>(swapchainExtent.height)),
@@ -1939,6 +2681,10 @@ void VulkanContext::updateUniformBuffer(uint32_t imageIndex) {
                               std::clamp(0.22f + weather * 0.78f, 0.0f, 1.0f),
                               dayCycle,
                               0.0f);
+  ubo.torchMeta = glm::vec4(static_cast<float>(environmentTorchLightCount), 0.0f, 0.0f, 0.0f);
+  for (size_t i = 0; i < environmentTorchLights.size(); ++i) {
+    ubo.torchLights[i] = environmentTorchLights[i];
+  }
 
   std::memcpy(uniformBuffersMapped[imageIndex], &ubo, sizeof(ubo));
 }

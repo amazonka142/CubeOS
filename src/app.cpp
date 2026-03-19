@@ -14,6 +14,7 @@
 #include <string>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -25,6 +26,7 @@ constexpr float kIconPadding = 6.0f;
 constexpr float kPanelPadding = 12.0f;
 constexpr int kInventoryCols = 9;
 constexpr int kInventoryRows = 3;
+constexpr int kCraftGridMaxSize = 3;
 constexpr uint16_t kMaxStack = 64;
 constexpr int kDigitWidth = 3;
 constexpr int kDigitHeight = 5;
@@ -37,6 +39,11 @@ constexpr char kSettingsFilePath[] = "settings.cfg";
 constexpr int kMinRenderDistance = 4;
 constexpr int kMaxRenderDistance = 14;
 constexpr uint64_t kDroppedItemsMeshKey = std::numeric_limits<uint64_t>::max() - 1ull;
+constexpr uint64_t kInteractionOverlayMeshKey = std::numeric_limits<uint64_t>::max() - 2ull;
+constexpr int kMaxTorchLights = 16;
+constexpr int kTorchLightRadiusXZ = 8;
+constexpr int kTorchLightRadiusY = 5;
+constexpr float kTorchLightRange = 8.5f;
 constexpr float kDroppedItemHalfSize = 0.19f;
 constexpr float kDroppedItemHalfHeight = 0.19f;
 constexpr float kDroppedItemGravity = -16.5f;
@@ -46,6 +53,242 @@ constexpr float kDayNightCycleDurationSec = 14.0f * 60.0f;
 constexpr float kWeatherMinDecisionSec = 38.0f;
 constexpr float kWeatherMaxDecisionSec = 110.0f;
 constexpr float kTau = 6.28318530718f;
+constexpr float kCraftPanelGap = 16.0f;
+constexpr float kAchievementNodeSize = 42.0f;
+constexpr float kCraftResultGap = 26.0f;
+constexpr float kAchievementPopupDuration = 3.15f;
+constexpr float kFurnaceSmeltDuration = 3.8f;
+constexpr float kCraftResultFlashDuration = 0.34f;
+constexpr int kWorldSelectMaxVisibleRows = 8;
+constexpr int kSettingsCategoryCount = 4;
+constexpr int kSettingsActionCount = 3;
+constexpr float kUiTextLineHeightPerPixel = 5.6f;
+constexpr float kStreamingLookaheadBlocks = 12.0f;
+constexpr float kStreamingProbeBlocks = 9.0f;
+constexpr int kStreamingWarmRadius = 1;
+constexpr float kTorchLightRefreshMoveThreshold = 0.55f;
+constexpr float kTorchLightRefreshForwardDot = 0.992f;
+
+int maxTorchLightsForQuality(int quality) {
+  static constexpr int kQualityToMaxTorchLights[3] = {6, 10, 16};
+  return kQualityToMaxTorchLights[std::clamp(quality, 0, 2)];
+}
+
+float torchLightRefreshIntervalForQuality(int quality) {
+  static constexpr float kQualityToRefreshInterval[3] = {0.20f, 0.10f, 0.05f};
+  return kQualityToRefreshInterval[std::clamp(quality, 0, 2)];
+}
+
+double focusedPlayingFpsForQuality(int quality) {
+  static constexpr double kQualityToFocusedFps[3] = {48.0, 60.0, 72.0};
+  return kQualityToFocusedFps[std::clamp(quality, 0, 2)];
+}
+
+double unfocusedPlayingFpsForQuality(int quality) {
+  static constexpr double kQualityToUnfocusedFps[3] = {24.0, 30.0, 36.0};
+  return kQualityToUnfocusedFps[std::clamp(quality, 0, 2)];
+}
+
+double focusedMenuFpsForQuality(int quality) {
+  static constexpr double kQualityToFocusedFps[3] = {24.0, 30.0, 42.0};
+  return kQualityToFocusedFps[std::clamp(quality, 0, 2)];
+}
+
+double unfocusedMenuFpsForQuality(int quality) {
+  static constexpr double kQualityToUnfocusedFps[3] = {12.0, 18.0, 24.0};
+  return kQualityToUnfocusedFps[std::clamp(quality, 0, 2)];
+}
+
+int startupViewRadiusForQuality(int quality, int targetRadius) {
+  static constexpr int kQualityToStartupRadius[3] = {4, 5, 6};
+  int startupRadius = kQualityToStartupRadius[std::clamp(quality, 0, 2)];
+  return std::clamp(std::min(targetRadius, startupRadius), kMinRenderDistance, kMaxRenderDistance);
+}
+
+double streamingExpansionIntervalForQuality(int quality) {
+  static constexpr double kQualityToInterval[3] = {1.10, 0.80, 0.55};
+  return kQualityToInterval[std::clamp(quality, 0, 2)];
+}
+
+void recordProfilerMetric(App::ProfilerMetric& metric, double sampleMs, uint64_t frameCount) {
+  metric.lastMs = sampleMs;
+  if (frameCount <= 1) {
+    metric.avgMs = sampleMs;
+  } else {
+    metric.avgMs = metric.avgMs * 0.90 + sampleMs * 0.10;
+  }
+  metric.maxMs = std::max(metric.maxMs, sampleMs);
+}
+
+int computeVisibleMenuRows(float availableHeight,
+                           float rowHeight,
+                           float rowGap,
+                           int totalRows,
+                           int maxVisibleRows) {
+  if (totalRows <= 0) {
+    return 0;
+  }
+  float safeAvailable = std::max(0.0f, availableHeight);
+  float step = rowHeight + rowGap;
+  int visibleRows = static_cast<int>(std::floor((safeAvailable + rowGap) / std::max(1.0f, step)));
+  visibleRows = std::clamp(visibleRows, 1, totalRows);
+  return std::min(visibleRows, maxVisibleRows);
+}
+
+int computeWorldSelectVisibleRows(int uiHeight, int totalRows) {
+  float panelHeight = std::min(static_cast<float>(uiHeight) * 0.78f, 540.0f);
+  return computeVisibleMenuRows(panelHeight - 116.0f, 40.0f, 10.0f, totalRows, kWorldSelectMaxVisibleRows);
+}
+
+enum class SettingsCategoryTab : int {
+  kGraphics = 0,
+  kAudio = 1,
+  kControls = 2,
+  kInterface = 3
+};
+
+enum class SettingsEntryId : int {
+  kGraphicsQuality = 0,
+  kRenderDistance = 1,
+  kAudioVolume = 2,
+  kSensitivity = 3,
+  kLanguage = 4,
+  kBlockGuides = 5
+};
+
+enum class SettingsFocusArea : int {
+  kCategories = 0,
+  kOptions = 1,
+  kActions = 2
+};
+
+enum class SettingsActionId : int {
+  kApply = 0,
+  kReset = 1,
+  kBack = 2
+};
+
+struct SettingsUiLayout {
+  float panelX = 0.0f;
+  float panelY = 0.0f;
+  float panelW = 0.0f;
+  float panelH = 0.0f;
+  float sidebarX = 0.0f;
+  float sidebarY = 0.0f;
+  float sidebarW = 0.0f;
+  float categoryH = 44.0f;
+  float categoryGap = 12.0f;
+  float contentX = 0.0f;
+  float contentY = 0.0f;
+  float contentW = 0.0f;
+  float optionH = 68.0f;
+  float optionGap = 14.0f;
+  float actionY = 0.0f;
+  float actionW = 172.0f;
+  float actionH = 42.0f;
+  float actionGap = 12.0f;
+};
+
+bool pointInRect(float px, float py, const glm::vec4& rect) {
+  return px >= rect.x &&
+         px <= rect.x + rect.z &&
+         py >= rect.y &&
+         py <= rect.y + rect.w;
+}
+
+int settingsEntryCountForCategory(int category) {
+  switch (static_cast<SettingsCategoryTab>(std::clamp(category, 0, kSettingsCategoryCount - 1))) {
+    case SettingsCategoryTab::kGraphics:
+      return 2;
+    case SettingsCategoryTab::kAudio:
+      return 1;
+    case SettingsCategoryTab::kControls:
+      return 1;
+    case SettingsCategoryTab::kInterface:
+    default:
+      return 2;
+  }
+}
+
+SettingsEntryId settingsEntryForCategory(int category, int optionIndex) {
+  SettingsCategoryTab tab = static_cast<SettingsCategoryTab>(std::clamp(category, 0, kSettingsCategoryCount - 1));
+  switch (tab) {
+    case SettingsCategoryTab::kGraphics:
+      return optionIndex <= 0 ? SettingsEntryId::kGraphicsQuality : SettingsEntryId::kRenderDistance;
+    case SettingsCategoryTab::kAudio:
+      return SettingsEntryId::kAudioVolume;
+    case SettingsCategoryTab::kControls:
+      return SettingsEntryId::kSensitivity;
+    case SettingsCategoryTab::kInterface:
+    default:
+      return optionIndex <= 0 ? SettingsEntryId::kLanguage : SettingsEntryId::kBlockGuides;
+  }
+}
+
+SettingsUiLayout makeSettingsUiLayout(float panelX, float panelY, float panelW, float panelH) {
+  SettingsUiLayout layout;
+  layout.panelX = panelX;
+  layout.panelY = panelY;
+  layout.panelW = panelW;
+  layout.panelH = panelH;
+  layout.sidebarX = layout.panelX + 28.0f;
+  layout.sidebarY = layout.panelY + 92.0f;
+  layout.sidebarW = 184.0f;
+  layout.contentX = layout.sidebarX + layout.sidebarW + 26.0f;
+  layout.contentY = layout.sidebarY;
+  layout.contentW = layout.panelW - (layout.contentX - layout.panelX) - 28.0f;
+  layout.actionY = layout.panelY + layout.panelH - layout.actionH - 28.0f;
+  return layout;
+}
+
+glm::vec4 settingsCategoryRect(const SettingsUiLayout& layout, int categoryIndex) {
+  float y = layout.sidebarY + static_cast<float>(categoryIndex) * (layout.categoryH + layout.categoryGap);
+  return {layout.sidebarX, y, layout.sidebarW, layout.categoryH};
+}
+
+glm::vec4 settingsOptionRect(const SettingsUiLayout& layout, int optionIndex) {
+  float y = layout.contentY + static_cast<float>(optionIndex) * (layout.optionH + layout.optionGap);
+  return {layout.contentX, y, layout.contentW, layout.optionH};
+}
+
+glm::vec4 settingsActionRect(const SettingsUiLayout& layout, int actionIndex) {
+  float totalW = static_cast<float>(kSettingsActionCount) * layout.actionW +
+                 static_cast<float>(kSettingsActionCount - 1) * layout.actionGap;
+  float x = layout.contentX + (layout.contentW - totalW) * 0.5f +
+            static_cast<float>(actionIndex) * (layout.actionW + layout.actionGap);
+  return {x, layout.actionY, layout.actionW, layout.actionH};
+}
+
+glm::vec4 settingsControlRect(const glm::vec4& optionRect, float width = 248.0f, float height = 28.0f) {
+  return {
+    optionRect.x + optionRect.z - width - 18.0f,
+    optionRect.y + optionRect.w - height - 18.0f,
+    width,
+    height
+  };
+}
+
+glm::vec4 settingsSegmentRect(const glm::vec4& controlRect, int segments, int index, float gap = 8.0f) {
+  float totalGap = static_cast<float>(std::max(0, segments - 1)) * gap;
+  float segmentW = (controlRect.z - totalGap) / static_cast<float>(std::max(1, segments));
+  float x = controlRect.x + static_cast<float>(index) * (segmentW + gap);
+  return {x, controlRect.y, segmentW, controlRect.w};
+}
+
+glm::vec4 settingsSliderTrackRect(const glm::vec4& optionRect) {
+  return settingsControlRect(optionRect, 248.0f, 14.0f);
+}
+
+float normalizedValueFromRect(float px, const glm::vec4& rect) {
+  if (rect.z <= 1.0f) {
+    return 0.0f;
+  }
+  return std::clamp((px - rect.x) / rect.z, 0.0f, 1.0f);
+}
+
+int scrollStepsFromOffset(double yoffset) {
+  return std::max(1, static_cast<int>(std::lround(std::abs(yoffset))));
+}
 
 constexpr uint8_t kDigitMap[10][kDigitHeight] = {
   {0b111, 0b101, 0b101, 0b101, 0b111}, // 0
@@ -232,6 +475,788 @@ const uint8_t* glyphForCodepoint(uint32_t codepoint) {
   return nullptr;
 }
 
+enum class ToolTier : uint8_t {
+  kNone = 0,
+  kWood = 1,
+  kStone = 2,
+  kIron = 3
+};
+
+enum AchievementId : uint8_t {
+  kAchievementGetWood = 0,
+  kAchievementCraftPlanks = 1,
+  kAchievementCraftSticks = 2,
+  kAchievementCraftWorkbench = 3,
+  kAchievementCraftWoodPickaxe = 4,
+  kAchievementGetStone = 5,
+  kAchievementCraftStonePickaxe = 6,
+  kAchievementCraftFurnace = 7,
+  kAchievementCraftTorch = 8,
+  kAchievementFindCave = 9,
+  kAchievementSmeltIron = 10,
+  kAchievementCraftIronPickaxe = 11,
+  kAchievementGetDiamond = 12
+};
+
+constexpr uint32_t achievementBit(AchievementId id) {
+  return 1u << static_cast<uint32_t>(id);
+}
+
+struct CraftRecipeDefinition {
+  uint8_t output = kAir;
+  uint16_t outputCount = 0;
+  AchievementId achievement = kAchievementGetWood;
+  bool shapeless = false;
+  int width = 0;
+  int height = 0;
+  std::array<uint8_t, 9> cells{};
+};
+
+struct CraftMatch {
+  bool matched = false;
+  uint8_t output = kAir;
+  uint16_t outputCount = 0;
+  AchievementId achievement = kAchievementGetWood;
+  std::array<uint8_t, App::kCraftingSlotCount> useCounts{};
+  int maxCrafts = 0;
+};
+
+const std::array<CraftRecipeDefinition, 8> kCraftRecipes = {{
+  {kPlanks, 4, kAchievementCraftPlanks, true, 1, 1, {kWood, kAir, kAir, kAir, kAir, kAir, kAir, kAir, kAir}},
+  {kStick, 4, kAchievementCraftSticks, false, 1, 2, {kPlanks, kPlanks, kAir, kAir, kAir, kAir, kAir, kAir, kAir}},
+  {kWorkbench, 1, kAchievementCraftWorkbench, false, 2, 2, {kPlanks, kPlanks, kPlanks, kPlanks, kAir, kAir, kAir, kAir, kAir}},
+  {kFurnace, 1, kAchievementCraftFurnace, false, 3, 3, {kStone, kStone, kStone, kStone, kAir, kStone, kStone, kStone, kStone}},
+  {kTorch, 4, kAchievementCraftTorch, false, 1, 2, {kCoalOre, kStick, kAir, kAir, kAir, kAir, kAir, kAir, kAir}},
+  {kWoodPickaxe, 1, kAchievementCraftWoodPickaxe, false, 3, 3, {kPlanks, kPlanks, kPlanks, kAir, kStick, kAir, kAir, kStick, kAir}},
+  {kStonePickaxe, 1, kAchievementCraftStonePickaxe, false, 3, 3, {kStone, kStone, kStone, kAir, kStick, kAir, kAir, kStick, kAir}},
+  {kIronPickaxe, 1, kAchievementCraftIronPickaxe, false, 3, 3, {kIronIngot, kIronIngot, kIronIngot, kAir, kStick, kAir, kAir, kStick, kAir}}
+}};
+
+constexpr int craftingSlotIndex(int row, int col) {
+  return row * kCraftGridMaxSize + col;
+}
+
+struct CraftUiLayout {
+  float panelX = 0.0f;
+  float panelY = 0.0f;
+  float panelWidth = 0.0f;
+  float panelHeight = 0.0f;
+  float inputX = 0.0f;
+  float inputY = 0.0f;
+  float inputWidth = 0.0f;
+  float inputHeight = 0.0f;
+  float resultX = 0.0f;
+  float resultY = 0.0f;
+  float infoX = 0.0f;
+  float infoY = 0.0f;
+  int gridSize = 2;
+};
+
+struct FurnaceUiLayout {
+  float panelX = 0.0f;
+  float panelY = 0.0f;
+  float panelWidth = 0.0f;
+  float panelHeight = 0.0f;
+  float inputX = 0.0f;
+  float inputY = 0.0f;
+  float fuelX = 0.0f;
+  float fuelY = 0.0f;
+  float outputX = 0.0f;
+  float outputY = 0.0f;
+  float flameX = 0.0f;
+  float flameY = 0.0f;
+  float flameW = 0.0f;
+  float flameH = 0.0f;
+  float progressX = 0.0f;
+  float progressY = 0.0f;
+  float progressW = 0.0f;
+  float progressH = 0.0f;
+  float fuelBarX = 0.0f;
+  float fuelBarY = 0.0f;
+  float fuelBarW = 0.0f;
+  float fuelBarH = 0.0f;
+  float infoX = 0.0f;
+  float infoY = 0.0f;
+};
+
+CraftUiLayout makeCraftUiLayout(int framebufferWidth, int framebufferHeight, int gridSize) {
+  CraftUiLayout layout;
+  layout.gridSize = std::clamp(gridSize, 2, kCraftGridMaxSize);
+  const float gridWidth =
+    kSlotSize * static_cast<float>(kInventoryCols) +
+    kSlotPadding * static_cast<float>(kInventoryCols - 1);
+  const float gridHeight =
+    kSlotSize * static_cast<float>(kInventoryRows) +
+    kSlotPadding * static_cast<float>(kInventoryRows - 1);
+  float inventoryX = (static_cast<float>(framebufferWidth) - gridWidth) * 0.5f;
+  float inventoryY = (static_cast<float>(framebufferHeight) - gridHeight) * 0.5f - 30.0f;
+  inventoryY = std::clamp(inventoryY, 20.0f, static_cast<float>(framebufferHeight) - gridHeight - 20.0f);
+
+  layout.inputWidth =
+    kSlotSize * static_cast<float>(layout.gridSize) +
+    kSlotPadding * static_cast<float>(layout.gridSize - 1);
+  layout.inputHeight = layout.inputWidth;
+  layout.panelWidth = gridWidth + kPanelPadding * 2.0f;
+  layout.panelHeight = std::max(layout.inputHeight + 72.0f, 202.0f);
+  layout.panelX = inventoryX - kPanelPadding;
+  layout.panelY = std::max(8.0f, inventoryY - kCraftPanelGap - layout.panelHeight);
+  layout.inputX = inventoryX;
+  layout.inputY = layout.panelY + kPanelPadding + 18.0f;
+  layout.resultX = layout.inputX + layout.inputWidth + kCraftResultGap;
+  layout.resultY = layout.inputY + (layout.inputHeight - kSlotSize) * 0.5f;
+  layout.infoX = layout.resultX + kSlotSize + 18.0f;
+  layout.infoY = layout.inputY + 4.0f;
+  return layout;
+}
+
+FurnaceUiLayout makeFurnaceUiLayout(int framebufferWidth, int framebufferHeight) {
+  FurnaceUiLayout layout;
+  const float gridWidth =
+    kSlotSize * static_cast<float>(kInventoryCols) +
+    kSlotPadding * static_cast<float>(kInventoryCols - 1);
+  const float gridHeight =
+    kSlotSize * static_cast<float>(kInventoryRows) +
+    kSlotPadding * static_cast<float>(kInventoryRows - 1);
+  float inventoryX = (static_cast<float>(framebufferWidth) - gridWidth) * 0.5f;
+  float inventoryY = (static_cast<float>(framebufferHeight) - gridHeight) * 0.5f - 30.0f;
+  inventoryY = std::clamp(inventoryY, 20.0f, static_cast<float>(framebufferHeight) - gridHeight - 20.0f);
+
+  layout.panelWidth = gridWidth + kPanelPadding * 2.0f;
+  layout.panelHeight = 190.0f;
+  layout.panelX = inventoryX - kPanelPadding;
+  layout.panelY = std::max(8.0f, inventoryY - kCraftPanelGap - layout.panelHeight);
+  layout.inputX = inventoryX + 24.0f;
+  layout.inputY = layout.panelY + 54.0f;
+  layout.fuelX = layout.inputX;
+  layout.fuelY = layout.inputY + kSlotSize + 24.0f;
+  layout.outputX = layout.inputX + 168.0f;
+  layout.outputY = layout.inputY + 34.0f;
+  layout.flameX = layout.inputX + 54.0f;
+  layout.flameY = layout.fuelY + 2.0f;
+  layout.flameW = 18.0f;
+  layout.flameH = 30.0f;
+  layout.progressX = layout.inputX + 84.0f;
+  layout.progressY = layout.inputY + 12.0f;
+  layout.progressW = 62.0f;
+  layout.progressH = 12.0f;
+  layout.fuelBarX = layout.progressX;
+  layout.fuelBarY = layout.progressY + 36.0f;
+  layout.fuelBarW = 62.0f;
+  layout.fuelBarH = 12.0f;
+  layout.infoX = layout.outputX + kSlotSize + 26.0f;
+  layout.infoY = layout.panelY + 46.0f;
+  return layout;
+}
+
+bool isFurnaceFuel(uint8_t type) {
+  switch (type) {
+    case kCoalOre:
+    case kWood:
+    case kPlanks:
+    case kStick:
+      return true;
+    default:
+      return false;
+  }
+}
+
+float furnaceFuelDuration(uint8_t type) {
+  switch (type) {
+    case kCoalOre:
+      return 15.0f;
+    case kWood:
+      return 8.0f;
+    case kPlanks:
+      return 6.0f;
+    case kStick:
+      return 2.8f;
+    default:
+      return 0.0f;
+  }
+}
+
+bool furnaceResultForInput(uint8_t inputType, uint8_t& outType) {
+  switch (inputType) {
+    case kIronOre:
+      outType = kIronIngot;
+      return true;
+    default:
+      outType = kAir;
+      return false;
+  }
+}
+
+std::string furnaceKeyForBlock(const glm::ivec3& block) {
+  return std::to_string(block.x) + ":" + std::to_string(block.y) + ":" + std::to_string(block.z);
+}
+
+int countNonEmptyCraftSlots(const std::array<ItemStack, App::kCraftingSlotCount>& slots, int gridSize) {
+  int count = 0;
+  for (int row = 0; row < gridSize; ++row) {
+    for (int col = 0; col < gridSize; ++col) {
+      const ItemStack& slot = slots[static_cast<size_t>(craftingSlotIndex(row, col))];
+      if (slot.type != kAir && slot.count > 0) {
+        ++count;
+      }
+    }
+  }
+  return count;
+}
+
+bool matchCraftRecipe(const CraftRecipeDefinition& recipe,
+                      const std::array<ItemStack, App::kCraftingSlotCount>& slots,
+                      int activeGridSize,
+                      CraftMatch& outMatch) {
+  outMatch = {};
+  if (activeGridSize < recipe.width || activeGridSize < recipe.height) {
+    return false;
+  }
+
+  if (recipe.shapeless) {
+    std::array<uint8_t, 256> required{};
+    int requiredTotal = 0;
+    for (uint8_t type : recipe.cells) {
+      if (type == kAir) {
+        continue;
+      }
+      ++required[static_cast<size_t>(type)];
+      ++requiredTotal;
+    }
+
+    if (countNonEmptyCraftSlots(slots, activeGridSize) != requiredTotal) {
+      return false;
+    }
+
+    int maxCrafts = std::numeric_limits<int>::max();
+    for (int row = 0; row < activeGridSize; ++row) {
+      for (int col = 0; col < activeGridSize; ++col) {
+        int slotIndex = craftingSlotIndex(row, col);
+        const ItemStack& slot = slots[static_cast<size_t>(slotIndex)];
+        if (slot.type == kAir || slot.count == 0) {
+          continue;
+        }
+        if (required[static_cast<size_t>(slot.type)] == 0) {
+          return false;
+        }
+        outMatch.useCounts[static_cast<size_t>(slotIndex)] = 1;
+        maxCrafts = std::min(maxCrafts, static_cast<int>(slot.count));
+        --required[static_cast<size_t>(slot.type)];
+      }
+    }
+
+    for (uint8_t remain : required) {
+      if (remain != 0) {
+        return false;
+      }
+    }
+
+    outMatch.matched = true;
+    outMatch.output = recipe.output;
+    outMatch.outputCount = recipe.outputCount;
+    outMatch.achievement = recipe.achievement;
+    outMatch.maxCrafts = std::max(1, maxCrafts);
+    return true;
+  }
+
+  for (int offsetY = 0; offsetY <= activeGridSize - recipe.height; ++offsetY) {
+    for (int offsetX = 0; offsetX <= activeGridSize - recipe.width; ++offsetX) {
+      CraftMatch candidate{};
+      bool ok = true;
+      int maxCrafts = std::numeric_limits<int>::max();
+      for (int row = 0; row < activeGridSize && ok; ++row) {
+        for (int col = 0; col < activeGridSize; ++col) {
+          int slotIndex = craftingSlotIndex(row, col);
+          const ItemStack& slot = slots[static_cast<size_t>(slotIndex)];
+          uint8_t expected = kAir;
+          if (row >= offsetY && row < offsetY + recipe.height &&
+              col >= offsetX && col < offsetX + recipe.width) {
+            int recipeIndex = (row - offsetY) * recipe.width + (col - offsetX);
+            expected = recipe.cells[static_cast<size_t>(recipeIndex)];
+          }
+
+          if (expected == kAir) {
+            if (slot.type != kAir && slot.count > 0) {
+              ok = false;
+              break;
+            }
+            continue;
+          }
+
+          if (slot.type != expected || slot.count == 0) {
+            ok = false;
+            break;
+          }
+
+          candidate.useCounts[static_cast<size_t>(slotIndex)] = 1;
+          maxCrafts = std::min(maxCrafts, static_cast<int>(slot.count));
+        }
+      }
+
+      if (!ok) {
+        continue;
+      }
+
+      candidate.matched = true;
+      candidate.output = recipe.output;
+      candidate.outputCount = recipe.outputCount;
+      candidate.achievement = recipe.achievement;
+      candidate.maxCrafts = std::max(1, maxCrafts);
+      outMatch = candidate;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool findCraftMatch(const std::array<ItemStack, App::kCraftingSlotCount>& slots,
+                    int activeGridSize,
+                    CraftMatch& outMatch) {
+  for (const CraftRecipeDefinition& recipe : kCraftRecipes) {
+    if (matchCraftRecipe(recipe, slots, activeGridSize, outMatch)) {
+      return true;
+    }
+  }
+  outMatch = {};
+  return false;
+}
+
+ToolTier toolTierForItem(uint8_t type) {
+  switch (type) {
+    case kWoodPickaxe:
+      return ToolTier::kWood;
+    case kStonePickaxe:
+      return ToolTier::kStone;
+    case kIronPickaxe:
+      return ToolTier::kIron;
+    default:
+      return ToolTier::kNone;
+  }
+}
+
+ToolTier requiredToolTierForBlock(uint8_t type) {
+  switch (type) {
+    case kStone:
+    case kCoalOre:
+      return ToolTier::kWood;
+    case kIronOre:
+      return ToolTier::kStone;
+    case kGoldOre:
+    case kDiamondOre:
+      return ToolTier::kIron;
+    default:
+      return ToolTier::kNone;
+  }
+}
+
+bool canMineBlock(uint8_t type, ToolTier toolTier) {
+  return static_cast<int>(toolTier) >= static_cast<int>(requiredToolTierForBlock(type));
+}
+
+float breakDurationForBlock(uint8_t type, ToolTier toolTier, bool inWater) {
+  float duration = kBreakDuration;
+  switch (type) {
+    case kLeaves:
+    case kSeagrass:
+    case kCoral:
+      duration = 0.18f;
+      break;
+    case kWood:
+    case kWorkbench:
+    case kWorkbenchNorth:
+    case kWorkbenchEast:
+    case kWorkbenchSouth:
+    case kWorkbenchWest:
+    case kFurnace:
+    case kFurnaceNorth:
+    case kFurnaceEast:
+    case kFurnaceSouth:
+    case kFurnaceWest:
+    case kLootCache:
+      duration = 0.72f;
+      break;
+    case kPlanks:
+      duration = 0.52f;
+      break;
+    case kStone:
+    case kCoalOre:
+      duration = !canMineBlock(type, toolTier) ? 2.8f
+                 : toolTier == ToolTier::kWood ? 0.86f
+                 : toolTier == ToolTier::kStone ? 0.54f
+                                                : 0.36f;
+      break;
+    case kIronOre:
+      duration = !canMineBlock(type, toolTier) ? 4.2f
+                 : toolTier == ToolTier::kStone ? 1.08f
+                                                : 0.70f;
+      break;
+    case kGoldOre:
+      duration = !canMineBlock(type, toolTier) ? 4.8f : 0.82f;
+      break;
+    case kDiamondOre:
+      duration = !canMineBlock(type, toolTier) ? 5.0f : 0.92f;
+      break;
+    case kTorch:
+      duration = 0.16f;
+      break;
+    default:
+      break;
+  }
+
+  if (inWater) {
+    duration *= 2.0f;
+  }
+  return duration;
+}
+
+uint8_t droppedItemForBlock(uint8_t type) {
+  switch (type) {
+    case kDiamondOre:
+      return kDiamond;
+    case kLootCache:
+      return kAir;
+    default:
+      return itemTypeForPlacedBlock(type);
+  }
+}
+
+bool shouldDropBrokenBlock(uint8_t type, ToolTier toolTier) {
+  if (type == kLootCache) {
+    return false;
+  }
+  ToolTier required = requiredToolTierForBlock(type);
+  return required == ToolTier::kNone || canMineBlock(type, toolTier);
+}
+
+std::string achievementTitle(AchievementId id, bool russian) {
+  switch (id) {
+    case kAchievementGetWood:
+      return russian ? "ПЕРВОЕ ДЕРЕВО" : "FIRST WOOD";
+    case kAchievementCraftPlanks:
+      return russian ? "ДОСКИ" : "PLANKS";
+    case kAchievementCraftSticks:
+      return russian ? "ПАЛКИ" : "STICKS";
+    case kAchievementCraftWorkbench:
+      return russian ? "ВЕРСТАК" : "WORKBENCH";
+    case kAchievementCraftWoodPickaxe:
+      return russian ? "ДЕРЕВЯННАЯ КИРКА" : "WOOD PICKAXE";
+    case kAchievementGetStone:
+      return russian ? "КАМЕННЫЙ ВЕК" : "STONE AGE";
+    case kAchievementCraftStonePickaxe:
+      return russian ? "КАМЕННАЯ КИРКА" : "STONE PICKAXE";
+    case kAchievementCraftFurnace:
+      return russian ? "ПЕЧКА" : "FURNACE";
+    case kAchievementCraftTorch:
+      return russian ? "ФАКЕЛЫ" : "TORCHES";
+    case kAchievementFindCave:
+      return russian ? "В ПЕЩЕРУ" : "INTO THE CAVE";
+    case kAchievementSmeltIron:
+      return russian ? "ПЛАВКА ЖЕЛЕЗА" : "SMELT IRON";
+    case kAchievementCraftIronPickaxe:
+      return russian ? "ЖЕЛЕЗНАЯ КИРКА" : "IRON PICKAXE";
+    case kAchievementGetDiamond:
+      return russian ? "АЛМАЗЫ" : "DIAMONDS";
+    default:
+      return russian ? "ДОСТИЖЕНИЕ" : "ACHIEVEMENT";
+  }
+}
+
+std::string achievementDescription(AchievementId id, bool russian) {
+  switch (id) {
+    case kAchievementGetWood:
+      return russian ? "СРУБИ ПЕРВОЕ ДЕРЕВО" : "CHOP YOUR FIRST TREE";
+    case kAchievementCraftPlanks:
+      return russian ? "СДЕЛАЙ ДОСКИ ИЗ ДЕРЕВА" : "CRAFT PLANKS FROM WOOD";
+    case kAchievementCraftSticks:
+      return russian ? "СДЕЛАЙ ПАЛКИ ИЗ ДОСОК" : "CRAFT STICKS FROM PLANKS";
+    case kAchievementCraftWorkbench:
+      return russian ? "СКРАФТИ И ПОСТАВЬ ВЕРСТАК" : "CRAFT AND PLACE A WORKBENCH";
+    case kAchievementCraftWoodPickaxe:
+      return russian ? "СДЕЛАЙ ПЕРВУЮ КИРКУ" : "CRAFT YOUR FIRST PICKAXE";
+    case kAchievementGetStone:
+      return russian ? "ДОБУДЬ КАМЕНЬ КИРКОЙ" : "MINE STONE WITH A PICKAXE";
+    case kAchievementCraftStonePickaxe:
+      return russian ? "УЛУЧШИ КИРКУ ДО КАМНЯ" : "UPGRADE TO STONE";
+    case kAchievementCraftFurnace:
+      return russian ? "СКРАФТИ ПЕЧКУ ИЗ КАМНЯ" : "CRAFT A FURNACE FROM STONE";
+    case kAchievementCraftTorch:
+      return russian ? "СОБЕРИ ФАКЕЛЫ ДЛЯ ПЕЩЕР" : "CRAFT TORCHES FOR CAVES";
+    case kAchievementFindCave:
+      return russian ? "СПУСТИСЬ В ПЕЩЕРУ" : "GO DOWN INTO A CAVE";
+    case kAchievementSmeltIron:
+      return russian ? "ПЕРЕПЛАВЬ ЖЕЛЕЗНУЮ РУДУ" : "SMELT IRON ORE";
+    case kAchievementCraftIronPickaxe:
+      return russian ? "СОБЕРИ ЖЕЛЕЗНУЮ КИРКУ" : "CRAFT AN IRON PICKAXE";
+    case kAchievementGetDiamond:
+      return russian ? "ДОБУДЬ ПЕРВЫЙ АЛМАЗ" : "MINE YOUR FIRST DIAMOND";
+    default:
+      return russian ? "ИДИ ПО ЦЕПОЧКЕ КРАФТА" : "FOLLOW THE CRAFTING CHAIN";
+  }
+}
+
+int achievementIconTile(AchievementId id) {
+  switch (id) {
+    case kAchievementGetWood:
+      return kTileWood;
+    case kAchievementCraftPlanks:
+      return kTilePlanks;
+    case kAchievementCraftSticks:
+      return kTileStick;
+    case kAchievementCraftWorkbench:
+      return kTileWorkbench;
+    case kAchievementCraftWoodPickaxe:
+      return kTileWoodPickaxe;
+    case kAchievementGetStone:
+      return kTileStone;
+    case kAchievementCraftStonePickaxe:
+      return kTileStonePickaxe;
+    case kAchievementCraftFurnace:
+      return kTileFurnaceFront;
+    case kAchievementCraftTorch:
+      return kTileTorch;
+    case kAchievementFindCave:
+      return kTileCoalOre;
+    case kAchievementSmeltIron:
+      return kTileIronIngot;
+    case kAchievementCraftIronPickaxe:
+      return kTileIronPickaxe;
+    case kAchievementGetDiamond:
+      return kTileDiamond;
+    default:
+      return kTileStone;
+  }
+}
+
+struct AchievementTreeNodeView {
+  AchievementId id;
+  float x;
+  float y;
+  uint32_t prereqMask;
+};
+
+struct AchievementTreeUiLayout {
+  float frameX = 0.0f;
+  float frameY = 0.0f;
+  float frameW = 0.0f;
+  float frameH = 0.0f;
+  float headerX = 0.0f;
+  float headerY = 0.0f;
+  float headerW = 0.0f;
+  float headerH = 0.0f;
+  float viewportX = 0.0f;
+  float viewportY = 0.0f;
+  float viewportW = 0.0f;
+  float viewportH = 0.0f;
+  float contentPadX = 56.0f;
+  float contentPadY = 54.0f;
+  float spacingX = 88.0f;
+  float spacingY = 94.0f;
+  float contentW = 0.0f;
+  float contentH = 0.0f;
+  float graphW = 0.0f;
+  float graphH = 0.0f;
+};
+
+constexpr std::array<AchievementTreeNodeView, App::kAchievementCount> kAchievementTreeNodes = {{
+  {kAchievementGetWood, 0.0f, 1.0f, 0u},
+  {kAchievementCraftPlanks, 1.2f, 1.0f, achievementBit(kAchievementGetWood)},
+  {kAchievementCraftSticks, 2.4f, 0.0f, achievementBit(kAchievementCraftPlanks)},
+  {kAchievementCraftWorkbench, 2.4f, 2.0f, achievementBit(kAchievementCraftPlanks)},
+  {kAchievementCraftWoodPickaxe, 3.8f, 1.0f, achievementBit(kAchievementCraftSticks) | achievementBit(kAchievementCraftWorkbench)},
+  {kAchievementGetStone, 5.2f, 1.0f, achievementBit(kAchievementCraftWoodPickaxe)},
+  {kAchievementCraftStonePickaxe, 6.4f, 2.0f, achievementBit(kAchievementGetStone)},
+  {kAchievementCraftFurnace, 6.4f, 0.0f, achievementBit(kAchievementGetStone)},
+  {kAchievementCraftTorch, 7.7f, 0.0f, achievementBit(kAchievementCraftSticks) | achievementBit(kAchievementCraftFurnace)},
+  {kAchievementFindCave, 7.7f, 2.0f, achievementBit(kAchievementGetStone)},
+  {kAchievementSmeltIron, 9.0f, 1.0f, achievementBit(kAchievementCraftFurnace) | achievementBit(kAchievementFindCave)},
+  {kAchievementCraftIronPickaxe, 10.3f, 2.0f, achievementBit(kAchievementSmeltIron)},
+  {kAchievementGetDiamond, 11.6f, 1.0f, achievementBit(kAchievementCraftIronPickaxe)}
+}};
+
+constexpr std::array<std::pair<int, int>, 15> kAchievementTreeEdges = {{
+  {0, 1},
+  {1, 2},
+  {1, 3},
+  {2, 4},
+  {3, 4},
+  {4, 5},
+  {5, 6},
+  {5, 7},
+  {2, 8},
+  {7, 8},
+  {5, 9},
+  {7, 10},
+  {9, 10},
+  {10, 11},
+  {11, 12}
+}};
+
+AchievementTreeUiLayout makeAchievementTreeLayout(int uiWidth, int uiHeight) {
+  AchievementTreeUiLayout layout;
+  float maxFrameW = std::max(480.0f, static_cast<float>(uiWidth) - 16.0f);
+  float maxFrameH = std::max(360.0f, static_cast<float>(uiHeight) - 16.0f);
+  layout.frameW = std::min(1160.0f, std::max(640.0f, static_cast<float>(uiWidth) - 72.0f));
+  layout.frameH = std::min(760.0f, std::max(420.0f, static_cast<float>(uiHeight) - 72.0f));
+  layout.frameW = std::min(layout.frameW, maxFrameW);
+  layout.frameH = std::min(layout.frameH, maxFrameH);
+  layout.frameX = (static_cast<float>(uiWidth) - layout.frameW) * 0.5f;
+  layout.frameY = std::max(10.0f, (static_cast<float>(uiHeight) - layout.frameH) * 0.5f + 18.0f);
+  layout.headerX = layout.frameX + 20.0f;
+  layout.headerY = layout.frameY + 18.0f;
+  layout.headerW = layout.frameW - 40.0f;
+  layout.headerH = 54.0f;
+  layout.viewportX = layout.frameX + 28.0f;
+  layout.viewportY = layout.frameY + 86.0f;
+  layout.viewportW = layout.frameW - 56.0f;
+  layout.viewportH = layout.frameH - 134.0f;
+  layout.graphW = 11.6f * layout.spacingX + kAchievementNodeSize;
+  layout.graphH = 2.0f * layout.spacingY + kAchievementNodeSize;
+  layout.contentW = layout.graphW + layout.contentPadX * 2.0f + 72.0f;
+  layout.contentH = std::max(layout.viewportH + 1.0f, layout.graphH + layout.contentPadY * 2.0f + 28.0f);
+  return layout;
+}
+
+glm::vec2 clampAchievementTreeScroll(const AchievementTreeUiLayout& layout, glm::vec2 scroll) {
+  float maxX = std::max(0.0f, layout.contentW - layout.viewportW);
+  float maxY = std::max(0.0f, layout.contentH - layout.viewportH);
+  return {
+    std::clamp(scroll.x, 0.0f, maxX),
+    std::clamp(scroll.y, 0.0f, maxY)
+  };
+}
+
+glm::vec4 achievementTreeTabRect(const AchievementTreeUiLayout& layout, int index) {
+  float tabW = 62.0f;
+  float tabH = 52.0f;
+  float gap = 10.0f;
+  float x = layout.frameX + 18.0f + static_cast<float>(index) * (tabW + gap);
+  float y = layout.frameY - 28.0f + (index == 0 ? -4.0f : 2.0f);
+  return {x, y, tabW, tabH};
+}
+
+glm::vec2 achievementTreeTabTargetScroll(const AchievementTreeUiLayout& layout, int index) {
+  float maxX = std::max(0.0f, layout.contentW - layout.viewportW);
+  if (index <= 0) {
+    return {0.0f, 0.0f};
+  }
+  if (index == 1) {
+    return {std::min(maxX, maxX * 0.46f), 0.0f};
+  }
+  return {maxX, 0.0f};
+}
+
+int activeAchievementTreeTab(const AchievementTreeUiLayout& layout, float scrollX) {
+  float maxX = std::max(1.0f, layout.contentW - layout.viewportW);
+  float t = std::clamp(scrollX / maxX, 0.0f, 1.0f);
+  if (t < 0.33f) {
+    return 0;
+  }
+  if (t < 0.72f) {
+    return 1;
+  }
+  return 2;
+}
+
+uint8_t placementFacingFromLook(const glm::vec3& lookDir) {
+  glm::vec2 horizontal(-lookDir.x, -lookDir.z);
+  if (std::abs(horizontal.x) > std::abs(horizontal.y)) {
+    return horizontal.x >= 0.0f ? kFacingEast : kFacingWest;
+  }
+  return horizontal.y >= 0.0f ? kFacingSouth : kFacingNorth;
+}
+
+uint8_t placedBlockTypeForItem(uint8_t itemType, const glm::vec3& lookDir) {
+  uint8_t facing = placementFacingFromLook(lookDir);
+  if (itemType == kWorkbench) {
+    return workbenchBlockForFacing(facing);
+  }
+  if (itemType == kFurnace) {
+    return furnaceBlockForFacing(facing);
+  }
+  return itemType;
+}
+
+enum class BlockAudioMaterial : uint8_t {
+  kDirt = 0,
+  kSand = 1,
+  kWood = 2,
+  kStone = 3
+};
+
+BlockAudioMaterial audioMaterialForBlock(uint8_t type) {
+  if (isWorkbenchBlock(type) || type == kWood || type == kPlanks || type == kLootCache || type == kTorch) {
+    return BlockAudioMaterial::kWood;
+  }
+  if (isFurnaceBlock(type) ||
+      type == kStone ||
+      type == kCoalOre ||
+      type == kIronOre ||
+      type == kGoldOre ||
+      type == kDiamondOre) {
+    return BlockAudioMaterial::kStone;
+  }
+  if (type == kSand || type == kSeagrass || type == kCoral) {
+    return BlockAudioMaterial::kSand;
+  }
+  return BlockAudioMaterial::kDirt;
+}
+
+AudioSystem::Cue breakCueForBlock(uint8_t type) {
+  switch (audioMaterialForBlock(type)) {
+    case BlockAudioMaterial::kSand:
+      return AudioSystem::Cue::kBlockBreakSand;
+    case BlockAudioMaterial::kWood:
+      return AudioSystem::Cue::kBlockBreakWood;
+    case BlockAudioMaterial::kStone:
+      return AudioSystem::Cue::kBlockBreakStone;
+    case BlockAudioMaterial::kDirt:
+    default:
+      return AudioSystem::Cue::kBlockBreakDirt;
+  }
+}
+
+AudioSystem::Cue placeCueForBlock(uint8_t type) {
+  switch (audioMaterialForBlock(type)) {
+    case BlockAudioMaterial::kSand:
+      return AudioSystem::Cue::kBlockPlaceSand;
+    case BlockAudioMaterial::kWood:
+      return AudioSystem::Cue::kBlockPlaceWood;
+    case BlockAudioMaterial::kStone:
+      return AudioSystem::Cue::kBlockPlaceStone;
+    case BlockAudioMaterial::kDirt:
+    default:
+      return AudioSystem::Cue::kBlockPlaceDirt;
+  }
+}
+
+float breakGainForBlock(uint8_t type) {
+  switch (audioMaterialForBlock(type)) {
+    case BlockAudioMaterial::kSand:
+      return 1.06f;
+    case BlockAudioMaterial::kWood:
+      return 0.98f;
+    case BlockAudioMaterial::kStone:
+      return 0.94f;
+    case BlockAudioMaterial::kDirt:
+    default:
+      return 1.0f;
+  }
+}
+
+float placeGainForBlock(uint8_t type) {
+  switch (audioMaterialForBlock(type)) {
+    case BlockAudioMaterial::kSand:
+      return 0.98f;
+    case BlockAudioMaterial::kWood:
+      return 0.92f;
+    case BlockAudioMaterial::kStone:
+      return 0.88f;
+    case BlockAudioMaterial::kDirt:
+    default:
+      return 0.94f;
+  }
+}
+
 int tileForBlock(uint8_t type) {
   if (isWaterBlock(type)) {
     return kTileWater;
@@ -260,6 +1285,38 @@ int tileForBlock(uint8_t type) {
       return kTileIronOre;
     case kGoldOre:
       return kTileGoldOre;
+    case kDiamondOre:
+      return kTileDiamondOre;
+    case kWorkbench:
+    case kWorkbenchNorth:
+    case kWorkbenchEast:
+    case kWorkbenchSouth:
+    case kWorkbenchWest:
+      return kTileWorkbench;
+    case kFurnace:
+    case kFurnaceNorth:
+    case kFurnaceEast:
+    case kFurnaceSouth:
+    case kFurnaceWest:
+      return kTileFurnaceFront;
+    case kLootCache:
+      return kTileLootCache;
+    case kPlanks:
+      return kTilePlanks;
+    case kStick:
+      return kTileStick;
+    case kIronIngot:
+      return kTileIronIngot;
+    case kDiamond:
+      return kTileDiamond;
+    case kWoodPickaxe:
+      return kTileWoodPickaxe;
+    case kStonePickaxe:
+      return kTileStonePickaxe;
+    case kIronPickaxe:
+      return kTileIronPickaxe;
+    case kTorch:
+      return kTileTorch;
     case kStone:
       return kTileStone;
     default:
@@ -287,6 +1344,26 @@ std::string displayNameForBlock(uint8_t type, bool russian) {
       return russian ? "ГРАВИЙ" : "GRAVEL";
     case kWood:
       return russian ? "ДЕРЕВО" : "WOOD";
+    case kPlanks:
+      return russian ? "ДОСКИ" : "PLANKS";
+    case kStick:
+      return russian ? "ПАЛКИ" : "STICKS";
+    case kWorkbench:
+    case kWorkbenchNorth:
+    case kWorkbenchEast:
+    case kWorkbenchSouth:
+    case kWorkbenchWest:
+      return russian ? "ВЕРСТАК" : "WORKBENCH";
+    case kFurnace:
+    case kFurnaceNorth:
+    case kFurnaceEast:
+    case kFurnaceSouth:
+    case kFurnaceWest:
+      return russian ? "ПЕЧКА" : "FURNACE";
+    case kLootCache:
+      return russian ? "СУНДУК" : "CHEST";
+    case kTorch:
+      return russian ? "ФАКЕЛ" : "TORCH";
     case kLeaves:
       return russian ? "ЛИСТВА" : "LEAVES";
     case kSeagrass:
@@ -297,8 +1374,20 @@ std::string displayNameForBlock(uint8_t type, bool russian) {
       return russian ? "УГОЛЬНАЯ РУДА" : "COAL ORE";
     case kIronOre:
       return russian ? "ЖЕЛЕЗНАЯ РУДА" : "IRON ORE";
+    case kIronIngot:
+      return russian ? "ЖЕЛЕЗО" : "IRON INGOT";
     case kGoldOre:
       return russian ? "ЗОЛОТАЯ РУДА" : "GOLD ORE";
+    case kDiamondOre:
+      return russian ? "АЛМАЗНАЯ РУДА" : "DIAMOND ORE";
+    case kDiamond:
+      return russian ? "АЛМАЗ" : "DIAMOND";
+    case kWoodPickaxe:
+      return russian ? "ДЕРЕВЯННАЯ КИРКА" : "WOOD PICKAXE";
+    case kStonePickaxe:
+      return russian ? "КАМЕННАЯ КИРКА" : "STONE PICKAXE";
+    case kIronPickaxe:
+      return russian ? "ЖЕЛЕЗНАЯ КИРКА" : "IRON PICKAXE";
     default:
       return russian ? "БЛОК" : "BLOCK";
   }
@@ -354,8 +1443,39 @@ glm::vec3 droppedItemColor(uint8_t type) {
       return {0.22f, 0.22f, 0.22f};
     case kIronOre:
       return {0.73f, 0.54f, 0.40f};
+    case kIronIngot:
+      return {0.84f, 0.86f, 0.90f};
     case kGoldOre:
       return {0.92f, 0.75f, 0.22f};
+    case kDiamondOre:
+    case kDiamond:
+      return {0.32f, 0.92f, 0.98f};
+    case kWorkbench:
+    case kWorkbenchNorth:
+    case kWorkbenchEast:
+    case kWorkbenchSouth:
+    case kWorkbenchWest:
+      return {0.62f, 0.42f, 0.18f};
+    case kFurnace:
+    case kFurnaceNorth:
+    case kFurnaceEast:
+    case kFurnaceSouth:
+    case kFurnaceWest:
+      return {0.58f, 0.60f, 0.66f};
+    case kLootCache:
+      return {0.92f, 0.76f, 0.30f};
+    case kPlanks:
+      return {0.76f, 0.57f, 0.34f};
+    case kStick:
+      return {0.76f, 0.61f, 0.38f};
+    case kTorch:
+      return {0.98f, 0.78f, 0.34f};
+    case kWoodPickaxe:
+      return {0.84f, 0.66f, 0.38f};
+    case kStonePickaxe:
+      return {0.72f, 0.72f, 0.76f};
+    case kIronPickaxe:
+      return {0.90f, 0.92f, 0.96f};
     case kStone:
       return {0.60f, 0.60f, 0.60f};
     default:
@@ -424,6 +1544,149 @@ void appendDroppedItemCube(std::vector<Vertex>& vertices,
   appendDroppedItemQuad(vertices, indices, p000, p100, p101, p001, base * 0.62f, tile); // -Y
   appendDroppedItemQuad(vertices, indices, p101, p111, p011, p001, base * 0.92f, tile); // +Z
   appendDroppedItemQuad(vertices, indices, p000, p010, p110, p100, base * 0.76f, tile); // -Z
+}
+
+bool shouldRenderDroppedItemAsSprite(uint8_t type) {
+  return !isBlockType(type) || type == kTorch;
+}
+
+void appendDroppedItemSprite(std::vector<Vertex>& vertices,
+                             std::vector<uint32_t>& indices,
+                             const glm::vec3& center,
+                             float spinY,
+                             uint8_t type) {
+  float halfWidth = 0.22f;
+  float halfHeight = 0.22f;
+  if (type == kTorch || type == kStick) {
+    halfWidth = 0.10f;
+    halfHeight = 0.30f;
+  } else if (type == kIronIngot) {
+    halfWidth = 0.26f;
+    halfHeight = 0.14f;
+  } else if (type == kDiamond) {
+    halfWidth = 0.22f;
+    halfHeight = 0.22f;
+  } else if (isToolItem(type)) {
+    halfWidth = 0.28f;
+    halfHeight = 0.28f;
+  }
+
+  const glm::vec3 base = droppedItemColor(type);
+  const int tile = tileForBlock(type);
+  const float c = std::cos(spinY);
+  const float sRot = std::sin(spinY);
+
+  auto rot = [&](const glm::vec3& local) {
+    float x = local.x * c - local.z * sRot;
+    float z = local.x * sRot + local.z * c;
+    return center + glm::vec3(x, local.y, z);
+  };
+
+  glm::vec3 v0 = rot({-halfWidth, -halfHeight, 0.0f});
+  glm::vec3 v1 = rot({halfWidth, -halfHeight, 0.0f});
+  glm::vec3 v2 = rot({halfWidth, halfHeight, 0.0f});
+  glm::vec3 v3 = rot({-halfWidth, halfHeight, 0.0f});
+  appendDroppedItemQuad(vertices, indices, v0, v1, v2, v3, base, tile);
+}
+
+uint32_t mixLootHash(uint32_t value) {
+  value ^= value >> 16;
+  value *= 0x7FEB352Du;
+  value ^= value >> 15;
+  value *= 0x846CA68Bu;
+  value ^= value >> 16;
+  return value;
+}
+
+uint32_t lootCacheStateForBlock(const glm::ivec3& block, int seed) {
+  uint32_t state = mixLootHash(static_cast<uint32_t>(seed) ^ 0x9E3779B9u);
+  state ^= mixLootHash(static_cast<uint32_t>(block.x) * 0x85EBCA6Bu);
+  state ^= mixLootHash(static_cast<uint32_t>(block.y) * 0xC2B2AE35u);
+  state ^= mixLootHash(static_cast<uint32_t>(block.z) * 0x27D4EB2Fu);
+  return state == 0u ? 0xA341316Cu : state;
+}
+
+void appendOverlayBox(std::vector<Vertex>& vertices,
+                      std::vector<uint32_t>& indices,
+                      const glm::vec3& minCorner,
+                      const glm::vec3& maxCorner,
+                      const glm::vec3& color) {
+  glm::vec3 p000{minCorner.x, minCorner.y, minCorner.z};
+  glm::vec3 p001{minCorner.x, minCorner.y, maxCorner.z};
+  glm::vec3 p010{minCorner.x, maxCorner.y, minCorner.z};
+  glm::vec3 p011{minCorner.x, maxCorner.y, maxCorner.z};
+  glm::vec3 p100{maxCorner.x, minCorner.y, minCorner.z};
+  glm::vec3 p101{maxCorner.x, minCorner.y, maxCorner.z};
+  glm::vec3 p110{maxCorner.x, maxCorner.y, minCorner.z};
+  glm::vec3 p111{maxCorner.x, maxCorner.y, maxCorner.z};
+
+  appendDroppedItemQuad(vertices, indices, p100, p110, p111, p101, color * 0.82f, kTileUiWhite);
+  appendDroppedItemQuad(vertices, indices, p001, p011, p010, p000, color * 0.82f, kTileUiWhite);
+  appendDroppedItemQuad(vertices, indices, p010, p011, p111, p110, color * 1.04f, kTileUiWhite);
+  appendDroppedItemQuad(vertices, indices, p000, p100, p101, p001, color * 0.62f, kTileUiWhite);
+  appendDroppedItemQuad(vertices, indices, p101, p111, p011, p001, color * 0.94f, kTileUiWhite);
+  appendDroppedItemQuad(vertices, indices, p000, p010, p110, p100, color * 0.74f, kTileUiWhite);
+}
+
+void appendOverlayEdge(std::vector<Vertex>& vertices,
+                       std::vector<uint32_t>& indices,
+                       const glm::vec3& a,
+                       const glm::vec3& b,
+                       float halfThickness,
+                       const glm::vec3& color) {
+  glm::vec3 minCorner = glm::min(a, b);
+  glm::vec3 maxCorner = glm::max(a, b);
+  if (std::abs(a.x - b.x) < 0.001f) {
+    minCorner.x = a.x - halfThickness;
+    maxCorner.x = a.x + halfThickness;
+  } else {
+    minCorner.x -= halfThickness;
+    maxCorner.x += halfThickness;
+  }
+  if (std::abs(a.y - b.y) < 0.001f) {
+    minCorner.y = a.y - halfThickness;
+    maxCorner.y = a.y + halfThickness;
+  } else {
+    minCorner.y -= halfThickness;
+    maxCorner.y += halfThickness;
+  }
+  if (std::abs(a.z - b.z) < 0.001f) {
+    minCorner.z = a.z - halfThickness;
+    maxCorner.z = a.z + halfThickness;
+  } else {
+    minCorner.z -= halfThickness;
+    maxCorner.z += halfThickness;
+  }
+  appendOverlayBox(vertices, indices, minCorner, maxCorner, color);
+}
+
+void appendOverlayWireCube(std::vector<Vertex>& vertices,
+                           std::vector<uint32_t>& indices,
+                           const glm::vec3& minCorner,
+                           const glm::vec3& maxCorner,
+                           float halfThickness,
+                           const glm::vec3& color) {
+  glm::vec3 p000{minCorner.x, minCorner.y, minCorner.z};
+  glm::vec3 p001{minCorner.x, minCorner.y, maxCorner.z};
+  glm::vec3 p010{minCorner.x, maxCorner.y, minCorner.z};
+  glm::vec3 p011{minCorner.x, maxCorner.y, maxCorner.z};
+  glm::vec3 p100{maxCorner.x, minCorner.y, minCorner.z};
+  glm::vec3 p101{maxCorner.x, minCorner.y, maxCorner.z};
+  glm::vec3 p110{maxCorner.x, maxCorner.y, minCorner.z};
+  glm::vec3 p111{maxCorner.x, maxCorner.y, maxCorner.z};
+
+  appendOverlayEdge(vertices, indices, p000, p100, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p001, p101, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p010, p110, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p011, p111, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p000, p001, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p010, p011, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p100, p101, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p110, p111, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p000, p010, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p001, p011, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p100, p110, halfThickness, color);
+  appendOverlayEdge(vertices, indices, p101, p111, halfThickness, color);
 }
 
 std::string trimAscii(const std::string& value) {
@@ -725,6 +1988,9 @@ void App::setScreenState(ScreenState state) {
     screenState == ScreenState::kPaused &&
     state == ScreenState::kSettings &&
     settingsReturnState == ScreenState::kPaused;
+  if (leavingGameplay && inventoryOpen) {
+    setInventoryOpen(false);
+  }
   if (leavingGameplay &&
       !pauseToInGameSettings &&
       !currentWorldPath.empty()) {
@@ -739,6 +2005,9 @@ void App::setScreenState(ScreenState state) {
 
   if (state != ScreenState::kPlaying && state != ScreenState::kPaused && inventoryOpen) {
     setInventoryOpen(false);
+  }
+  if (state != ScreenState::kPlaying && achievementTreeOpen) {
+    setAchievementTreeOpen(false);
   }
 
   if (state != ScreenState::kPlaying && breakingActive) {
@@ -756,12 +2025,7 @@ void App::setScreenState(ScreenState state) {
   } else {
     menuIntro = 0.0f;
   }
-  if (window) {
-    int cursorMode = (screenState == ScreenState::kPlaying && !inventoryOpen)
-      ? GLFW_CURSOR_DISABLED
-      : GLFW_CURSOR_NORMAL;
-    glfwSetInputMode(window, GLFW_CURSOR, cursorMode);
-  }
+  refreshCursorMode();
   firstMouse = true;
   menuUpDown = false;
   menuDownDown = false;
@@ -797,7 +2061,7 @@ void App::updateWindowTitle() {
       : std::string(label);
   };
 
-  std::string title = "CubeOS v0.2.1";
+  std::string title = "CubeOS v0.2.2";
   switch (screenState) {
     case ScreenState::kMainMenu:
       title += " | " + loc("Menu: ", "Меню: ") + mark(mainMenuSelection, 0, loc("Start", "Начать")) + "  "
@@ -820,8 +2084,8 @@ void App::updateWindowTitle() {
     }
     case ScreenState::kSettings:
       title += ru
-        ? " | Настройки | Вверх/Вниз выбор | Влево/Вправо изменить | Enter действие"
-        : " | Settings | Up/Down Select | Left/Right Adjust | Enter Action";
+        ? " | Настройки | Категории мышкой | Ползунки тянуть | Esc назад"
+        : " | Settings | Mouse Categories | Drag Sliders | Esc Back";
       break;
     case ScreenState::kPaused:
       title += " | " + loc("Paused: ", "Пауза: ") + mark(pauseMenuSelection, 0, loc("Continue", "Продолжить")) + "  "
@@ -894,20 +2158,70 @@ void App::saveCurrentPlayerState() const {
     std::cerr << "Warning: failed to open player-state file for write: " << statePath << "\n";
     return;
   }
+
+  auto writeStacks = [&](const auto& slots) {
+    for (const ItemStack& slot : slots) {
+      out << static_cast<int>(slot.type) << " " << slot.count << " ";
+    }
+    out << "\n";
+  };
+
+  out << "CUBEOS_PLAYER_V3\n";
   out << playerPos.x << " "
       << playerPos.y << " "
       << playerPos.z << " "
       << yaw << " "
-      << pitch << "\n";
+      << pitch << " "
+      << selectedSlot << " "
+      << achievementMask << "\n";
+  writeStacks(hotbar);
+  writeStacks(inventory);
+  std::vector<SavedFurnace> savedFurnaces;
+  savedFurnaces.reserve(furnaceStates.size());
+  for (const auto& [key, furnace] : furnaceStates) {
+    bool hasContent = (furnace.input.count > 0 && furnace.input.type != kAir) ||
+                      (furnace.fuel.count > 0 && furnace.fuel.type != kAir) ||
+                      (furnace.output.count > 0 && furnace.output.type != kAir) ||
+                      furnace.burnTime > 0.0f ||
+                      furnace.smeltProgress > 0.0f;
+    if (!hasContent) {
+      continue;
+    }
+
+    SavedFurnace saved{};
+    char sep0 = 0;
+    char sep1 = 0;
+    std::istringstream parser(key);
+    if (!(parser >> saved.pos.x >> sep0 >> saved.pos.y >> sep1 >> saved.pos.z) ||
+        sep0 != ':' || sep1 != ':') {
+      continue;
+    }
+    saved.input = furnace.input;
+    saved.fuel = furnace.fuel;
+    saved.output = furnace.output;
+    saved.burnTime = furnace.burnTime;
+    saved.burnDuration = furnace.burnDuration;
+    saved.smeltProgress = furnace.smeltProgress;
+    savedFurnaces.push_back(saved);
+  }
+  out << savedFurnaces.size() << "\n";
+  for (const SavedFurnace& furnace : savedFurnaces) {
+    out << furnace.pos.x << " "
+        << furnace.pos.y << " "
+        << furnace.pos.z << " "
+        << static_cast<int>(furnace.input.type) << " " << furnace.input.count << " "
+        << static_cast<int>(furnace.fuel.type) << " " << furnace.fuel.count << " "
+        << static_cast<int>(furnace.output.type) << " " << furnace.output.count << " "
+        << furnace.burnTime << " "
+        << furnace.burnDuration << " "
+        << furnace.smeltProgress << "\n";
+  }
   if (!out.good()) {
     std::cerr << "Warning: failed to flush player-state data: " << statePath << "\n";
   }
 }
 
-bool App::loadPlayerStateForWorld(const std::string& worldPath,
-                                  glm::vec3& outPos,
-                                  float& outYaw,
-                                  float& outPitch) const {
+bool App::loadPlayerStateForWorld(const std::string& worldPath, PlayerSaveData& outState) const {
   std::string statePath = playerStatePathForWorld(worldPath);
   if (statePath.empty()) {
     return false;
@@ -918,18 +2232,122 @@ bool App::loadPlayerStateForWorld(const std::string& worldPath,
     return false;
   }
 
+  PlayerSaveData loaded{};
+  std::string firstToken;
+  if (!(in >> firstToken)) {
+    return false;
+  }
+
+  auto readStacks = [&](auto& slots) -> bool {
+    for (ItemStack& slot : slots) {
+      int rawType = 0;
+      uint16_t rawCount = 0;
+      if (!(in >> rawType >> rawCount)) {
+        return false;
+      }
+      slot.type = static_cast<uint8_t>(std::clamp(rawType, 0, 255));
+      slot.count = rawCount;
+      if (slot.count == 0) {
+        slot.type = kAir;
+      }
+    }
+    return true;
+  };
+
+  auto loadFurnaceSection = [&](size_t furnaceCount) -> bool {
+    loaded.furnaces.clear();
+    loaded.furnaces.reserve(furnaceCount);
+    for (size_t i = 0; i < furnaceCount; ++i) {
+      SavedFurnace furnace{};
+      int inputType = 0;
+      int fuelType = 0;
+      int outputType = 0;
+      if (!(in >> furnace.pos.x
+              >> furnace.pos.y
+              >> furnace.pos.z
+              >> inputType >> furnace.input.count
+              >> fuelType >> furnace.fuel.count
+              >> outputType >> furnace.output.count
+              >> furnace.burnTime
+              >> furnace.burnDuration
+              >> furnace.smeltProgress)) {
+        return false;
+      }
+      furnace.input.type = static_cast<uint8_t>(std::clamp(inputType, 0, 255));
+      furnace.fuel.type = static_cast<uint8_t>(std::clamp(fuelType, 0, 255));
+      furnace.output.type = static_cast<uint8_t>(std::clamp(outputType, 0, 255));
+      if (furnace.input.count == 0) {
+        furnace.input.type = kAir;
+      }
+      if (furnace.fuel.count == 0) {
+        furnace.fuel.type = kAir;
+      }
+      if (furnace.output.count == 0) {
+        furnace.output.type = kAir;
+      }
+      loaded.furnaces.push_back(furnace);
+    }
+    return true;
+  };
+
+  if (firstToken == "CUBEOS_PLAYER_V3") {
+    size_t furnaceCount = 0;
+    if (!(in >> loaded.pos.x
+            >> loaded.pos.y
+            >> loaded.pos.z
+            >> loaded.yaw
+            >> loaded.pitch
+            >> loaded.selectedSlot
+            >> loaded.achievementMask)) {
+      return false;
+    }
+    if (!readStacks(loaded.hotbar) || !readStacks(loaded.inventory)) {
+      return false;
+    }
+    if (!(in >> furnaceCount) || !loadFurnaceSection(furnaceCount)) {
+      return false;
+    }
+    loaded.selectedSlot = std::clamp(loaded.selectedSlot, 0, static_cast<int>(hotbar.size()) - 1);
+    outState = loaded;
+    return true;
+  }
+
+  if (firstToken == "CUBEOS_PLAYER_V2") {
+    if (!(in >> loaded.pos.x
+            >> loaded.pos.y
+            >> loaded.pos.z
+            >> loaded.yaw
+            >> loaded.pitch
+            >> loaded.selectedSlot
+            >> loaded.achievementMask)) {
+      return false;
+    }
+    if (!readStacks(loaded.hotbar) || !readStacks(loaded.inventory)) {
+      return false;
+    }
+    loaded.selectedSlot = std::clamp(loaded.selectedSlot, 0, static_cast<int>(hotbar.size()) - 1);
+    outState = loaded;
+    return true;
+  }
+
   float x = 0.0f;
   float y = 0.0f;
   float z = 0.0f;
   float loadedYaw = -90.0f;
   float loadedPitch = 0.0f;
-  if (!(in >> x >> y >> z >> loadedYaw >> loadedPitch)) {
+  try {
+    x = std::stof(firstToken);
+  } catch (...) {
+    return false;
+  }
+  if (!(in >> y >> z >> loadedYaw >> loadedPitch)) {
     return false;
   }
 
-  outPos = glm::vec3(x, y, z);
-  outYaw = loadedYaw;
-  outPitch = loadedPitch;
+  loaded.pos = glm::vec3(x, y, z);
+  loaded.yaw = loadedYaw;
+  loaded.pitch = loadedPitch;
+  outState = loaded;
   return true;
 }
 
@@ -965,10 +2383,8 @@ void App::loadWorldFromSelection(int entryIndex) {
   pendingWorldSettings.generateStructures = true;
   world.setGenerationSettings(pendingWorldSettings);
   pendingSeedText = std::to_string(world.getSeed());
-  hasPendingPlayerResume = loadPlayerStateForWorld(currentWorldPath,
-                                                   pendingResumePlayerPos,
-                                                   pendingResumeYaw,
-                                                   pendingResumePitch);
+  pendingPlayerState = {};
+  hasPendingPlayerResume = loadPlayerStateForWorld(currentWorldPath, pendingPlayerState);
 
   for (ItemStack& slot : hotbar) {
     slot.type = kAir;
@@ -978,11 +2394,46 @@ void App::loadWorldFromSelection(int entryIndex) {
     slot.type = kAir;
     slot.count = 0;
   }
+  for (ItemStack& slot : craftingSlots) {
+    slot.type = kAir;
+    slot.count = 0;
+  }
   cursorStack.type = kAir;
   cursorStack.count = 0;
   selectedSlot = 0;
+  achievementMask = 0;
+  furnaceStates.clear();
+  furnaceOpen = false;
+  achievementPopupVisible = false;
+  achievementPopupQueue.clear();
+  achievementPopupTimer = 0.0f;
 
-  if (pendingWorldSettings.startInventoryMode != 0) {
+  if (hasPendingPlayerResume) {
+    hotbar = pendingPlayerState.hotbar;
+    inventory = pendingPlayerState.inventory;
+    selectedSlot = std::clamp(pendingPlayerState.selectedSlot, 0, static_cast<int>(hotbar.size()) - 1);
+    achievementMask = pendingPlayerState.achievementMask;
+    for (const SavedFurnace& saved : pendingPlayerState.furnaces) {
+      FurnaceState furnace{};
+      furnace.input = saved.input;
+      furnace.fuel = saved.fuel;
+      furnace.output = saved.output;
+      furnace.burnTime = saved.burnTime;
+      furnace.burnDuration = saved.burnDuration;
+      furnace.smeltProgress = saved.smeltProgress;
+      furnaceStates[furnaceKeyForBlock(saved.pos)] = furnace;
+    }
+  }
+
+  bool storageEmpty = true;
+  for (const ItemStack& slot : hotbar) {
+    storageEmpty = storageEmpty && (slot.count == 0 || slot.type == kAir);
+  }
+  for (const ItemStack& slot : inventory) {
+    storageEmpty = storageEmpty && (slot.count == 0 || slot.type == kAir);
+  }
+
+  if (( !hasPendingPlayerResume || storageEmpty) && pendingWorldSettings.startInventoryMode != 0) {
     std::array<uint8_t, App::kHotbarSlotCount> creativeBlocks = {
       kGrass, kDirt, kStone, kSand, kWater, kWood, kLeaves, kCoalOre, kGoldOre
     };
@@ -1006,6 +2457,7 @@ void App::beginCreateWorldFlow() {
   pendingWorldSettings.ravineFrequency = std::clamp(pendingWorldSettings.ravineFrequency, 0.25f, 2.5f);
   pendingSeedText.clear();
   hasPendingPlayerResume = false;
+  pendingPlayerState = {};
   setScreenState(ScreenState::kCreateWorld);
 }
 
@@ -1059,9 +2511,19 @@ void App::createWorldFromMenu() {
     slot.type = kAir;
     slot.count = 0;
   }
+  for (ItemStack& slot : craftingSlots) {
+    slot.type = kAir;
+    slot.count = 0;
+  }
   cursorStack.type = kAir;
   cursorStack.count = 0;
   selectedSlot = 0;
+  achievementMask = 0;
+  furnaceStates.clear();
+  furnaceOpen = false;
+  achievementPopupVisible = false;
+  achievementPopupQueue.clear();
+  achievementPopupTimer = 0.0f;
 
   if (settings.startInventoryMode != 0) {
     std::array<uint8_t, App::kHotbarSlotCount> creativeBlocks = {
@@ -1086,19 +2548,35 @@ void App::setupGameplaySession() {
   playerVel = glm::vec3(0.0f);
   onGround = false;
   inventoryOpen = false;
+  workbenchOpen = false;
+  furnaceOpen = false;
   breakingActive = false;
   breakingProgress = 0.0f;
   breakingStage = 0;
   droppedItems.clear();
   droppedItemMeshUploaded = false;
   droppedItemMeshTimer = 0.0f;
+  cachedTorchLights.clear();
+  torchLightRefreshTimer = 0.0f;
+  torchLightsCacheValid = false;
+  torchLightSampleSelectedBlock = kAir;
+  interactionOverlayUploaded = false;
+  interactionOutlineActive = false;
+  interactionPreviewActive = false;
+  interactionPreviewType = kAir;
+  pendingWorldChunkUploads.erase(kInteractionOverlayMeshKey);
+  pendingWorldChunkRemovals.erase(kInteractionOverlayMeshKey);
+  achievementPopupVisible = false;
+  achievementPopupQueue.clear();
+  achievementPopupTimer = 0.0f;
   world.clearBreakOverlay();
   resetEnvironmentForSession();
 
   int initialCx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int initialCz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
-  int spawnChunkRadius = std::max(8, activeChunkViewRadius + 1);
-  int preloadRadius = std::max(4, std::min(activeChunkViewRadius, 6));
+  int startupViewRadius = startupViewRadiusForQuality(appliedSettings.graphicsQuality, activeChunkViewRadius);
+  int spawnChunkRadius = std::max(3, startupViewRadius);
+  int preloadRadius = std::max(2, std::min(startupViewRadius, 4));
   const bool ru = appliedSettings.language == 1;
   world.updateActiveChunks(initialCx, initialCz, spawnChunkRadius);
   renderLoadingFrame(0.32f, ru ? "Генерация чанков" : "Generating chunks");
@@ -1155,9 +2633,10 @@ void App::setupGameplaySession() {
   auto isSpawnGround = [](uint8_t block) {
     return block != kAir &&
            !isWaterBlock(block) &&
-           !isUnderwaterPlantBlock(block) &&
+           !isDecorationBlock(block) &&
            block != kLeaves &&
-           block != kGravel;
+           block != kGravel &&
+           block != kLootCache;
   };
 
   auto isPreferredSpawnGround = [](uint8_t block) {
@@ -1165,7 +2644,7 @@ void App::setupGameplaySession() {
   };
 
   auto isSkyPassable = [](uint8_t block) {
-    return block == kAir || block == kLeaves || isUnderwaterPlantBlock(block);
+    return block == kAir || block == kLeaves || isDecorationBlock(block);
   };
 
   auto findSurfaceSpawn = [&]() -> glm::vec3 {
@@ -1356,6 +2835,117 @@ void App::setupGameplaySession() {
       return exposure;
     };
 
+    auto nearbyWoodScore = [&](const SpawnCandidate& c) -> int {
+      int score = 0;
+      for (int dz = -7; dz <= 7; ++dz) {
+        for (int dx = -7; dx <= 7; ++dx) {
+          int wx = c.x + dx;
+          int wz = c.z + dz;
+          if (!world.inBounds(wx, std::clamp(c.y, 0, world.height() - 1), wz)) {
+            continue;
+          }
+          for (int y = std::max(1, c.y - 1); y <= std::min(world.height() - 2, c.y + 8); ++y) {
+            if (world.getBlock(wx, y, wz) == kWood) {
+              score += std::max(1, 8 - std::max(std::abs(dx), std::abs(dz)));
+              break;
+            }
+          }
+        }
+      }
+      return std::min(score, 18);
+    };
+
+    auto nearbyStoneScore = [&](const SpawnCandidate& c) -> int {
+      auto exposed = [&](int x, int y, int z) {
+        static constexpr int kDirs[6][3] = {
+          {1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+          {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
+        };
+        for (const auto& dir : kDirs) {
+          int nx = x + dir[0];
+          int ny = y + dir[1];
+          int nz = z + dir[2];
+          if (!world.inBounds(nx, ny, nz)) {
+            continue;
+          }
+          uint8_t neighbor = world.getBlock(nx, ny, nz);
+          if (neighbor == kAir || isWaterBlock(neighbor) || isDecorationBlock(neighbor)) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      int score = 0;
+      for (int dz = -6; dz <= 6; ++dz) {
+        for (int dx = -6; dx <= 6; ++dx) {
+          int wx = c.x + dx;
+          int wz = c.z + dz;
+          bool foundColumn = false;
+          for (int y = std::max(1, c.y - 4); y <= std::min(world.height() - 2, c.y + 4); ++y) {
+            if (!world.inBounds(wx, y, wz)) {
+              continue;
+            }
+            uint8_t block = world.getBlock(wx, y, wz);
+            if (block != kStone && block != kCoalOre && block != kIronOre) {
+              continue;
+            }
+            if (!exposed(wx, y, wz)) {
+              continue;
+            }
+            score += (block == kIronOre) ? 4 : (block == kCoalOre ? 3 : 1);
+            foundColumn = true;
+            break;
+          }
+          if (foundColumn && score >= 20) {
+            return score;
+          }
+        }
+      }
+      return score;
+    };
+
+    auto nearbyCaveScore = [&](const SpawnCandidate& c) -> int {
+      int score = 0;
+      for (int dz = -8; dz <= 8; dz += 2) {
+        for (int dx = -8; dx <= 8; dx += 2) {
+          int wx = c.x + dx;
+          int wz = c.z + dz;
+          int surfaceY = 0;
+          uint8_t ground = kAir;
+          if (!probeSurface(wx, wz, surfaceY, ground)) {
+            continue;
+          }
+          for (int y = surfaceY; y >= std::max(surfaceY - 6, 2); --y) {
+            if (!world.inBounds(wx, y + 1, wz)) {
+              continue;
+            }
+            if (world.getBlock(wx, y, wz) != kAir || world.getBlock(wx, y + 1, wz) != kAir) {
+              continue;
+            }
+            uint8_t below = world.getBlock(wx, y - 1, wz);
+            if (below == kAir || isWaterBlock(below) || isDecorationBlock(below)) {
+              continue;
+            }
+            bool hasRoof = false;
+            for (int roofY = y + 2; roofY <= std::min(y + 6, world.height() - 1); ++roofY) {
+              uint8_t roof = world.getBlock(wx, roofY, wz);
+              if (!isSkyPassable(roof) && !isWaterBlock(roof)) {
+                hasRoof = true;
+                break;
+              }
+            }
+            if (!hasRoof) {
+              continue;
+            }
+            score += std::max(1, 6 - std::max(std::abs(dx), std::abs(dz)) / 2);
+            break;
+          }
+        }
+      }
+      return std::min(score, 16);
+    };
+
     glm::vec3 bestPos{};
     auto pickBest = [&](bool highBandOnly,
                         bool preferredOnly,
@@ -1386,14 +2976,29 @@ void App::setupGameplaySession() {
         if (localWaterExposure > maxWaterExposure) {
           continue;
         }
+        int woodScore = nearbyWoodScore(c);
+        int stoneScore = nearbyStoneScore(c);
+        int caveScore = nearbyCaveScore(c);
 
         int score = c.y * 140
                     - c.radius * 6
                     - surfaceRoughness * 12
                     - localLedgeRisk * 9
-                    - localWaterExposure * 7;
+                    - localWaterExposure * 7
+                    + woodScore * 18
+                    + stoneScore * 12
+                    + caveScore * 22;
         if (isPreferredSpawnGround(c.ground)) {
           score += 260;
+        }
+        if (woodScore > 0) {
+          score += 120;
+        }
+        if (stoneScore > 0) {
+          score += 90;
+        }
+        if (caveScore > 0) {
+          score += 110;
         }
 
         if (score > bestScore) {
@@ -1445,18 +3050,18 @@ void App::setupGameplaySession() {
             int x = bestWater->x + ox;
             int z = bestWater->z + oz;
             uint8_t below = world.getBlock(x, platformTopY - 1, z);
-            if (below == kAir || isWaterBlock(below) || isUnderwaterPlantBlock(below) || below == kLeaves) {
+            if (below == kAir || isWaterBlock(below) || isDecorationBlock(below) || below == kLeaves) {
               world.setBlock(x, platformTopY - 1, z, kStone);
             }
 
             uint8_t floorBlock = world.getBlock(x, platformTopY, z);
-            if (floorBlock == kAir || isWaterBlock(floorBlock) || isUnderwaterPlantBlock(floorBlock) || floorBlock == kLeaves) {
+            if (floorBlock == kAir || isWaterBlock(floorBlock) || isDecorationBlock(floorBlock) || floorBlock == kLeaves) {
               world.setBlock(x, platformTopY, z, kDirt);
             }
 
             for (int y = platformTopY + 1; y <= platformTopY + 3; ++y) {
               uint8_t headBlock = world.getBlock(x, y, z);
-              if (isWaterBlock(headBlock) || isUnderwaterPlantBlock(headBlock) || headBlock == kLeaves) {
+              if (isWaterBlock(headBlock) || isDecorationBlock(headBlock) || headBlock == kLeaves) {
                 world.setBlock(x, y, z, kAir);
               }
             }
@@ -1471,7 +3076,7 @@ void App::setupGameplaySession() {
       int highestSolid = 0;
       for (int y = world.height() - 3; y >= 1; --y) {
         uint8_t block = world.getBlock(baseX, y, baseZ);
-        if (block == kAir || isWaterBlock(block) || isUnderwaterPlantBlock(block) || block == kLeaves) {
+        if (block == kAir || isWaterBlock(block) || isDecorationBlock(block) || block == kLeaves) {
           continue;
         }
         highestSolid = y;
@@ -1504,7 +3109,7 @@ void App::setupGameplaySession() {
 
   playerPos = findSurfaceSpawn();
   if (hasPendingPlayerResume) {
-    glm::vec3 resumePos = pendingResumePlayerPos;
+    glm::vec3 resumePos = pendingPlayerState.pos;
     int rx = static_cast<int>(std::floor(resumePos.x));
     int ry = static_cast<int>(std::floor(resumePos.y));
     int rz = static_cast<int>(std::floor(resumePos.z));
@@ -1517,7 +3122,7 @@ void App::setupGameplaySession() {
       int minY = std::max(1, y - kMaxDropForResume);
       for (int sy = y - 1; sy >= minY; --sy) {
         uint8_t block = world.getBlock(x, sy, z);
-        if (block == kAir || block == kLeaves || isUnderwaterPlantBlock(block)) {
+        if (block == kAir || block == kLeaves || isDecorationBlock(block)) {
           continue;
         }
         return true;
@@ -1530,10 +3135,11 @@ void App::setupGameplaySession() {
     bool resumeSafe = hasNearbySupport(rx, ry, rz);
     if (resumeInBounds && !collidesAt(resumePos) && resumeSafe) {
       playerPos = resumePos;
-      yaw = pendingResumeYaw;
-      pitch = std::clamp(pendingResumePitch, -89.0f, 89.0f);
+      yaw = pendingPlayerState.yaw;
+      pitch = std::clamp(pendingPlayerState.pitch, -89.0f, 89.0f);
     }
     hasPendingPlayerResume = false;
+    pendingPlayerState = {};
   }
   while (collidesAt(playerPos) && playerPos.y < static_cast<float>(world.height() - 3)) {
     playerPos.y += 0.35f;
@@ -1543,15 +3149,21 @@ void App::setupGameplaySession() {
 
   int cx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int cz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
-  if (cx != initialCx || cz != initialCz) {
-    world.updateActiveChunks(cx, cz, activeChunkViewRadius);
-  }
+  int initialLoadedViewRadius = std::min(startupViewRadius, kMinRenderDistance);
+  world.updateActiveChunks(cx, cz, initialLoadedViewRadius);
+  renderLoadingFrame(0.90f,
+                     ru
+                       ? "Подготовка ближайших чанков"
+                       : "Preparing nearby chunks");
+  (void)world.waitForChunkRegion(cx, cz, 1, 250, ChunkGenStatus::kNoise);
+  loadedChunkViewRadius = initialLoadedViewRadius;
+  nextStreamingRadiusExpandTime = glfwGetTime() + streamingExpansionIntervalForQuality(appliedSettings.graphicsQuality);
   currentChunkX = cx;
   currentChunkZ = cz;
   chunkCenterValid = true;
 
   const bool ruUi = appliedSettings.language == 1;
-  renderLoadingFrame(0.92f, ruUi ? "Сборка рендера чанков" : "Building chunk render data");
+  renderLoadingFrame(0.95f, ruUi ? "Сборка рендера чанков" : "Building chunk render data");
   std::vector<ChunkMeshUpload> worldSnapshot;
   world.snapshotChunkMeshes(worldSnapshot);
   rebuildUiMesh();
@@ -1569,6 +3181,7 @@ void App::setupGameplaySession() {
   lastWorldChunkUploadTime = glfwGetTime();
   uiDirty = false;
   refreshSelectedBlock();
+  refreshAchievementsProgress();
 
   renderLoadingFrame(1.0f, ruUi ? "Готово" : "Done");
   setScreenState(ScreenState::kPlaying);
@@ -1596,6 +3209,12 @@ void App::processMenuInput(float deltaTime) {
   double mouseY = 0.0;
   glfwGetCursorPos(window, &mouseX, &mouseY);
   glm::vec2 menuMouseFb = cursorToFramebuffer(mouseX, mouseY);
+  if (std::abs(cursorFbX - menuMouseFb.x) > 0.01f ||
+      std::abs(cursorFbY - menuMouseFb.y) > 0.01f) {
+    cursorFbX = menuMouseFb.x;
+    cursorFbY = menuMouseFb.y;
+    uiDirty = true;
+  }
   bool mouseLeftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
   bool mouseRightPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
   bool mouseLeftClicked = mouseLeftPressed && !mouseLeftDown;
@@ -1687,36 +3306,84 @@ void App::processMenuInput(float deltaTime) {
       pendingSettings.renderDistance != appliedSettings.renderDistance ||
       std::abs(pendingSettings.sensitivity - appliedSettings.sensitivity) > 0.0001f ||
       pendingSettings.audioVolume != appliedSettings.audioVolume ||
-      pendingSettings.language != appliedSettings.language;
+      pendingSettings.language != appliedSettings.language ||
+      pendingSettings.blockGuides != appliedSettings.blockGuides;
   };
 
-  auto adjustSettingsValue = [&](bool increase) {
-    switch (settingsSelection) {
-      case 0: {
+  auto syncSettingsState = [&]() {
+    settingsCategory = std::clamp(settingsCategory, 0, kSettingsCategoryCount - 1);
+    settingsOptionSelection =
+      std::clamp(settingsOptionSelection, 0, std::max(0, settingsEntryCountForCategory(settingsCategory) - 1));
+    settingsActionSelection = std::clamp(settingsActionSelection, 0, kSettingsActionCount - 1);
+    settingsFocusArea = std::clamp(settingsFocusArea,
+                                   static_cast<int>(SettingsFocusArea::kCategories),
+                                   static_cast<int>(SettingsFocusArea::kActions));
+  };
+
+  auto openSettingsScreen = [&](ScreenState returnState) {
+    settingsSelection = 0;
+    settingsScroll = 0;
+    settingsReturnState = returnState;
+    settingsCategory = static_cast<int>(SettingsCategoryTab::kGraphics);
+    settingsOptionSelection = 0;
+    settingsActionSelection = 0;
+    settingsFocusArea = static_cast<int>(SettingsFocusArea::kOptions);
+    pendingSettings = appliedSettings;
+    settingsDirty = false;
+    setScreenState(ScreenState::kSettings);
+  };
+
+  auto setSettingsEntryFromNormalized = [&](SettingsEntryId entry, float t) {
+    t = std::clamp(t, 0.0f, 1.0f);
+    switch (entry) {
+      case SettingsEntryId::kRenderDistance:
+        pendingSettings.renderDistance = std::clamp(
+          kMinRenderDistance + static_cast<int>(std::lround(t * static_cast<float>(kMaxRenderDistance - kMinRenderDistance))),
+          kMinRenderDistance,
+          kMaxRenderDistance);
+        break;
+      case SettingsEntryId::kAudioVolume:
+        pendingSettings.audioVolume = std::clamp(static_cast<int>(std::lround(t * 100.0f)), 0, 100);
+        break;
+      case SettingsEntryId::kSensitivity:
+        pendingSettings.sensitivity = std::clamp(0.03f + t * (0.40f - 0.03f), 0.03f, 0.40f);
+        break;
+      default:
+        return;
+    }
+    updateSettingsDirtyFlag();
+    uiDirty = true;
+  };
+
+  auto adjustSettingsEntry = [&](SettingsEntryId entry, bool increase) {
+    switch (entry) {
+      case SettingsEntryId::kGraphicsQuality: {
         int delta = increase ? 1 : -1;
         pendingSettings.graphicsQuality = std::clamp(pendingSettings.graphicsQuality + delta, 0, 2);
         break;
       }
-      case 1: {
+      case SettingsEntryId::kRenderDistance: {
         int delta = increase ? 1 : -1;
         pendingSettings.renderDistance =
           std::clamp(pendingSettings.renderDistance + delta, kMinRenderDistance, kMaxRenderDistance);
         break;
       }
-      case 2: {
-        float delta = increase ? 0.01f : -0.01f;
-        pendingSettings.sensitivity = std::clamp(pendingSettings.sensitivity + delta, 0.03f, 0.40f);
-        break;
-      }
-      case 3: {
+      case SettingsEntryId::kAudioVolume: {
         int delta = increase ? 5 : -5;
         pendingSettings.audioVolume = std::clamp(pendingSettings.audioVolume + delta, 0, 100);
         break;
       }
-      case 4: {
-        pendingSettings.language = pendingSettings.language == 0 ? 1 : 0;
+      case SettingsEntryId::kSensitivity: {
+        float delta = increase ? 0.01f : -0.01f;
+        pendingSettings.sensitivity = std::clamp(pendingSettings.sensitivity + delta, 0.03f, 0.40f);
         break;
       }
+      case SettingsEntryId::kLanguage:
+        pendingSettings.language = pendingSettings.language == 0 ? 1 : 0;
+        break;
+      case SettingsEntryId::kBlockGuides:
+        pendingSettings.blockGuides = !pendingSettings.blockGuides;
+        break;
       default:
         return;
     }
@@ -1725,7 +3392,64 @@ void App::processMenuInput(float deltaTime) {
     uiDirty = true;
   };
 
+  auto activateSettingsAction = [&](SettingsActionId action) {
+    switch (action) {
+      case SettingsActionId::kApply: {
+        bool inGameContext =
+          settingsReturnState == ScreenState::kPlaying ||
+          settingsReturnState == ScreenState::kPaused;
+        applySettings(inGameContext);
+        saveSettingsWithWarning("settings menu apply");
+        break;
+      }
+      case SettingsActionId::kReset:
+        pendingSettings = UserSettings{};
+        updateSettingsDirtyFlag();
+        uiDirty = true;
+        break;
+      case SettingsActionId::kBack:
+      default:
+        pendingSettings = appliedSettings;
+        settingsDirty = false;
+        setScreenState(settingsReturnState);
+        break;
+    }
+  };
+
+  auto fixedMenuRowAtMouse = [&](int rowCount) -> int {
+    float t = static_cast<float>(glfwGetTime());
+    float intro = menuIntro * menuIntro * (3.0f - 2.0f * menuIntro);
+    float panelWidth = std::min(static_cast<float>(width) * 0.72f, 640.0f);
+    float panelHeight = std::min(static_cast<float>(height) * 0.78f, 540.0f);
+    float panelX = (static_cast<float>(width) - panelWidth) * 0.5f;
+    float panelY = (static_cast<float>(height) - panelHeight) * 0.5f;
+    panelY += (1.0f - intro) * 28.0f;
+    panelY += std::sin(t * 1.4f) * 3.0f;
+
+    float totalH = kMenuButtonHeight * static_cast<float>(rowCount) +
+                   kMenuButtonGap * static_cast<float>(std::max(0, rowCount - 1));
+    float bx = panelX + (panelWidth - kMenuButtonWidth) * 0.5f;
+    float by = panelY + 90.0f + (panelHeight - 130.0f - totalH) * 0.5f;
+    if (menuMouseFb.x < bx || menuMouseFb.x > bx + kMenuButtonWidth) {
+      return -1;
+    }
+
+    for (int i = 0; i < rowCount; ++i) {
+      float y = by + static_cast<float>(i) * (kMenuButtonHeight + kMenuButtonGap);
+      if (menuMouseFb.y >= y && menuMouseFb.y <= y + kMenuButtonHeight) {
+        return i;
+      }
+    }
+    return -1;
+  };
+
   if (screenState == ScreenState::kMainMenu) {
+    int hoveredRow = fixedMenuRowAtMouse(3);
+    if (hoveredRow >= 0 && hoveredRow != mainMenuSelection) {
+      mainMenuSelection = hoveredRow;
+      updateWindowTitle();
+      uiDirty = true;
+    }
     if (upPressed && !menuUpDown) {
       mainMenuSelection = std::max(0, mainMenuSelection - 1);
       updateWindowTitle();
@@ -1740,11 +3464,16 @@ void App::processMenuInput(float deltaTime) {
       if (mainMenuSelection == 0) {
         beginWorldSelectFlow();
       } else if (mainMenuSelection == 1) {
-        settingsSelection = 0;
-        settingsReturnState = ScreenState::kMainMenu;
-        pendingSettings = appliedSettings;
-        settingsDirty = false;
-        setScreenState(ScreenState::kSettings);
+        openSettingsScreen(ScreenState::kMainMenu);
+      } else {
+        glfwSetWindowShouldClose(window, GLFW_TRUE);
+      }
+    }
+    if (mouseLeftClicked && hoveredRow >= 0) {
+      if (hoveredRow == 0) {
+        beginWorldSelectFlow();
+      } else if (hoveredRow == 1) {
+        openSettingsScreen(ScreenState::kMainMenu);
       } else {
         glfwSetWindowShouldClose(window, GLFW_TRUE);
       }
@@ -1753,6 +3482,12 @@ void App::processMenuInput(float deltaTime) {
       glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
   } else if (screenState == ScreenState::kPaused) {
+    int hoveredRow = fixedMenuRowAtMouse(3);
+    if (hoveredRow >= 0 && hoveredRow != pauseMenuSelection) {
+      pauseMenuSelection = hoveredRow;
+      updateWindowTitle();
+      uiDirty = true;
+    }
     if (upPressed && !menuUpDown) {
       pauseMenuSelection = std::max(0, pauseMenuSelection - 1);
       updateWindowTitle();
@@ -1767,11 +3502,16 @@ void App::processMenuInput(float deltaTime) {
       if (pauseMenuSelection == 0) {
         setScreenState(ScreenState::kPlaying);
       } else if (pauseMenuSelection == 1) {
-        settingsSelection = 0;
-        settingsReturnState = ScreenState::kPaused;
-        pendingSettings = appliedSettings;
-        settingsDirty = false;
-        setScreenState(ScreenState::kSettings);
+        openSettingsScreen(ScreenState::kPaused);
+      } else {
+        setScreenState(ScreenState::kMainMenu);
+      }
+    }
+    if (mouseLeftClicked && hoveredRow >= 0) {
+      if (hoveredRow == 0) {
+        setScreenState(ScreenState::kPlaying);
+      } else if (hoveredRow == 1) {
+        openSettingsScreen(ScreenState::kPaused);
       } else {
         setScreenState(ScreenState::kMainMenu);
       }
@@ -1781,21 +3521,22 @@ void App::processMenuInput(float deltaTime) {
     }
   } else if (screenState == ScreenState::kWorldSelect) {
     int rowCount = static_cast<int>(worldSelectEntries.size()) + 2;
-    constexpr int kVisibleRows = 8;
+    int visibleRows = computeWorldSelectVisibleRows(height, rowCount);
 
     auto syncWorldSelectScroll = [&]() {
-      if (rowCount <= kVisibleRows) {
+      if (rowCount <= visibleRows) {
         worldSelectScroll = 0;
         return;
       }
-      int maxScroll = rowCount - kVisibleRows;
+      int maxScroll = rowCount - visibleRows;
       if (worldSelectSelection < worldSelectScroll) {
         worldSelectScroll = worldSelectSelection;
-      } else if (worldSelectSelection >= worldSelectScroll + kVisibleRows) {
-        worldSelectScroll = worldSelectSelection - kVisibleRows + 1;
+      } else if (worldSelectSelection >= worldSelectScroll + visibleRows) {
+        worldSelectScroll = worldSelectSelection - visibleRows + 1;
       }
       worldSelectScroll = std::clamp(worldSelectScroll, 0, maxScroll);
     };
+    syncWorldSelectScroll();
 
     auto activateWorldSelectRow = [&](int row) {
       if (row < 0 || row >= rowCount) {
@@ -1854,18 +3595,18 @@ void App::processMenuInput(float deltaTime) {
       panelY += std::sin(t * 1.4f) * 3.0f;
 
       int startRow = 0;
-      if (rowCount > kVisibleRows) {
-        startRow = std::clamp(worldSelectScroll, 0, rowCount - kVisibleRows);
+      if (rowCount > visibleRows) {
+        startRow = std::clamp(worldSelectScroll, 0, rowCount - visibleRows);
       }
-      int endRow = std::min(rowCount, startRow + kVisibleRows);
-      int visibleRows = endRow - startRow;
+      int endRow = std::min(rowCount, startRow + visibleRows);
+      int drawRows = endRow - startRow;
 
       float rowW = panelWidth - 120.0f;
       float rowX = panelX + (panelWidth - rowW) * 0.5f;
       float rowH = 40.0f;
       float rowGap = 10.0f;
-      float rowsH = static_cast<float>(visibleRows) * rowH +
-                    static_cast<float>(std::max(0, visibleRows - 1)) * rowGap;
+      float rowsH = static_cast<float>(drawRows) * rowH +
+                    static_cast<float>(std::max(0, drawRows - 1)) * rowGap;
       float rowY = panelY + 84.0f + std::max(0.0f, (panelHeight - 116.0f - rowsH) * 0.5f);
 
       if (menuMouseFb.x < rowX || menuMouseFb.x > rowX + rowW) {
@@ -1918,35 +3659,208 @@ void App::processMenuInput(float deltaTime) {
   } else if (screenState == ScreenState::kLoadingWorld) {
     // Loading is driven by synchronous world setup functions.
   } else if (screenState == ScreenState::kSettings) {
-    constexpr int kSettingsFieldCount = 8;
+    syncSettingsState();
+    float t = static_cast<float>(glfwGetTime());
+    float intro = menuIntro * menuIntro * (3.0f - 2.0f * menuIntro);
+    float settingsPanelW = std::min(static_cast<float>(width) * 0.82f, 860.0f);
+    float settingsPanelH = std::min(static_cast<float>(height) * 0.80f, 560.0f);
+    float settingsPanelX = (static_cast<float>(width) - settingsPanelW) * 0.5f;
+    float settingsPanelY = (static_cast<float>(height) - settingsPanelH) * 0.5f;
+    settingsPanelY += (1.0f - intro) * 28.0f;
+    settingsPanelY += std::sin(t * 1.4f) * 3.0f;
+    SettingsUiLayout settingsLayout = makeSettingsUiLayout(settingsPanelX,
+                                                           settingsPanelY,
+                                                           settingsPanelW,
+                                                           settingsPanelH);
+    int optionCount = settingsEntryCountForCategory(settingsCategory);
+
+    int hoveredCategory = -1;
+    for (int i = 0; i < kSettingsCategoryCount; ++i) {
+      if (pointInRect(menuMouseFb.x, menuMouseFb.y, settingsCategoryRect(settingsLayout, i))) {
+        hoveredCategory = i;
+        break;
+      }
+    }
+
+    int hoveredOption = -1;
+    for (int i = 0; i < optionCount; ++i) {
+      if (pointInRect(menuMouseFb.x, menuMouseFb.y, settingsOptionRect(settingsLayout, i))) {
+        hoveredOption = i;
+        break;
+      }
+    }
+
+    int hoveredAction = -1;
+    for (int i = 0; i < kSettingsActionCount; ++i) {
+      if (pointInRect(menuMouseFb.x, menuMouseFb.y, settingsActionRect(settingsLayout, i))) {
+        hoveredAction = i;
+        break;
+      }
+    }
+
+    auto setSettingsFocus = [&](SettingsFocusArea focus) {
+      int nextFocus = static_cast<int>(focus);
+      if (settingsFocusArea != nextFocus) {
+        settingsFocusArea = nextFocus;
+        uiDirty = true;
+      }
+    };
+
+    auto handleSettingsOptionPointer = [&](int optionIndex, bool primaryClick, bool secondaryClick, bool primaryHold) {
+      settingsOptionSelection = std::clamp(optionIndex, 0, std::max(0, optionCount - 1));
+      setSettingsFocus(SettingsFocusArea::kOptions);
+
+      SettingsEntryId entry = settingsEntryForCategory(settingsCategory, optionIndex);
+      glm::vec4 optionRect = settingsOptionRect(settingsLayout, optionIndex);
+      glm::vec4 controlRect = settingsControlRect(optionRect);
+
+      switch (entry) {
+        case SettingsEntryId::kGraphicsQuality: {
+          if (!primaryClick && !secondaryClick) {
+            return;
+          }
+          for (int i = 0; i < 3; ++i) {
+            if (pointInRect(menuMouseFb.x, menuMouseFb.y, settingsSegmentRect(controlRect, 3, i))) {
+              pendingSettings.graphicsQuality = i;
+              updateSettingsDirtyFlag();
+              uiDirty = true;
+              return;
+            }
+          }
+          adjustSettingsEntry(entry, primaryClick);
+          return;
+        }
+        case SettingsEntryId::kRenderDistance:
+        case SettingsEntryId::kAudioVolume:
+        case SettingsEntryId::kSensitivity: {
+          glm::vec4 sliderRect = settingsSliderTrackRect(optionRect);
+          glm::vec4 sliderHitRect{sliderRect.x, optionRect.y + 12.0f, sliderRect.z, optionRect.w - 24.0f};
+          if (primaryHold && pointInRect(menuMouseFb.x, menuMouseFb.y, sliderHitRect)) {
+            setSettingsEntryFromNormalized(entry, normalizedValueFromRect(menuMouseFb.x, sliderRect));
+            return;
+          }
+          if (secondaryClick) {
+            adjustSettingsEntry(entry, false);
+            return;
+          }
+          if (primaryClick) {
+            if (pointInRect(menuMouseFb.x, menuMouseFb.y, sliderHitRect)) {
+              setSettingsEntryFromNormalized(entry, normalizedValueFromRect(menuMouseFb.x, sliderRect));
+            } else {
+              adjustSettingsEntry(entry, menuMouseFb.x >= optionRect.x + optionRect.z * 0.5f);
+            }
+          }
+          return;
+        }
+        case SettingsEntryId::kLanguage: {
+          if (!primaryClick && !secondaryClick) {
+            return;
+          }
+          if (pointInRect(menuMouseFb.x, menuMouseFb.y, settingsSegmentRect(controlRect, 2, 0))) {
+            pendingSettings.language = 0;
+          } else if (pointInRect(menuMouseFb.x, menuMouseFb.y, settingsSegmentRect(controlRect, 2, 1))) {
+            pendingSettings.language = 1;
+          } else if (primaryClick || secondaryClick) {
+            pendingSettings.language = pendingSettings.language == 0 ? 1 : 0;
+          }
+          updateSettingsDirtyFlag();
+          uiDirty = true;
+          return;
+        }
+        case SettingsEntryId::kBlockGuides: {
+          if (!primaryClick && !secondaryClick) {
+            return;
+          }
+          if (pointInRect(menuMouseFb.x, menuMouseFb.y, settingsSegmentRect(controlRect, 2, 0))) {
+            pendingSettings.blockGuides = false;
+          } else if (pointInRect(menuMouseFb.x, menuMouseFb.y, settingsSegmentRect(controlRect, 2, 1))) {
+            pendingSettings.blockGuides = true;
+          } else {
+            pendingSettings.blockGuides = !pendingSettings.blockGuides;
+          }
+          updateSettingsDirtyFlag();
+          uiDirty = true;
+          return;
+        }
+        default:
+          return;
+      }
+    };
+
+    if (mouseLeftClicked && hoveredCategory >= 0) {
+      settingsCategory = hoveredCategory;
+      settingsOptionSelection = 0;
+      setSettingsFocus(SettingsFocusArea::kOptions);
+      uiDirty = true;
+    } else if (mouseLeftClicked && hoveredAction >= 0) {
+      settingsActionSelection = hoveredAction;
+      setSettingsFocus(SettingsFocusArea::kActions);
+      activateSettingsAction(static_cast<SettingsActionId>(hoveredAction));
+    } else if (hoveredOption >= 0 &&
+               (mouseLeftClicked || mouseRightClicked || mouseLeftPressed)) {
+      handleSettingsOptionPointer(hoveredOption, mouseLeftClicked, mouseRightClicked, mouseLeftPressed);
+    }
+
+    optionCount = settingsEntryCountForCategory(settingsCategory);
+    settingsOptionSelection = std::clamp(settingsOptionSelection, 0, std::max(0, optionCount - 1));
+
     if (upPressed && !menuUpDown) {
-      settingsSelection = std::max(0, settingsSelection - 1);
+      if (settingsFocusArea == static_cast<int>(SettingsFocusArea::kCategories)) {
+        settingsCategory = std::max(0, settingsCategory - 1);
+        settingsOptionSelection = 0;
+      } else if (settingsFocusArea == static_cast<int>(SettingsFocusArea::kOptions)) {
+        if (settingsOptionSelection > 0) {
+          --settingsOptionSelection;
+        } else {
+          settingsFocusArea = static_cast<int>(SettingsFocusArea::kCategories);
+        }
+      } else {
+        settingsFocusArea = static_cast<int>(SettingsFocusArea::kOptions);
+      }
       uiDirty = true;
     }
     if (downPressed && !menuDownDown) {
-      settingsSelection = std::min(kSettingsFieldCount - 1, settingsSelection + 1);
+      if (settingsFocusArea == static_cast<int>(SettingsFocusArea::kCategories)) {
+        settingsCategory = std::min(kSettingsCategoryCount - 1, settingsCategory + 1);
+        settingsOptionSelection = 0;
+      } else if (settingsFocusArea == static_cast<int>(SettingsFocusArea::kOptions)) {
+        if (settingsOptionSelection + 1 < optionCount) {
+          ++settingsOptionSelection;
+        } else {
+          settingsFocusArea = static_cast<int>(SettingsFocusArea::kActions);
+        }
+      } else {
+        settingsFocusArea = static_cast<int>(SettingsFocusArea::kOptions);
+      }
       uiDirty = true;
     }
-    if ((leftPressed && !menuLeftDown) || (rightPressed && !menuRightDown)) {
-      adjustSettingsValue(rightPressed && !menuRightDown);
+    if (leftPressed && !menuLeftDown) {
+      if (settingsFocusArea == static_cast<int>(SettingsFocusArea::kOptions)) {
+        adjustSettingsEntry(settingsEntryForCategory(settingsCategory, settingsOptionSelection), false);
+      } else if (settingsFocusArea == static_cast<int>(SettingsFocusArea::kActions)) {
+        settingsActionSelection = std::max(0, settingsActionSelection - 1);
+        uiDirty = true;
+      }
+    }
+    if (rightPressed && !menuRightDown) {
+      if (settingsFocusArea == static_cast<int>(SettingsFocusArea::kCategories)) {
+        settingsFocusArea = static_cast<int>(SettingsFocusArea::kOptions);
+        uiDirty = true;
+      } else if (settingsFocusArea == static_cast<int>(SettingsFocusArea::kOptions)) {
+        adjustSettingsEntry(settingsEntryForCategory(settingsCategory, settingsOptionSelection), true);
+      } else {
+        settingsActionSelection = std::min(kSettingsActionCount - 1, settingsActionSelection + 1);
+        uiDirty = true;
+      }
     }
     if (enterPressed && !menuEnterDown) {
-      if (settingsSelection <= 4) {
-        adjustSettingsValue(true);
-      } else if (settingsSelection == 5) {
-        bool inGameContext =
-          settingsReturnState == ScreenState::kPlaying ||
-          settingsReturnState == ScreenState::kPaused;
-        applySettings(inGameContext);
-        saveSettingsWithWarning("settings menu apply");
-      } else if (settingsSelection == 6) {
-        pendingSettings = UserSettings{};
-        updateSettingsDirtyFlag();
+      if (settingsFocusArea == static_cast<int>(SettingsFocusArea::kCategories)) {
+        settingsFocusArea = static_cast<int>(SettingsFocusArea::kOptions);
         uiDirty = true;
-      } else if (settingsSelection == 7) {
-        pendingSettings = appliedSettings;
-        settingsDirty = false;
-        setScreenState(settingsReturnState);
+      } else if (settingsFocusArea == static_cast<int>(SettingsFocusArea::kOptions)) {
+        adjustSettingsEntry(settingsEntryForCategory(settingsCategory, settingsOptionSelection), true);
+      } else {
+        activateSettingsAction(static_cast<SettingsActionId>(settingsActionSelection));
       }
     }
     if (escPressed && !menuEscDown) {
@@ -2083,6 +3997,13 @@ void App::loadSettings() {
           c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         }
         appliedSettings.language = (lowered == "ru" || lowered == "russian" || lowered == "1") ? 1 : 0;
+      } else if (key == "block_guides") {
+        std::string lowered = value;
+        for (char& c : lowered) {
+          c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        appliedSettings.blockGuides =
+          !(lowered == "0" || lowered == "false" || lowered == "off" || lowered == "no");
       }
     }
   }
@@ -2107,6 +4028,7 @@ bool App::saveSettings() const {
   out << "sensitivity=" << appliedSettings.sensitivity << "\n";
   out << "audio_volume=" << appliedSettings.audioVolume << "\n";
   out << "language=" << (appliedSettings.language == 1 ? "ru" : "en") << "\n";
+  out << "block_guides=" << (appliedSettings.blockGuides ? "on" : "off") << "\n";
   return true;
 }
 
@@ -2125,15 +4047,22 @@ void App::applySettings(bool refreshWorldStreaming) {
   appliedSettings.sensitivity = std::clamp(pendingSettings.sensitivity, 0.03f, 0.40f);
   appliedSettings.audioVolume = std::clamp(pendingSettings.audioVolume, 0, 100);
   appliedSettings.language = std::clamp(pendingSettings.language, 0, 1);
+  appliedSettings.blockGuides = pendingSettings.blockGuides;
+  audio.setMasterVolume(appliedSettings.audioVolume);
   pendingSettings = appliedSettings;
   settingsDirty = false;
 
   activeChunkViewRadius = appliedSettings.renderDistance;
+  loadedChunkViewRadius = std::min(loadedChunkViewRadius, activeChunkViewRadius);
 
   if (refreshWorldStreaming && screenState == ScreenState::kPlaying) {
     int cx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
     int cz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
-    world.updateActiveChunks(cx, cz, activeChunkViewRadius);
+    int radius = std::max(loadedChunkViewRadius, startupViewRadiusForQuality(appliedSettings.graphicsQuality,
+                                                                             activeChunkViewRadius));
+    loadedChunkViewRadius = std::min(radius, activeChunkViewRadius);
+    world.updateActiveChunks(cx, cz, loadedChunkViewRadius);
+    nextStreamingRadiusExpandTime = glfwGetTime() + streamingExpansionIntervalForQuality(appliedSettings.graphicsQuality);
     currentChunkX = cx;
     currentChunkZ = cz;
     chunkCenterValid = true;
@@ -2163,12 +4092,20 @@ void App::initWindow() {
     throw std::runtime_error("Failed to create GLFW window.");
   }
 
+  glfwGetWindowSize(window, &width, &height);
+  glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
   glfwSetWindowUserPointer(window, this);
+  glfwSetWindowSizeCallback(window, App::windowSizeCallback);
   glfwSetFramebufferSizeCallback(window, App::framebufferResizeCallback);
+  glfwSetScrollCallback(window, App::scrollCallback);
   glfwSetCursorPosCallback(window, App::mouseCallback);
   glfwSetCharCallback(window, App::charCallback);
   glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
   loadSettings();
+  if (!audio.init()) {
+    std::cerr << "Warning: failed to initialize audio.\n";
+  }
+  audio.setMasterVolume(appliedSettings.audioVolume);
   menuIntro = 0.0f;
   updateWindowTitle();
 }
@@ -2213,13 +4150,9 @@ void App::initVulkan() {
 }
 
 void App::mainLoop() {
-  constexpr double kWorldChunkUploadMinIntervalSec = 1.0 / 30.0; // Section uploads are cheap enough to stream at ~30 Hz.
-  constexpr int kMeshRebuildTaskBudgetPerTick = 10;
-  constexpr int kMeshUploadBudgetPerTick = 16;
-  constexpr double kMaxFrameRatePlayingFocused = 72.0;
-  constexpr double kMaxFrameRatePlayingUnfocused = 30.0;
-  constexpr double kMaxFrameRateMenusFocused = 45.0;
-  constexpr double kMaxFrameRateMenusUnfocused = 24.0;
+  constexpr double kWorldChunkUploadMinIntervalSec = 1.0 / 60.0; // Keep world pop-in lower without uploading every frame.
+  constexpr int kMeshRebuildTaskBudgetPerTick = 18;
+  constexpr int kMeshUploadBudgetPerTick = 28;
   constexpr float kWaterSimTickFocusedSec = 0.24f;
   constexpr float kWaterSimTickUnfocusedSec = 0.40f;
   constexpr double kMenuUiTickFocusedSec = 1.0 / 24.0;
@@ -2232,6 +4165,9 @@ void App::mainLoop() {
     float deltaTime = static_cast<float>(currentTime - lastTime);
     deltaTime = std::clamp(deltaTime, 0.0f, 0.12f);
     lastTime = currentTime;
+    profiler.frameCount += 1;
+    size_t chunkUpdatesThisFrame = 0;
+    size_t chunkRemovalsThisFrame = 0;
     float positiveDelta = std::max(0.0f, deltaTime);
     fpsSampleAccum += positiveDelta;
     fpsSampleFrames += 1;
@@ -2246,6 +4182,7 @@ void App::mainLoop() {
       fpsSampleFrames = 0;
     }
 
+    double eventsInputStart = glfwGetTime();
     glfwPollEvents();
     bool windowFocused = glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE;
     bool windowMinimized = glfwGetWindowAttrib(window, GLFW_ICONIFIED) == GLFW_TRUE ||
@@ -2257,13 +4194,42 @@ void App::mainLoop() {
     }
 
     processInput(deltaTime);
+    recordProfilerMetric(profiler.eventsInput,
+                         (glfwGetTime() - eventsInputStart) * 1000.0,
+                         profiler.frameCount);
+
+    double environmentStart = glfwGetTime();
     updateEnvironment(deltaTime);
+    recordProfilerMetric(profiler.environment,
+                         (glfwGetTime() - environmentStart) * 1000.0,
+                         profiler.frameCount);
 
     if (selectedItemToastTimer > 0.0f) {
       selectedItemToastTimer = std::max(0.0f, selectedItemToastTimer - deltaTime);
       uiDirty = true;
     }
+    if (craftResultFlashTimer > 0.0f) {
+      craftResultFlashTimer = std::max(0.0f, craftResultFlashTimer - deltaTime);
+      uiDirty = true;
+    }
+    if (achievementPopupVisible) {
+      achievementPopupTimer = std::max(0.0f, achievementPopupTimer - deltaTime);
+      uiDirty = true;
+      if (achievementPopupTimer <= 0.0f) {
+        achievementPopupVisible = false;
+      }
+    }
+    if (!achievementPopupVisible && !achievementPopupQueue.empty()) {
+      activeAchievementPopupId = achievementPopupQueue.front();
+      achievementPopupQueue.pop_front();
+      achievementPopupVisible = true;
+      achievementPopupTimer = kAchievementPopupDuration;
+      uiDirty = true;
+    }
     if (debugWorldgenOverlay && (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused)) {
+      uiDirty = true;
+    }
+    if (debugProfilerOverlay && (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused)) {
       uiDirty = true;
     }
 
@@ -2282,12 +4248,24 @@ void App::mainLoop() {
     } else {
       menuUiTickAccumulator = 0.0;
     }
-    if (screenState == ScreenState::kPlaying && !inventoryOpen) {
+    double playerStart = glfwGetTime();
+    if (screenState == ScreenState::kPlaying && !inventoryOpen && !achievementTreeOpen) {
       updatePlayer(deltaTime);
     }
+    recordProfilerMetric(profiler.player,
+                         (glfwGetTime() - playerStart) * 1000.0,
+                         profiler.frameCount);
 
+    double streamingStart = glfwGetTime();
     if (screenState == ScreenState::kPlaying) {
       updateStreaming();
+    }
+    recordProfilerMetric(profiler.streaming,
+                         (glfwGetTime() - streamingStart) * 1000.0,
+                         profiler.frameCount);
+
+    double simulationStart = glfwGetTime();
+    if (screenState == ScreenState::kPlaying) {
       waterSimBoostTimer = std::max(0.0f, waterSimBoostTimer - deltaTime);
       waterSimAccumulator += deltaTime;
       float waterTickSec = windowFocused ? kWaterSimTickFocusedSec : kWaterSimTickUnfocusedSec;
@@ -2319,12 +4297,23 @@ void App::mainLoop() {
       waterSimBoostTimer = 0.0f;
       waterSimAccumulator = 0.0f;
     }
+    recordProfilerMetric(profiler.simulation,
+                         (glfwGetTime() - simulationStart) * 1000.0,
+                         profiler.frameCount);
 
+    double gameplayStart = glfwGetTime();
     if (screenState == ScreenState::kPlaying) {
+      updateFurnaces(deltaTime);
       updateDroppedItems(deltaTime);
     }
+    syncAudioState();
     syncDroppedItemMesh(false);
+    updateInteractionOverlayMesh();
+    recordProfilerMetric(profiler.gameplay,
+                         (glfwGetTime() - gameplayStart) * 1000.0,
+                         profiler.frameCount);
 
+    double meshStart = glfwGetTime();
     bool worldScreenActive = screenState == ScreenState::kPlaying ||
                              screenState == ScreenState::kPaused ||
                              screenState == ScreenState::kLoadingWorld;
@@ -2346,6 +4335,8 @@ void App::mainLoop() {
           meshBuildBudget,
           meshUploadBudget);
         if (hasChunkUpdateBatch) {
+          chunkUpdatesThisFrame += chunkUpdates.size();
+          chunkRemovalsThisFrame += removedChunkKeys.size();
           for (uint64_t key : removedChunkKeys) {
             pendingWorldChunkUploads.erase(key);
             pendingWorldChunkRemovals.insert(key);
@@ -2382,19 +4373,26 @@ void App::mainLoop() {
       vk.updateWorldChunkMeshes(uploads, removals);
       lastWorldChunkUploadTime = currentTime;
     }
+    recordProfilerMetric(profiler.mesh,
+                         (glfwGetTime() - meshStart) * 1000.0,
+                         profiler.frameCount);
 
+    double uiStart = glfwGetTime();
     if (uiDirty) {
       rebuildUiMesh();
       composeMeshData();
       vk.updateMesh(meshVertices, meshIndices, skyIndexCount, worldIndexCount, uiIndexCount);
       uiDirty = false;
     }
+    recordProfilerMetric(profiler.ui,
+                         (glfwGetTime() - uiStart) * 1000.0,
+                         profiler.frameCount);
 
     glm::vec3 eye;
     glm::vec3 front;
     bool cameraInWater = false;
     if (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused) {
-      eye = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
+      eye = playerPos + glm::vec3(0.0f, cameraEyeHeight(), 0.0f);
       front = cameraFront();
       cameraInWater = isWaterBlock(world.getBlock(static_cast<int>(std::floor(eye.x)),
                                                    static_cast<int>(std::floor(eye.y)),
@@ -2411,21 +4409,72 @@ void App::mainLoop() {
                                       200.0f);
     proj[1][1] *= -1.0f;
 
+    double torchStart = glfwGetTime();
     vk.setEnvironmentState(dayLightFactor, weatherIntensity, dayCycleTime);
-    vk.setCameraWorldState(eye, cameraInWater);
+    if (worldScreenActive) {
+      int quality = std::clamp(appliedSettings.graphicsQuality, 0, 2);
+      size_t maxLights = static_cast<size_t>(maxTorchLightsForQuality(quality));
+      float refreshInterval = torchLightRefreshIntervalForQuality(quality);
+      glm::vec3 eyeDelta = eye - torchLightSampleEye;
+      float movedSq = glm::dot(eyeDelta, eyeDelta);
+      bool movedEnough = movedSq >= (kTorchLightRefreshMoveThreshold * kTorchLightRefreshMoveThreshold);
+      bool turnedEnough = glm::dot(front, torchLightSampleForward) <= kTorchLightRefreshForwardDot;
+      bool selectedChanged = torchLightSampleSelectedBlock != selectedBlock;
+      torchLightRefreshTimer = std::max(0.0f, torchLightRefreshTimer - deltaTime);
+      if (!torchLightsCacheValid || movedEnough || turnedEnough || selectedChanged || torchLightRefreshTimer <= 0.0f) {
+        cachedTorchLights = collectTorchLights(maxLights);
+        torchLightSampleEye = eye;
+        torchLightSampleForward = front;
+        torchLightSampleSelectedBlock = selectedBlock;
+        torchLightRefreshTimer = refreshInterval;
+        torchLightsCacheValid = true;
+      } else if (cachedTorchLights.size() > maxLights) {
+        cachedTorchLights.resize(maxLights);
+      }
+      vk.setTorchLights(cachedTorchLights);
+    } else {
+      cachedTorchLights.clear();
+      torchLightRefreshTimer = 0.0f;
+      torchLightsCacheValid = false;
+      vk.setTorchLights({});
+    }
+    recordProfilerMetric(profiler.torch,
+                         (glfwGetTime() - torchStart) * 1000.0,
+                         profiler.frameCount);
+
+    double drawStart = glfwGetTime();
+    vk.setCameraWorldState(eye, front, cameraInWater);
     vk.setCameraMatrices(view, proj);
     vk.drawFrame();
+    recordProfilerMetric(profiler.draw,
+                         (glfwGetTime() - drawStart) * 1000.0,
+                         profiler.frameCount);
 
     double frameDuration = glfwGetTime() - frameStart;
     bool playingState = screenState == ScreenState::kPlaying;
+    int quality = std::clamp(appliedSettings.graphicsQuality, 0, 2);
     double targetFps = playingState
-      ? (windowFocused ? kMaxFrameRatePlayingFocused : kMaxFrameRatePlayingUnfocused)
-      : (windowFocused ? kMaxFrameRateMenusFocused : kMaxFrameRateMenusUnfocused);
+      ? (windowFocused ? focusedPlayingFpsForQuality(quality) : unfocusedPlayingFpsForQuality(quality))
+      : (windowFocused ? focusedMenuFpsForQuality(quality) : unfocusedMenuFpsForQuality(quality));
     double frameBudget = 1.0 / targetFps;
+    double sleepMs = 0.0;
     if (frameDuration < frameBudget) {
+      double sleepStart = glfwGetTime();
       auto sleepTime = std::chrono::duration<double>(frameBudget - frameDuration);
       std::this_thread::sleep_for(std::chrono::duration_cast<std::chrono::microseconds>(sleepTime));
+      sleepMs = (glfwGetTime() - sleepStart) * 1000.0;
     }
+    recordProfilerMetric(profiler.sleep, sleepMs, profiler.frameCount);
+    profiler.targetFps = targetFps;
+    profiler.targetFrameMs = frameBudget * 1000.0;
+    profiler.torchLights = cachedTorchLights.size();
+    profiler.chunkUpdates = chunkUpdatesThisFrame;
+    profiler.chunkRemovals = chunkRemovalsThisFrame;
+    profiler.pendingGpuUploads = pendingWorldChunkUploads.size();
+    profiler.pendingGpuRemovals = pendingWorldChunkRemovals.size();
+    recordProfilerMetric(profiler.frame,
+                         (glfwGetTime() - frameStart) * 1000.0,
+                         profiler.frameCount);
   }
 
   vk.waitIdle();
@@ -2491,15 +4540,151 @@ void App::updateEnvironment(float deltaTime) {
   dayLightFactor = computeDaylightFactor();
 }
 
+void App::updateFurnaces(float deltaTime) {
+  if (deltaTime <= 0.0f || furnaceStates.empty()) {
+    return;
+  }
+
+  bool activeChanged = false;
+  std::string activeKey = furnaceOpen ? furnaceKeyForBlock(activeFurnaceBlock) : std::string();
+
+  for (auto& [key, furnace] : furnaceStates) {
+    float prevBurnTime = furnace.burnTime;
+    float prevBurnDuration = furnace.burnDuration;
+    float prevSmelt = furnace.smeltProgress;
+    ItemStack prevInput = furnace.input;
+    ItemStack prevFuel = furnace.fuel;
+    ItemStack prevOutput = furnace.output;
+
+    if (furnace.burnTime > 0.0f) {
+      furnace.burnTime = std::max(0.0f, furnace.burnTime - deltaTime);
+    }
+
+    uint8_t resultType = kAir;
+    bool hasRecipe = furnace.input.count > 0 &&
+                     furnaceResultForInput(furnace.input.type, resultType);
+    bool outputCompatible = hasRecipe &&
+                            (furnace.output.count == 0 ||
+                             (furnace.output.type == resultType && furnace.output.count < kMaxStack));
+    bool canSmelt = hasRecipe && outputCompatible;
+
+    if (canSmelt && furnace.burnTime <= 0.0f && furnace.fuel.count > 0) {
+      float fuelTime = furnaceFuelDuration(furnace.fuel.type);
+      if (fuelTime > 0.0f) {
+        furnace.burnTime = fuelTime;
+        furnace.burnDuration = fuelTime;
+        furnace.fuel.count = static_cast<uint16_t>(furnace.fuel.count - 1);
+        if (furnace.fuel.count == 0) {
+          furnace.fuel.type = kAir;
+        }
+      }
+    }
+
+    if (canSmelt && furnace.burnTime > 0.0f) {
+      furnace.smeltProgress += deltaTime;
+      if (furnace.smeltProgress >= kFurnaceSmeltDuration) {
+        furnace.smeltProgress -= kFurnaceSmeltDuration;
+        furnace.input.count = static_cast<uint16_t>(furnace.input.count - 1);
+        if (furnace.input.count == 0) {
+          furnace.input.type = kAir;
+        }
+        if (furnace.output.count == 0 || furnace.output.type == kAir) {
+          furnace.output.type = resultType;
+          furnace.output.count = 1;
+        } else if (furnace.output.type == resultType && furnace.output.count < kMaxStack) {
+          furnace.output.count = static_cast<uint16_t>(furnace.output.count + 1);
+        }
+      }
+    } else if (!canSmelt) {
+      furnace.smeltProgress = 0.0f;
+    }
+
+    if (!activeKey.empty() && key == activeKey &&
+        (prevBurnTime != furnace.burnTime ||
+         prevBurnDuration != furnace.burnDuration ||
+         prevSmelt != furnace.smeltProgress ||
+         prevInput.type != furnace.input.type ||
+         prevInput.count != furnace.input.count ||
+         prevFuel.type != furnace.fuel.type ||
+         prevFuel.count != furnace.fuel.count ||
+         prevOutput.type != furnace.output.type ||
+         prevOutput.count != furnace.output.count)) {
+      activeChanged = true;
+    }
+  }
+
+  if (furnaceOpen && activeChanged) {
+    uiDirty = true;
+  }
+}
+
+void App::syncAudioState() {
+  bool playFurnaceLoop = false;
+  if (screenState == ScreenState::kPlaying && inventoryOpen && furnaceOpen && hasFurnaceAccess()) {
+    auto it = furnaceStates.find(furnaceKeyForBlock(activeFurnaceBlock));
+    playFurnaceLoop = it != furnaceStates.end() && it->second.burnTime > 0.0f;
+  }
+
+  audio.setLoopCueActive(AudioSystem::Cue::kFurnaceLoop, playFurnaceLoop);
+}
+
 void App::processInput(float deltaTime) {
   if (screenState != ScreenState::kPlaying) {
     processMenuInput(deltaTime);
+    crouching = false;
+    sprinting = false;
     escDown = false;
     tabDown = false;
-    debugToggleDown = false;
-    debugModeDown = false;
-    debugSliceUpDown = false;
-    debugSliceDownDown = false;
+    achievementToggleDown = false;
+
+    bool allowDebugOverlayKeys = screenState == ScreenState::kPaused;
+    if (allowDebugOverlayKeys) {
+      bool debugTogglePressed = glfwGetKey(window, GLFW_KEY_F3) == GLFW_PRESS;
+      if (debugTogglePressed && !debugToggleDown) {
+        debugWorldgenOverlay = !debugWorldgenOverlay;
+        uiDirty = true;
+      }
+      debugToggleDown = debugTogglePressed;
+
+      bool debugModePressed = glfwGetKey(window, GLFW_KEY_F4) == GLFW_PRESS;
+      if (debugModePressed && !debugModeDown) {
+        debugWorldgenOverlayMode = (debugWorldgenOverlayMode + 1) % 3;
+        debugWorldgenOverlay = true;
+        uiDirty = true;
+      }
+      debugModeDown = debugModePressed;
+
+      bool sliceUpPressed = glfwGetKey(window, GLFW_KEY_PAGE_UP) == GLFW_PRESS ||
+                            glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS;
+      if (sliceUpPressed && !debugSliceUpDown) {
+        debugDensitySliceOffset = std::clamp(debugDensitySliceOffset + 4, -48, 48);
+        debugWorldgenOverlay = true;
+        uiDirty = true;
+      }
+      debugSliceUpDown = sliceUpPressed;
+
+      bool sliceDownPressed = glfwGetKey(window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS ||
+                              glfwGetKey(window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
+      if (sliceDownPressed && !debugSliceDownDown) {
+        debugDensitySliceOffset = std::clamp(debugDensitySliceOffset - 4, -48, 48);
+        debugWorldgenOverlay = true;
+        uiDirty = true;
+      }
+      debugSliceDownDown = sliceDownPressed;
+
+      bool profilerTogglePressed = glfwGetKey(window, GLFW_KEY_F6) == GLFW_PRESS;
+      if (profilerTogglePressed && !debugProfilerToggleDown) {
+        debugProfilerOverlay = !debugProfilerOverlay;
+        uiDirty = true;
+      }
+      debugProfilerToggleDown = profilerTogglePressed;
+    } else {
+      debugToggleDown = false;
+      debugModeDown = false;
+      debugSliceUpDown = false;
+      debugSliceDownDown = false;
+      debugProfilerToggleDown = false;
+    }
     mouseLeftDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     mouseRightDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
     return;
@@ -2509,6 +4694,8 @@ void App::processInput(float deltaTime) {
   if (escPressed && !escDown) {
     if (inventoryOpen) {
       setInventoryOpen(false);
+    } else if (achievementTreeOpen) {
+      setAchievementTreeOpen(false);
     } else {
       pauseMenuSelection = 0;
       setScreenState(ScreenState::kPaused);
@@ -2522,11 +4709,36 @@ void App::processInput(float deltaTime) {
 
   bool tabPressed = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
   if (tabPressed && !tabDown) {
+    if (!inventoryOpen) {
+      workbenchOpen = false;
+      furnaceOpen = false;
+    }
     setInventoryOpen(!inventoryOpen);
     tabDown = true;
   } else if (!tabPressed) {
     tabDown = false;
   }
+
+  if (inventoryOpen && workbenchOpen && !hasWorkbenchAccess()) {
+    setInventoryOpen(false);
+    showToast(appliedSettings.language == 1 ? "ВЕРСТАК СЛИШКОМ ДАЛЕКО" : "WORKBENCH OUT OF RANGE", 1.8f);
+    mouseLeftDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    mouseRightDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+    return;
+  }
+  if (inventoryOpen && furnaceOpen && !hasFurnaceAccess()) {
+    setInventoryOpen(false);
+    showToast(appliedSettings.language == 1 ? "ПЕЧКА СЛИШКОМ ДАЛЕКО" : "FURNACE OUT OF RANGE", 1.8f);
+    mouseLeftDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    mouseRightDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+    return;
+  }
+
+  bool achievementPressed = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
+  if (achievementPressed && !achievementToggleDown) {
+    setAchievementTreeOpen(!achievementTreeOpen);
+  }
+  achievementToggleDown = achievementPressed;
 
   bool debugTogglePressed = glfwGetKey(window, GLFW_KEY_F3) == GLFW_PRESS;
   if (debugTogglePressed && !debugToggleDown) {
@@ -2561,6 +4773,13 @@ void App::processInput(float deltaTime) {
   }
   debugSliceDownDown = sliceDownPressed;
 
+  bool profilerTogglePressed = glfwGetKey(window, GLFW_KEY_F6) == GLFW_PRESS;
+  if (profilerTogglePressed && !debugProfilerToggleDown) {
+    debugProfilerOverlay = !debugProfilerOverlay;
+    uiDirty = true;
+  }
+  debugProfilerToggleDown = profilerTogglePressed;
+
   int prevSlot = selectedSlot;
   for (int i = 0; i < static_cast<int>(hotbar.size()); ++i) {
     if (glfwGetKey(window, GLFW_KEY_1 + i) == GLFW_PRESS) {
@@ -2574,8 +4793,11 @@ void App::processInput(float deltaTime) {
 
   bool leftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
   bool rightPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+  bool dropPressed = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
 
   if (inventoryOpen) {
+    crouching = false;
+    sprinting = false;
     if (leftPressed && !mouseLeftDown) {
       double xpos = 0.0;
       double ypos = 0.0;
@@ -2597,6 +4819,7 @@ void App::processInput(float deltaTime) {
 
     mouseLeftDown = leftPressed;
     mouseRightDown = rightPressed;
+    dropOneDown = dropPressed;
 
     if (breakingActive) {
       breakingActive = false;
@@ -2605,6 +4828,96 @@ void App::processInput(float deltaTime) {
       world.clearBreakOverlay();
     }
 
+    (void)deltaTime;
+    return;
+  }
+
+  if (achievementTreeOpen) {
+    crouching = false;
+    sprinting = false;
+    AchievementTreeUiLayout layout = makeAchievementTreeLayout(width, height);
+    glm::vec2 scroll =
+      clampAchievementTreeScroll(layout, {achievementTreeScrollX, achievementTreeScrollY});
+
+    bool panLeft = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS ||
+                   glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
+    bool panRight = glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS ||
+                    glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
+    bool panUp = glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS ||
+                 glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS;
+    bool panDown = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS ||
+                   glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS;
+
+    float panStep = 420.0f * deltaTime;
+    if (panLeft) {
+      scroll.x -= panStep;
+    }
+    if (panRight) {
+      scroll.x += panStep;
+    }
+    if (panUp) {
+      scroll.y -= panStep;
+    }
+    if (panDown) {
+      scroll.y += panStep;
+    }
+
+    auto pointInRect = [](float px, float py, const glm::vec4& rect) {
+      return px >= rect.x && px <= rect.x + rect.z &&
+             py >= rect.y && py <= rect.y + rect.w;
+    };
+
+    bool insideViewport =
+      cursorFbX >= layout.viewportX && cursorFbX <= layout.viewportX + layout.viewportW &&
+      cursorFbY >= layout.viewportY && cursorFbY <= layout.viewportY + layout.viewportH;
+
+    if (leftPressed && !mouseLeftDown) {
+      achievementTreeDragging = false;
+      for (int tab = 0; tab < 3; ++tab) {
+        glm::vec4 rect = achievementTreeTabRect(layout, tab);
+        if (pointInRect(cursorFbX, cursorFbY, rect)) {
+          glm::vec2 target = achievementTreeTabTargetScroll(layout, tab);
+          scroll = clampAchievementTreeScroll(layout, target);
+          uiDirty = true;
+          break;
+        }
+      }
+
+      if (!achievementTreeDragging && insideViewport) {
+        achievementTreeDragging = true;
+        achievementTreeDragLastX = cursorFbX;
+        achievementTreeDragLastY = cursorFbY;
+      }
+    } else if (!leftPressed) {
+      achievementTreeDragging = false;
+    }
+
+    if (achievementTreeDragging && leftPressed) {
+      float dx = cursorFbX - achievementTreeDragLastX;
+      float dy = cursorFbY - achievementTreeDragLastY;
+      achievementTreeDragLastX = cursorFbX;
+      achievementTreeDragLastY = cursorFbY;
+      scroll.x -= dx;
+      scroll.y -= dy;
+    }
+
+    scroll = clampAchievementTreeScroll(layout, scroll);
+    if (std::abs(scroll.x - achievementTreeScrollX) > 0.01f ||
+        std::abs(scroll.y - achievementTreeScrollY) > 0.01f) {
+      achievementTreeScrollX = scroll.x;
+      achievementTreeScrollY = scroll.y;
+      uiDirty = true;
+    }
+
+    mouseLeftDown = leftPressed;
+    mouseRightDown = rightPressed;
+    dropOneDown = dropPressed;
+    if (breakingActive) {
+      breakingActive = false;
+      breakingProgress = 0.0f;
+      breakingStage = 0;
+      world.clearBreakOverlay();
+    }
     (void)deltaTime;
     return;
   }
@@ -2632,17 +4945,41 @@ void App::processInput(float deltaTime) {
   }
 
   bool inWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
-  const float moveSpeed = inWater ? 3.2f : 6.0f;
+  bool shiftPressed = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+                      glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+  bool sprintPressed = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                       glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+  crouching = !inWater && shiftPressed;
+  sprinting = !inWater && !crouching && sprintPressed && glm::length(wishDir) > 0.001f;
+  const float moveSpeed = inWater ? 3.2f : (crouching ? 2.6f : (sprinting ? 8.2f : 6.0f));
   playerVel.x = wishDir.x * moveSpeed;
   playerVel.z = wishDir.z * moveSpeed;
+
+  if (dropPressed && !dropOneDown) {
+    ItemStack& stack = hotbar[static_cast<size_t>(selectedSlot)];
+    if (stack.count > 0 && stack.type != kAir) {
+      glm::vec3 dropDir = cameraFront();
+      glm::vec3 dropSource = playerPos + glm::vec3(dropDir.x, 0.0f, dropDir.z) * 0.8f + glm::vec3(0.0f, 1.0f, 0.0f);
+      glm::ivec3 dropPos(static_cast<int>(std::floor(dropSource.x)),
+                         static_cast<int>(std::floor(dropSource.y)),
+                         static_cast<int>(std::floor(dropSource.z)));
+      spawnDroppedItem(stack.type, dropPos);
+      stack.count = static_cast<uint16_t>(stack.count - 1);
+      if (stack.count == 0) {
+        stack.type = kAir;
+      }
+      refreshSelectedBlock();
+      uiDirty = true;
+    }
+  }
+  dropOneDown = dropPressed;
 
   if (inWater) {
     float verticalIntent = 0.0f;
     if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
       verticalIntent += 1.0f;
     }
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
-        glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
+    if (shiftPressed) {
       verticalIntent -= 1.0f;
     }
 
@@ -2657,16 +4994,22 @@ void App::processInput(float deltaTime) {
     onGround = false;
   }
 
+  ToolTier equippedTool = toolTierForItem(selectedBlock);
+
   if (leftPressed) {
-    glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
+    glm::vec3 origin = playerPos + glm::vec3(0.0f, cameraEyeHeight(), 0.0f);
     glm::vec3 breakDir = cameraFront();
     RaycastHit hit = raycast(origin, breakDir, kBreakMaxDistance);
     if (hit.hit) {
-      float breakDuration = inWater ? (kBreakDuration * 2.0f) : kBreakDuration;
       glm::ivec3 targetBlock = hit.block;
       uint8_t hitType = world.getBlock(targetBlock.x, targetBlock.y, targetBlock.z);
 
-      auto breakTarget = [&](const glm::ivec3& blockPos) {
+      auto breakTarget = [&](const glm::ivec3& blockPos, uint8_t blockType) {
+        float breakDuration = breakDurationForBlock(blockType, equippedTool, inWater);
+        if (breakDuration <= 0.0f) {
+          return;
+        }
+
         if (!breakingActive || blockPos != breakingBlock) {
           breakingActive = true;
           breakingBlock = blockPos;
@@ -2686,8 +5029,17 @@ void App::processInput(float deltaTime) {
           uint8_t removed = world.getBlock(blockPos.x, blockPos.y, blockPos.z);
           if (removed != kAir && !isWaterBlock(removed)) {
             world.setBlock(blockPos.x, blockPos.y, blockPos.z, kAir);
+            audio.playCue(breakCueForBlock(removed), breakGainForBlock(removed));
+            if (isFurnaceBlock(removed)) {
+              furnaceStates.erase(furnaceKeyForBlock(blockPos));
+              if (furnaceOpen && activeFurnaceBlock == blockPos) {
+                furnaceOpen = false;
+              }
+            }
             waterSimBoostTimer = std::max(waterSimBoostTimer, 2.0f);
-            spawnDroppedItem(removed, blockPos);
+            if (shouldDropBrokenBlock(removed, equippedTool)) {
+              spawnDroppedItem(droppedItemForBlock(removed), blockPos);
+            }
           }
           breakingActive = false;
           breakingProgress = 0.0f;
@@ -2715,7 +5067,7 @@ void App::processInput(float deltaTime) {
           }
 
           uint8_t candidate = world.getBlock(voxel.x, voxel.y, voxel.z);
-          if (candidate == kAir || isWaterBlock(candidate) || isUnderwaterPlantBlock(candidate)) {
+          if (candidate == kAir || isWaterBlock(candidate) || isDecorationBlock(candidate)) {
             continue;
           }
           targetBlock = voxel;
@@ -2730,7 +5082,7 @@ void App::processInput(float deltaTime) {
           int minY = std::max(0, hit.block.y - kMaxWaterProbeDepth);
           for (int y = hit.block.y - 1; y >= minY; --y) {
             uint8_t belowType = world.getBlock(hit.block.x, y, hit.block.z);
-            if (belowType == kAir || isWaterBlock(belowType) || isUnderwaterPlantBlock(belowType)) {
+            if (belowType == kAir || isWaterBlock(belowType) || isDecorationBlock(belowType)) {
               continue;
             }
             targetBlock = {hit.block.x, y, hit.block.z};
@@ -2748,10 +5100,10 @@ void App::processInput(float deltaTime) {
             world.clearBreakOverlay();
           }
         } else {
-          breakTarget(targetBlock);
+          breakTarget(targetBlock, hitType);
         }
       } else {
-        breakTarget(targetBlock);
+        breakTarget(targetBlock, hitType);
       }
     } else if (breakingActive) {
       breakingActive = false;
@@ -2767,12 +5119,39 @@ void App::processInput(float deltaTime) {
   }
 
   if (rightPressed && !mouseRightDown) {
-    glm::vec3 origin = playerPos + glm::vec3(0.0f, 1.8f, 0.0f);
+    glm::vec3 origin = playerPos + glm::vec3(0.0f, cameraEyeHeight(), 0.0f);
     glm::vec3 placeDir = cameraFront();
     RaycastHit hit = raycast(origin, placeDir, kBreakMaxDistance);
     if (hit.hit) {
       glm::ivec3 target = hit.block + hit.normal;
       uint8_t hitType = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+
+      if (hitType == kLootCache && !crouching) {
+        if (claimLootCache(hit.block)) {
+          mouseLeftDown = leftPressed;
+          mouseRightDown = rightPressed;
+          return;
+        }
+      }
+      if (isWorkbenchBlock(hitType) && !crouching) {
+        activeWorkbenchBlock = hit.block;
+        furnaceOpen = false;
+        workbenchOpen = true;
+        setInventoryOpen(true);
+        mouseLeftDown = leftPressed;
+        mouseRightDown = rightPressed;
+        return;
+      }
+      if (isFurnaceBlock(hitType) && !crouching) {
+        activeFurnaceBlock = hit.block;
+        workbenchOpen = false;
+        furnaceOpen = true;
+        returnCraftingItemsToInventory();
+        setInventoryOpen(true);
+        mouseLeftDown = leftPressed;
+        mouseRightDown = rightPressed;
+        return;
+      }
 
       if (isWaterBlock(hitType)) {
         bool foundPlace = false;
@@ -2793,13 +5172,13 @@ void App::processInput(float deltaTime) {
           }
 
           uint8_t candidate = world.getBlock(voxel.x, voxel.y, voxel.z);
-          if (candidate == kAir || isWaterBlock(candidate) || isUnderwaterPlantBlock(candidate)) {
+          if (candidate == kAir || isWaterBlock(candidate) || isDecorationBlock(candidate)) {
             lastReplaceable = voxel;
             continue;
           }
 
           uint8_t replaceType = world.getBlock(lastReplaceable.x, lastReplaceable.y, lastReplaceable.z);
-          if (replaceType == kAir || isWaterBlock(replaceType) || isUnderwaterPlantBlock(replaceType)) {
+          if (replaceType == kAir || isWaterBlock(replaceType) || isDecorationBlock(replaceType)) {
             target = lastReplaceable;
             foundPlace = true;
           }
@@ -2814,14 +5193,34 @@ void App::processInput(float deltaTime) {
       uint8_t targetType = world.getBlock(target.x, target.y, target.z);
       bool targetReplaceable = targetType == kAir ||
                                isWaterBlock(targetType) ||
-                               isUnderwaterPlantBlock(targetType);
+                               isDecorationBlock(targetType);
+      ItemStack& stack = hotbar[static_cast<size_t>(selectedSlot)];
+      glm::vec3 adjustedPlayerPos = playerPos;
+      uint8_t placedType = placedBlockTypeForItem(stack.type, placeDir);
       if (world.inBounds(target.x, target.y, target.z) &&
           targetReplaceable &&
-          !blockIntersectsPlayer(target.x, target.y, target.z)) {
-        ItemStack& stack = hotbar[static_cast<size_t>(selectedSlot)];
-        if (stack.count > 0 && stack.type != kAir) {
-          world.setBlock(target.x, target.y, target.z, stack.type);
+          canPlaceBlockAt(target.x, target.y, target.z, placedType, &adjustedPlayerPos)) {
+        if (stack.count > 0 && stack.type != kAir && isPlaceableItem(stack.type)) {
+          if (stack.type == kTorch) {
+            uint8_t below = world.getBlock(target.x, target.y - 1, target.z);
+            bool supported = target.y > world.getGenerationSettings().minY &&
+                             below != kAir &&
+                             !isWaterBlock(below) &&
+                             !isDecorationBlock(below);
+            if (!supported) {
+              mouseLeftDown = leftPressed;
+              mouseRightDown = rightPressed;
+              return;
+            }
+          }
+          world.setBlock(target.x, target.y, target.z, placedType);
+          audio.playCue(placeCueForBlock(placedType), placeGainForBlock(placedType));
           waterSimBoostTimer = std::max(waterSimBoostTimer, 2.0f);
+          if (adjustedPlayerPos.y > playerPos.y + 0.0001f) {
+            playerPos = adjustedPlayerPos;
+            playerVel.y = std::max(0.0f, playerVel.y);
+            onGround = true;
+          }
           stack.count -= 1;
           if (stack.count == 0) {
             stack.type = kAir;
@@ -2840,6 +5239,9 @@ void App::processInput(float deltaTime) {
 }
 
 void App::updatePlayer(float deltaTime) {
+  waterSwimSoundTimer = std::max(0.0f, waterSwimSoundTimer - deltaTime);
+
+  glm::vec3 startPos = playerPos;
   bool inWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
   if (inWater) {
     const float waterGravity = -5.0f;
@@ -2848,6 +5250,24 @@ void App::updatePlayer(float deltaTime) {
   } else {
     const float gravity = -18.0f;
     playerVel.y += gravity * deltaTime;
+  }
+
+  glm::vec2 horizontalVel(playerVel.x, playerVel.z);
+  float horizontalSpeed = glm::length(horizontalVel);
+  if (horizontalSpeed > 0.18f) {
+    glm::vec2 moveDir = horizontalVel / horizontalSpeed;
+    glm::vec3 probePos = playerPos + glm::vec3(moveDir.x, 0.0f, moveDir.y) * kStreamingProbeBlocks;
+    int probeCx = static_cast<int>(std::floor(probePos.x / static_cast<float>(kChunkSize)));
+    int probeCz = static_cast<int>(std::floor(probePos.z / static_cast<float>(kChunkSize)));
+    if (world.getChunkGenerationStatus(probeCx, probeCz) < ChunkGenStatus::kSurface) {
+      for (int dz = -kStreamingWarmRadius; dz <= kStreamingWarmRadius; ++dz) {
+        for (int dx = -kStreamingWarmRadius; dx <= kStreamingWarmRadius; ++dx) {
+          int dist = std::max(std::abs(dx), std::abs(dz));
+          ChunkGenStatus target = dist == 0 ? ChunkGenStatus::kFeatures : ChunkGenStatus::kSurface;
+          world.requestChunkToStatus(probeCx + dx, probeCz + dz, target);
+        }
+      }
+    }
   }
 
   glm::vec3 pos = playerPos;
@@ -2903,20 +5323,147 @@ void App::updatePlayer(float deltaTime) {
   }
 
   playerPos = pos;
-  if (intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f))) {
+  bool inWaterAfterMove = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
+  if (inWaterAfterMove) {
     onGround = false;
+
+    glm::vec3 frameDelta = playerPos - startPos;
+    float horizontalMove = glm::length(glm::vec2(frameDelta.x, frameDelta.z));
+    float verticalMove = std::abs(frameDelta.y);
+    bool enteredWater = !wasPlayerInWater;
+    bool activeSwim = horizontalMove > 0.05f || verticalMove > 0.04f;
+    if ((enteredWater || activeSwim) && waterSwimSoundTimer <= 0.0f) {
+      float swimGain = enteredWater
+                         ? 1.02f
+                         : std::clamp(0.74f + horizontalMove * 3.8f + verticalMove * 2.4f, 0.78f, 1.12f);
+      audio.playCue(AudioSystem::Cue::kWaterSwim, swimGain);
+      waterSwimSoundTimer = enteredWater ? 0.52f : (horizontalMove > 0.12f ? 0.36f : 0.46f);
+    }
+  } else {
+    waterSwimSoundTimer = 0.0f;
   }
+  wasPlayerInWater = inWaterAfterMove;
+  refreshAchievementsProgress();
 }
 
 void App::updateStreaming() {
   int cx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int cz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
+  int streamingRadius = std::max(kMinRenderDistance, std::min(loadedChunkViewRadius, activeChunkViewRadius));
   if (!chunkCenterValid || cx != currentChunkX || cz != currentChunkZ) {
     currentChunkX = cx;
     currentChunkZ = cz;
     chunkCenterValid = true;
-    world.updateActiveChunks(cx, cz, activeChunkViewRadius);
+    world.updateActiveChunks(cx, cz, streamingRadius);
   }
+
+  if (loadedChunkViewRadius < activeChunkViewRadius) {
+    double now = glfwGetTime();
+    World::RuntimeStats stats = world.collectRuntimeStats();
+    bool busy =
+      stats.generatingChunks > 12 ||
+      stats.generationQueue > 18 ||
+      stats.pendingSectionRebuilds > 24 ||
+      stats.dirtySections > 96;
+    if (!busy && now >= nextStreamingRadiusExpandTime) {
+      loadedChunkViewRadius = std::min(activeChunkViewRadius, loadedChunkViewRadius + 1);
+      world.updateActiveChunks(cx, cz, loadedChunkViewRadius);
+      nextStreamingRadiusExpandTime = now + streamingExpansionIntervalForQuality(appliedSettings.graphicsQuality);
+    }
+  }
+
+  glm::vec2 streamDir{0.0f};
+  glm::vec3 forward3 = cameraFront();
+  glm::vec2 forward2(forward3.x, forward3.z);
+  float forwardLen = glm::length(forward2);
+  if (forwardLen > 0.001f) {
+    streamDir = forward2 / forwardLen;
+  }
+
+  if (glm::length(streamDir) > 0.001f) {
+    glm::vec3 streamAnchor = playerPos;
+    streamAnchor.x += streamDir.x * kStreamingLookaheadBlocks;
+    streamAnchor.z += streamDir.y * kStreamingLookaheadBlocks;
+    int streamCx = static_cast<int>(std::floor(streamAnchor.x / static_cast<float>(kChunkSize)));
+    int streamCz = static_cast<int>(std::floor(streamAnchor.z / static_cast<float>(kChunkSize)));
+    if (streamCx != cx || streamCz != cz) {
+      for (int dz = -kStreamingWarmRadius; dz <= kStreamingWarmRadius; ++dz) {
+        for (int dx = -kStreamingWarmRadius; dx <= kStreamingWarmRadius; ++dx) {
+          int dist = std::max(std::abs(dx), std::abs(dz));
+          ChunkGenStatus target = dist == 0 ? ChunkGenStatus::kFeatures : ChunkGenStatus::kSurface;
+          if (world.getChunkGenerationStatus(streamCx + dx, streamCz + dz) < target) {
+            world.requestChunkToStatus(streamCx + dx, streamCz + dz, target);
+          }
+        }
+      }
+    }
+  }
+}
+
+std::vector<glm::vec4> App::collectTorchLights(size_t maxLights) const {
+  size_t clampedMaxLights = std::min(maxLights, static_cast<size_t>(kMaxTorchLights));
+  if (clampedMaxLights == 0) {
+    return {};
+  }
+
+  std::vector<std::pair<float, glm::vec4>> rankedLights;
+  rankedLights.reserve(clampedMaxLights + 4);
+
+  glm::vec3 eye = playerPos + glm::vec3(0.0f, cameraEyeHeight(), 0.0f);
+  int baseX = static_cast<int>(std::floor(playerPos.x));
+  int baseY = static_cast<int>(std::floor(playerPos.y + 1.0f));
+  int baseZ = static_cast<int>(std::floor(playerPos.z));
+  float maxRangeSq = kTorchLightRange * kTorchLightRange;
+
+  auto considerLight = [&](const glm::vec3& lightPos, float range) {
+    glm::vec3 delta = lightPos - eye;
+    float distSq = glm::dot(delta, delta);
+    if (distSq > range * range) {
+      return;
+    }
+    rankedLights.push_back({distSq, glm::vec4(lightPos, range)});
+  };
+
+  for (int y = baseY - kTorchLightRadiusY; y <= baseY + kTorchLightRadiusY; ++y) {
+    for (int z = baseZ - kTorchLightRadiusXZ; z <= baseZ + kTorchLightRadiusXZ; ++z) {
+      for (int x = baseX - kTorchLightRadiusXZ; x <= baseX + kTorchLightRadiusXZ; ++x) {
+        if (!world.inBounds(x, y, z)) {
+          continue;
+        }
+        if (world.getBlock(x, y, z) != kTorch) {
+          continue;
+        }
+        glm::vec3 lightPos(x + 0.5f, y + 0.78f, z + 0.5f);
+        glm::vec3 delta = lightPos - eye;
+        float distSq = glm::dot(delta, delta);
+        if (distSq > maxRangeSq) {
+          continue;
+        }
+        rankedLights.push_back({distSq, glm::vec4(lightPos, kTorchLightRange)});
+      }
+    }
+  }
+
+  if (selectedBlock == kTorch) {
+    glm::vec3 heldLight = eye + cameraFront() * 0.46f + glm::vec3(0.0f, -0.18f, 0.0f);
+    considerLight(heldLight, 6.4f);
+  }
+
+  std::sort(rankedLights.begin(),
+            rankedLights.end(),
+            [](const auto& a, const auto& b) {
+              return a.first < b.first;
+            });
+  if (rankedLights.size() > clampedMaxLights) {
+    rankedLights.resize(clampedMaxLights);
+  }
+
+  std::vector<glm::vec4> lights;
+  lights.reserve(rankedLights.size());
+  for (const auto& entry : rankedLights) {
+    lights.push_back(entry.second);
+  }
+  return lights;
 }
 
 void App::rebuildWorldMesh() {
@@ -3004,6 +5551,34 @@ void App::rebuildUiMesh() {
     uiIndices.push_back(start + 3);
   };
 
+  auto addUvQuad = [&](float x,
+                       float y,
+                       float w,
+                       float h,
+                       const glm::vec3& color,
+                       const glm::vec2& uv0,
+                       const glm::vec2& uv1,
+                       const glm::vec2& uv2,
+                       const glm::vec2& uv3) {
+    glm::vec2 p0 = toNdc(x, y);
+    glm::vec2 p1 = toNdc(x + w, y);
+    glm::vec2 p2 = toNdc(x + w, y + h);
+    glm::vec2 p3 = toNdc(x, y + h);
+
+    uint32_t start = static_cast<uint32_t>(uiVertices.size());
+    uiVertices.push_back({{p0.x, p0.y, 0.0f}, color, uv0});
+    uiVertices.push_back({{p1.x, p1.y, 0.0f}, color, uv1});
+    uiVertices.push_back({{p2.x, p2.y, 0.0f}, color, uv2});
+    uiVertices.push_back({{p3.x, p3.y, 0.0f}, color, uv3});
+
+    uiIndices.push_back(start + 0);
+    uiIndices.push_back(start + 1);
+    uiIndices.push_back(start + 2);
+    uiIndices.push_back(start + 0);
+    uiIndices.push_back(start + 2);
+    uiIndices.push_back(start + 3);
+  };
+
   auto addSolidQuad = [&](float x, float y, float w, float h, const glm::vec3& color) {
     glm::vec2 p0 = toNdc(x, y);
     glm::vec2 p1 = toNdc(x + w, y);
@@ -3032,23 +5607,117 @@ void App::rebuildUiMesh() {
 
   const int backgroundTile = tileForBlock(kStone);
 
+  auto findTextGlyph = [&](uint32_t codepoint) -> const VulkanContext::UiGlyphInfo* {
+    if (!vk.hasUiFont()) {
+      return nullptr;
+    }
+    if (const auto* glyph = vk.findUiGlyph(codepoint)) {
+      return glyph;
+    }
+    uint32_t upper = toUpperCodepoint(codepoint);
+    if (upper != codepoint) {
+      return vk.findUiGlyph(upper);
+    }
+    return nullptr;
+  };
+
+  auto bitmapAdvanceForCodepoint = [&](uint32_t codepoint, float pixel) -> float {
+    if (pixel <= 0.0f) {
+      return 0.0f;
+    }
+    codepoint = toUpperCodepoint(codepoint);
+    if (codepoint == static_cast<uint32_t>(' ')) {
+      return pixel * 2.0f;
+    }
+    return pixel * static_cast<float>(kGlyphWidth + 1);
+  };
+
+  auto drawBitmapGlyph = [&](uint32_t codepoint,
+                             float x,
+                             float y,
+                             float pixel,
+                             const glm::vec3& color) {
+    if (pixel <= 0.0f) {
+      return;
+    }
+
+    codepoint = toUpperCodepoint(codepoint);
+    if (codepoint == static_cast<uint32_t>(' ')) {
+      return;
+    }
+
+    uint8_t fallback[kGlyphHeight] = {0, 0, 0, 0, 0};
+    const uint8_t* glyph = glyphForCodepoint(codepoint);
+    if (!glyph) {
+      switch (codepoint) {
+        case static_cast<uint32_t>('-'):
+          fallback[2] = 0b111;
+          glyph = fallback;
+          break;
+        case static_cast<uint32_t>('.'):
+          fallback[4] = 0b010;
+          glyph = fallback;
+          break;
+        case static_cast<uint32_t>(':'):
+          fallback[1] = 0b010;
+          fallback[3] = 0b010;
+          glyph = fallback;
+          break;
+        case static_cast<uint32_t>('/'):
+          fallback[0] = 0b001;
+          fallback[1] = 0b001;
+          fallback[2] = 0b010;
+          fallback[3] = 0b100;
+          fallback[4] = 0b100;
+          glyph = fallback;
+          break;
+        default:
+          fallback[0] = 0b111;
+          fallback[1] = 0b001;
+          fallback[2] = 0b010;
+          fallback[3] = 0b000;
+          fallback[4] = 0b010;
+          glyph = fallback;
+          break;
+      }
+    }
+
+    for (int row = 0; row < kGlyphHeight; ++row) {
+      uint8_t bits = glyph[row];
+      for (int col = 0; col < kGlyphWidth; ++col) {
+        int bit = kGlyphWidth - 1 - col;
+        if ((bits & (1u << bit)) == 0) {
+          continue;
+        }
+        addSolidQuad(x + static_cast<float>(col) * pixel,
+                     y + static_cast<float>(row) * pixel,
+                     pixel,
+                     pixel,
+                     color);
+      }
+    }
+  };
+
   auto measureTextWidth = [&](const std::string& text, float pixel) -> float {
     float widthPx = 0.0f;
+    float fontScale = 0.0f;
+    if (vk.hasUiFont() && vk.uiFontLineHeight() > 0.0f) {
+      fontScale = (pixel * kUiTextLineHeightPerPixel) / vk.uiFontLineHeight();
+    }
     size_t index = 0;
     while (index < text.size()) {
       uint32_t cp = 0;
       if (!nextUtf8Codepoint(text, index, cp)) {
         break;
       }
-      cp = toUpperCodepoint(cp);
-      if (cp == static_cast<uint32_t>(' ')) {
-        widthPx += pixel * 2.0f;
+      if (cp == static_cast<uint32_t>('\n')) {
+        break;
+      }
+      if (const auto* glyph = findTextGlyph(cp)) {
+        widthPx += std::max(glyph->advance, glyph->width + 1.0f) * fontScale;
         continue;
       }
-      widthPx += pixel * static_cast<float>(kGlyphWidth + 1);
-    }
-    if (widthPx > 0.0f) {
-      widthPx -= pixel;
+      widthPx += bitmapAdvanceForCodepoint(cp, pixel);
     }
     return widthPx;
   };
@@ -3063,6 +5732,11 @@ void App::rebuildUiMesh() {
       return;
     }
 
+    float fontScale = 0.0f;
+    if (vk.hasUiFont() && vk.uiFontLineHeight() > 0.0f) {
+      fontScale = (pixel * kUiTextLineHeightPerPixel) / vk.uiFontLineHeight();
+    }
+
     if (centered) {
       x -= measureTextWidth(text, pixel) * 0.5f;
     }
@@ -3073,64 +5747,30 @@ void App::rebuildUiMesh() {
       if (!nextUtf8Codepoint(text, index, cp)) {
         break;
       }
-      cp = toUpperCodepoint(cp);
-      if (cp == static_cast<uint32_t>(' ')) {
-        x += pixel * 2.0f;
+      if (cp == static_cast<uint32_t>('\n')) {
+        break;
+      }
+
+      if (const auto* glyph = findTextGlyph(cp)) {
+        if (glyph->width > 0.0f && glyph->height > 0.0f) {
+          float gx = x + glyph->bearingX * fontScale;
+          float gy = y + glyph->bearingTop * fontScale;
+          addUvQuad(gx,
+                    gy,
+                    glyph->width * fontScale,
+                    glyph->height * fontScale,
+                    color,
+                    {glyph->uMin, glyph->vMin},
+                    {glyph->uMax, glyph->vMin},
+                    {glyph->uMax, glyph->vMax},
+                    {glyph->uMin, glyph->vMax});
+        }
+        x += std::max(glyph->advance, glyph->width + 1.0f) * fontScale;
         continue;
       }
 
-      uint8_t fallback[kGlyphHeight] = {0, 0, 0, 0, 0};
-      const uint8_t* glyph = glyphForCodepoint(cp);
-      if (!glyph) {
-        switch (cp) {
-          case static_cast<uint32_t>('-'):
-            fallback[2] = 0b111;
-            glyph = fallback;
-            break;
-          case static_cast<uint32_t>('.'):
-            fallback[4] = 0b010;
-            glyph = fallback;
-            break;
-          case static_cast<uint32_t>(':'):
-            fallback[1] = 0b010;
-            fallback[3] = 0b010;
-            glyph = fallback;
-            break;
-          case static_cast<uint32_t>('/'):
-            fallback[0] = 0b001;
-            fallback[1] = 0b001;
-            fallback[2] = 0b010;
-            fallback[3] = 0b100;
-            fallback[4] = 0b100;
-            glyph = fallback;
-            break;
-          default:
-            fallback[0] = 0b111;
-            fallback[1] = 0b001;
-            fallback[2] = 0b010;
-            fallback[3] = 0b000;
-            fallback[4] = 0b010;
-            glyph = fallback;
-            break;
-        }
-      }
-
-      for (int row = 0; row < kGlyphHeight; ++row) {
-        uint8_t bits = glyph[row];
-        for (int col = 0; col < kGlyphWidth; ++col) {
-          int bit = kGlyphWidth - 1 - col;
-          if ((bits & (1u << bit)) == 0) {
-            continue;
-          }
-          addSolidQuad(x + static_cast<float>(col) * pixel,
-                       y + static_cast<float>(row) * pixel,
-                       pixel,
-                       pixel,
-                       color);
-        }
-      }
-
-      x += pixel * static_cast<float>(kGlyphWidth + 1);
+      drawBitmapGlyph(cp, x, y, pixel, color);
+      x += bitmapAdvanceForCodepoint(cp, pixel);
     }
   };
 
@@ -3139,8 +5779,13 @@ void App::rebuildUiMesh() {
     float t = static_cast<float>(glfwGetTime());
     float intro = menuIntro * menuIntro * (3.0f - 2.0f * menuIntro);
     float pulse = 0.5f + 0.5f * std::sin(t * 6.5f);
-    float panelWidth = std::min(static_cast<float>(width) * 0.72f, 640.0f);
-    float panelHeight = std::min(static_cast<float>(height) * 0.78f, 540.0f);
+    bool settingsScreen = screenState == ScreenState::kSettings;
+    float panelWidth = settingsScreen
+      ? std::min(static_cast<float>(width) * 0.82f, 860.0f)
+      : std::min(static_cast<float>(width) * 0.72f, 640.0f);
+    float panelHeight = settingsScreen
+      ? std::min(static_cast<float>(height) * 0.80f, 560.0f)
+      : std::min(static_cast<float>(height) * 0.78f, 540.0f);
     float panelX = (static_cast<float>(width) - panelWidth) * 0.5f;
     float panelY = (static_cast<float>(height) - panelHeight) * 0.5f;
     panelY += (1.0f - intro) * 28.0f;
@@ -3153,7 +5798,7 @@ void App::rebuildUiMesh() {
             40.0f,
             glm::vec3(0.16f, 0.19f, 0.24f),
             backgroundTile);
-    drawText("CUBEOS V0 2 1 BETA", panelX + panelWidth * 0.5f, panelY + 18.0f, 3.0f,
+    drawText("CubeOS v0.2.2 Beta", panelX + panelWidth * 0.5f, panelY + 18.0f, 3.0f,
              glm::vec3(0.91f, 0.94f, 0.98f), true);
 
     auto drawMenuRow = [&](int index,
@@ -3295,20 +5940,20 @@ void App::rebuildUiMesh() {
                true);
 
       int totalRows = static_cast<int>(worldSelectEntries.size()) + 2;
-      constexpr int kVisibleRows = 8;
+      int visibleRows = computeWorldSelectVisibleRows(height, totalRows);
       int startRow = 0;
-      if (totalRows > kVisibleRows) {
-        startRow = std::clamp(worldSelectScroll, 0, totalRows - kVisibleRows);
+      if (totalRows > visibleRows) {
+        startRow = std::clamp(worldSelectScroll, 0, totalRows - visibleRows);
       }
-      int endRow = std::min(totalRows, startRow + kVisibleRows);
-      int visibleRows = endRow - startRow;
+      int endRow = std::min(totalRows, startRow + visibleRows);
+      int drawRows = endRow - startRow;
 
       float rowW = panelWidth - 120.0f;
       float rowX = panelX + (panelWidth - rowW) * 0.5f;
       float rowH = 40.0f;
       float rowGap = 10.0f;
-      float rowsH = static_cast<float>(visibleRows) * rowH +
-                    static_cast<float>(std::max(0, visibleRows - 1)) * rowGap;
+      float rowsH = static_cast<float>(drawRows) * rowH +
+                    static_cast<float>(std::max(0, drawRows - 1)) * rowGap;
       float rowY = panelY + 84.0f + std::max(0.0f, (panelHeight - 116.0f - rowsH) * 0.5f);
 
       for (int row = startRow; row < endRow; ++row) {
@@ -3347,9 +5992,11 @@ void App::rebuildUiMesh() {
                  false);
       }
 
-      if (totalRows > kVisibleRows) {
+      if (totalRows > visibleRows) {
         std::string hint = (ruUi ? "СПИСОК " : "SCROLL ") +
                            std::to_string(startRow + 1) +
+                           "-" +
+                           std::to_string(endRow) +
                            "/" +
                            std::to_string(totalRows);
         drawText(hint,
@@ -3367,78 +6014,403 @@ void App::rebuildUiMesh() {
       }
     } else if (screenState == ScreenState::kSettings) {
       const bool ru = appliedSettings.language == 1;
-      drawText(ru ? "НАСТРОЙКИ" : "SETTINGS",
-               panelX + panelWidth * 0.5f,
-               panelY + 56.0f,
-               3.0f,
-               glm::vec3(0.90f),
-               true);
-      float rowW = panelWidth - 120.0f;
-      float rowX = panelX + (panelWidth - rowW) * 0.5f;
-      float rowH = 40.0f;
-      float rowGap = 14.0f;
-      float rowY = panelY + 92.0f;
-      for (int i = 0; i < 8; ++i) {
-        drawMenuRow(i,
-                    settingsSelection,
-                    rowX,
-                    rowY + static_cast<float>(i) * (rowH + rowGap),
-                    rowW,
-                    rowH,
-                    glm::vec3(0.21f, 0.23f, 0.28f));
-      }
+      SettingsUiLayout settingsLayout = makeSettingsUiLayout(panelX, panelY, panelWidth, panelHeight);
+      int activeCategory = std::clamp(settingsCategory, 0, kSettingsCategoryCount - 1);
+      int optionCount = settingsEntryCountForCategory(activeCategory);
+      int activeOption = std::clamp(settingsOptionSelection, 0, std::max(0, optionCount - 1));
+      int activeAction = std::clamp(settingsActionSelection, 0, kSettingsActionCount - 1);
+      SettingsFocusArea focusArea =
+        static_cast<SettingsFocusArea>(std::clamp(settingsFocusArea,
+                                                  static_cast<int>(SettingsFocusArea::kCategories),
+                                                  static_cast<int>(SettingsFocusArea::kActions)));
 
-      std::string graphicsValue = "MEDIUM";
-      if (pendingSettings.graphicsQuality == 0) {
-        graphicsValue = "LOW";
-      } else if (pendingSettings.graphicsQuality == 2) {
-        graphicsValue = "HIGH";
-      }
-      if (ru) {
+      auto categoryLabel = [&](int category) -> std::string {
+        switch (static_cast<SettingsCategoryTab>(category)) {
+          case SettingsCategoryTab::kGraphics:
+            return ru ? "ГРАФИКА" : "GRAPHICS";
+          case SettingsCategoryTab::kAudio:
+            return ru ? "ЗВУК" : "AUDIO";
+          case SettingsCategoryTab::kControls:
+            return ru ? "УПРАВЛЕНИЕ" : "CONTROLS";
+          case SettingsCategoryTab::kInterface:
+          default:
+            return ru ? "ИНТЕРФЕЙС" : "INTERFACE";
+        }
+      };
+
+      auto categoryHint = [&](int category) -> std::string {
+        switch (static_cast<SettingsCategoryTab>(category)) {
+          case SettingsCategoryTab::kGraphics:
+            return ru ? "КАЧЕСТВО И МИР" : "VISUALS AND WORLD";
+          case SettingsCategoryTab::kAudio:
+            return ru ? "ГРОМКОСТЬ ИГРЫ" : "GAME VOLUME";
+          case SettingsCategoryTab::kControls:
+            return ru ? "МЫШЬ И КАМЕРА" : "MOUSE AND CAMERA";
+          case SettingsCategoryTab::kInterface:
+          default:
+            return ru ? "ЯЗЫК И ПОДСКАЗКИ" : "LANGUAGE AND HINTS";
+        }
+      };
+
+      auto entryTitle = [&](SettingsEntryId entry) -> std::string {
+        switch (entry) {
+          case SettingsEntryId::kGraphicsQuality:
+            return ru ? "КАЧЕСТВО ГРАФИКИ" : "GRAPHICS QUALITY";
+          case SettingsEntryId::kRenderDistance:
+            return ru ? "ДАЛЬНОСТЬ ПРОРИСОВКИ" : "RENDER DISTANCE";
+          case SettingsEntryId::kAudioVolume:
+            return ru ? "ГРОМКОСТЬ" : "MASTER VOLUME";
+          case SettingsEntryId::kSensitivity:
+            return ru ? "ЧУВСТВИТЕЛЬНОСТЬ МЫШИ" : "MOUSE SENSITIVITY";
+          case SettingsEntryId::kLanguage:
+            return ru ? "ЯЗЫК" : "LANGUAGE";
+          case SettingsEntryId::kBlockGuides:
+          default:
+            return ru ? "КОНТУРЫ БЛОКОВ" : "BLOCK GUIDES";
+        }
+      };
+
+      auto entryHint = [&](SettingsEntryId entry) -> std::string {
+        switch (entry) {
+          case SettingsEntryId::kGraphicsQuality:
+            return ru ? "ВЛИЯЕТ НА КАРТИНКУ И FPS" : "BALANCES LOOKS AND FPS";
+          case SettingsEntryId::kRenderDistance:
+            return ru ? "СКОЛЬКО ЧАНКОВ ВИДНО ВДАЛЬ" : "HOW FAR CHUNKS STAY VISIBLE";
+          case SettingsEntryId::kAudioVolume:
+            return ru ? "ОБЩАЯ ГРОМКОСТЬ ВСЕЙ ИГРЫ" : "OVERALL GAME SOUND LEVEL";
+          case SettingsEntryId::kSensitivity:
+            return ru ? "СКОРОСТЬ ПОВОРОТА КАМЕРЫ" : "CAMERA TURN SPEED";
+          case SettingsEntryId::kLanguage:
+            return ru ? "ЯЗЫК МЕНЮ И ПОДПИСЕЙ" : "MENU AND UI LANGUAGE";
+          case SettingsEntryId::kBlockGuides:
+          default:
+            return ru ? "КОНТУР И ПРЕВЬЮ ПОСТАНОВКИ" : "OUTLINE AND PLACEMENT PREVIEW";
+        }
+      };
+
+      auto graphicsValueText = [&]() -> std::string {
         if (pendingSettings.graphicsQuality == 0) {
-          graphicsValue = "НИЗКО";
-        } else if (pendingSettings.graphicsQuality == 2) {
-          graphicsValue = "ВЫСОКО";
-        } else {
-          graphicsValue = "СРЕДНЕ";
+          return ru ? "НИЗКО" : "LOW";
+        }
+        if (pendingSettings.graphicsQuality == 2) {
+          return ru ? "ВЫСОКО" : "HIGH";
+        }
+        return ru ? "СРЕДНЕ" : "MEDIUM";
+      };
+
+      auto valueText = [&](SettingsEntryId entry) -> std::string {
+        switch (entry) {
+          case SettingsEntryId::kGraphicsQuality:
+            return graphicsValueText();
+          case SettingsEntryId::kRenderDistance:
+            return std::to_string(pendingSettings.renderDistance) + (ru ? " ЧАНКОВ" : " CHUNKS");
+          case SettingsEntryId::kAudioVolume:
+            return std::to_string(pendingSettings.audioVolume) + "%";
+          case SettingsEntryId::kSensitivity: {
+            std::ostringstream ss;
+            ss.setf(std::ios::fixed);
+            ss.precision(2);
+            ss << pendingSettings.sensitivity;
+            return ss.str();
+          }
+          case SettingsEntryId::kLanguage:
+            return pendingSettings.language == 1
+              ? (ru ? "РУССКИЙ" : "RUSSIAN")
+              : (ru ? "АНГЛИЙСКИЙ" : "ENGLISH");
+          case SettingsEntryId::kBlockGuides:
+          default:
+            return pendingSettings.blockGuides
+              ? (ru ? "ВКЛЮЧЕНО" : "ENABLED")
+              : (ru ? "ВЫКЛЮЧЕНО" : "DISABLED");
+        }
+      };
+
+      auto actionLabel = [&](int action) -> std::string {
+        switch (static_cast<SettingsActionId>(action)) {
+          case SettingsActionId::kApply:
+            return ru ? "СОХРАНИТЬ И ПРИМЕНИТЬ" : "SAVE AND APPLY";
+          case SettingsActionId::kReset:
+            return ru ? "СБРОСИТЬ" : "RESET";
+          case SettingsActionId::kBack:
+          default:
+            return settingsReturnState == ScreenState::kPaused
+              ? (ru ? "НАЗАД В ПАУЗУ" : "BACK TO PAUSE")
+              : (ru ? "НАЗАД В МЕНЮ" : "BACK TO MENU");
+        }
+      };
+
+      auto sliderNormalized = [&](SettingsEntryId entry) -> float {
+        switch (entry) {
+          case SettingsEntryId::kRenderDistance:
+            return static_cast<float>(pendingSettings.renderDistance - kMinRenderDistance) /
+                   static_cast<float>(kMaxRenderDistance - kMinRenderDistance);
+          case SettingsEntryId::kAudioVolume:
+            return static_cast<float>(pendingSettings.audioVolume) / 100.0f;
+          case SettingsEntryId::kSensitivity:
+            return (pendingSettings.sensitivity - 0.03f) / (0.40f - 0.03f);
+          default:
+            return 0.0f;
+        }
+      };
+
+      int hoveredCategory = -1;
+      for (int i = 0; i < kSettingsCategoryCount; ++i) {
+        if (pointInRect(cursorFbX, cursorFbY, settingsCategoryRect(settingsLayout, i))) {
+          hoveredCategory = i;
+          break;
         }
       }
 
-      std::ostringstream sens;
-      sens.setf(std::ios::fixed);
-      sens.precision(2);
-      sens << pendingSettings.sensitivity;
+      int hoveredOption = -1;
+      for (int i = 0; i < optionCount; ++i) {
+        if (pointInRect(cursorFbX, cursorFbY, settingsOptionRect(settingsLayout, i))) {
+          hoveredOption = i;
+          break;
+        }
+      }
 
-      std::string dirtyMark = settingsDirty
-        ? (ru ? " НЕ СОХРАНЕНО" : " UNSAVED")
-        : (ru ? " СОХРАНЕНО" : " SAVED");
-      std::string backText =
-        settingsReturnState == ScreenState::kPaused
-          ? (ru ? "НАЗАД В ПАУЗУ" : "BACK TO PAUSE")
-          : (ru ? "НАЗАД В МЕНЮ" : "BACK TO MENU");
-      std::string languageValue = pendingSettings.language == 1
-        ? (ru ? "РУССКИЙ" : "RUSSIAN")
-        : (ru ? "АНГЛИЙСКИЙ" : "ENGLISH");
-      std::string line0 = (ru ? "ГРАФИКА " : "GRAPHICS ") + graphicsValue;
-      std::string line1 = (ru ? "ДАЛЬНОСТЬ " : "RENDER DISTANCE ") +
-                          std::to_string(pendingSettings.renderDistance) +
-                          (ru ? " ЧАНКОВ" : " CHUNKS");
-      std::string line2 = (ru ? "ЧУВСТВИТЕЛЬНОСТЬ " : "SENSITIVITY ") + sens.str();
-      std::string line3 = (ru ? "ГРОМКОСТЬ " : "AUDIO ") + std::to_string(pendingSettings.audioVolume);
-      std::string line4 = (ru ? "ЯЗЫК " : "LANGUAGE ") + languageValue;
-      std::string line5 = ru ? "СОХРАНИТЬ И ПРИМЕНИТЬ" : "SAVE AND APPLY";
-      std::string line6 = ru ? "СБРОС ПО УМОЛЧАНИЮ" : "RESET DEFAULTS";
-      std::string line7 = backText + dirtyMark;
+      int hoveredAction = -1;
+      for (int i = 0; i < kSettingsActionCount; ++i) {
+        if (pointInRect(cursorFbX, cursorFbY, settingsActionRect(settingsLayout, i))) {
+          hoveredAction = i;
+          break;
+        }
+      }
 
-      std::array<std::string, 8> lines = {line0, line1, line2, line3, line4, line5, line6, line7};
-      for (int i = 0; i < 8; ++i) {
-        drawText(lines[static_cast<size_t>(i)],
-                 rowX + 16.0f,
-                 rowY + static_cast<float>(i) * (rowH + rowGap) + 12.0f,
-                 2.6f,
-                 glm::vec3(0.92f, 0.94f, 0.98f),
+      addQuad(settingsLayout.sidebarX - 10.0f,
+              settingsLayout.sidebarY - 10.0f,
+              settingsLayout.sidebarW + 20.0f,
+              settingsLayout.panelH - 140.0f,
+              glm::vec3(0.16f, 0.18f, 0.22f),
+              backgroundTile);
+      addQuad(settingsLayout.contentX - 10.0f,
+              settingsLayout.contentY - 10.0f,
+              settingsLayout.contentW + 20.0f,
+              settingsLayout.panelH - 140.0f,
+              glm::vec3(0.14f, 0.16f, 0.20f),
+              backgroundTile);
+
+      drawText(ru ? "НАСТРОЙКИ" : "SETTINGS",
+               panelX + 28.0f,
+               panelY + 20.0f,
+               3.1f,
+               glm::vec3(0.92f, 0.94f, 0.98f),
+               false);
+      drawText(settingsDirty ? (ru ? "ЕСТЬ НЕСОХРАНЕННЫЕ ИЗМЕНЕНИЯ" : "UNSAVED CHANGES")
+                             : (ru ? "ВСЕ ИЗМЕНЕНИЯ СОХРАНЕНЫ" : "ALL CHANGES SAVED"),
+               panelX + panelWidth - 28.0f,
+               panelY + 22.0f,
+               1.9f,
+               settingsDirty ? glm::vec3(0.95f, 0.75f, 0.42f) : glm::vec3(0.70f, 0.84f, 0.72f),
+               true);
+      drawText(ru ? "КАТЕГОРИИ" : "CATEGORIES",
+               settingsLayout.sidebarX,
+               settingsLayout.sidebarY - 26.0f,
+               1.9f,
+               glm::vec3(0.72f, 0.78f, 0.86f),
+               false);
+      drawText(categoryLabel(activeCategory),
+               settingsLayout.contentX,
+               settingsLayout.contentY - 28.0f,
+               2.6f,
+               glm::vec3(0.90f, 0.92f, 0.98f),
+               false);
+
+      for (int i = 0; i < kSettingsCategoryCount; ++i) {
+        glm::vec4 rect = settingsCategoryRect(settingsLayout, i);
+        bool active = i == activeCategory;
+        bool focused = focusArea == SettingsFocusArea::kCategories && i == activeCategory;
+        bool hovered = i == hoveredCategory;
+        glm::vec3 color = active
+          ? glm::vec3(0.26f, 0.34f, 0.46f)
+          : glm::vec3(0.20f, 0.22f, 0.28f);
+        if (hovered) {
+          color += glm::vec3(0.04f, 0.05f, 0.07f);
+        }
+        if (focused) {
+          addQuad(rect.x - 4.0f, rect.y - 4.0f, rect.z + 8.0f, rect.w + 8.0f,
+                  glm::vec3(0.82f, 0.88f, 0.96f), backgroundTile);
+        }
+        addQuad(rect.x, rect.y, rect.z, rect.w, color, backgroundTile);
+        drawText(categoryLabel(i),
+                 rect.x + 14.0f,
+                 rect.y + 9.0f,
+                 2.35f,
+                 glm::vec3(0.94f, 0.95f, 0.98f),
+                 false);
+        drawText(categoryHint(i),
+                 rect.x + 14.0f,
+                 rect.y + 27.0f,
+                 1.55f,
+                 active ? glm::vec3(0.78f, 0.86f, 0.95f) : glm::vec3(0.62f, 0.68f, 0.76f),
                  false);
       }
+
+      auto drawChoiceChips = [&](const glm::vec4& controlRect,
+                                 const std::vector<std::string>& labels,
+                                 int selectedIndex,
+                                 int hoveredIndex,
+                                 const glm::vec3& accent) {
+        int segments = static_cast<int>(labels.size());
+        for (int i = 0; i < segments; ++i) {
+          glm::vec4 seg = settingsSegmentRect(controlRect, segments, i);
+          bool selected = i == selectedIndex;
+          bool hovered = i == hoveredIndex;
+          glm::vec3 color = selected ? accent : glm::vec3(0.22f, 0.24f, 0.30f);
+          if (hovered && !selected) {
+            color += glm::vec3(0.05f);
+          }
+          addQuad(seg.x, seg.y, seg.z, seg.w, color, backgroundTile);
+          drawText(labels[static_cast<size_t>(i)],
+                   seg.x + seg.z * 0.5f,
+                   seg.y + 8.0f,
+                   1.95f,
+                   glm::vec3(0.95f, 0.96f, 0.99f),
+                   true);
+        }
+      };
+
+      for (int optionIndex = 0; optionIndex < optionCount; ++optionIndex) {
+        SettingsEntryId entry = settingsEntryForCategory(activeCategory, optionIndex);
+        glm::vec4 rect = settingsOptionRect(settingsLayout, optionIndex);
+        bool selected = focusArea == SettingsFocusArea::kOptions && optionIndex == activeOption;
+        bool hovered = optionIndex == hoveredOption;
+        if (selected) {
+          addQuad(rect.x - 5.0f, rect.y - 5.0f, rect.z + 10.0f, rect.w + 10.0f,
+                  glm::vec3(0.80f, 0.86f, 0.95f), backgroundTile);
+        }
+        glm::vec3 rowColor = glm::vec3(0.20f, 0.23f, 0.29f);
+        if (hovered) {
+          rowColor += glm::vec3(0.04f, 0.05f, 0.07f);
+        }
+        addQuad(rect.x, rect.y, rect.z, rect.w, rowColor, backgroundTile);
+
+        drawText(entryTitle(entry),
+                 rect.x + 16.0f,
+                 rect.y + 10.0f,
+                 2.35f,
+                 glm::vec3(0.94f, 0.95f, 0.98f),
+                 false);
+        drawText(entryHint(entry),
+                 rect.x + 16.0f,
+                 rect.y + 32.0f,
+                 1.55f,
+                 glm::vec3(0.68f, 0.74f, 0.82f),
+                 false);
+        drawText(valueText(entry),
+                 rect.x + rect.z - 148.0f,
+                 rect.y + 10.0f,
+                 1.9f,
+                 glm::vec3(0.88f, 0.92f, 0.98f),
+                 false);
+
+        glm::vec4 controlRect = settingsControlRect(rect);
+        if (entry == SettingsEntryId::kGraphicsQuality) {
+          int hoveredSegment = -1;
+          for (int i = 0; i < 3; ++i) {
+            if (pointInRect(cursorFbX, cursorFbY, settingsSegmentRect(controlRect, 3, i))) {
+              hoveredSegment = i;
+              break;
+            }
+          }
+          drawChoiceChips(controlRect,
+                          {ru ? "НИЗКО" : "LOW", ru ? "СРЕДНЕ" : "MED", ru ? "ВЫСОКО" : "HIGH"},
+                          pendingSettings.graphicsQuality,
+                          hoveredSegment,
+                          glm::vec3(0.30f, 0.47f, 0.74f));
+        } else if (entry == SettingsEntryId::kLanguage) {
+          int hoveredSegment = -1;
+          for (int i = 0; i < 2; ++i) {
+            if (pointInRect(cursorFbX, cursorFbY, settingsSegmentRect(controlRect, 2, i))) {
+              hoveredSegment = i;
+              break;
+            }
+          }
+          drawChoiceChips(controlRect,
+                          {ru ? "ENGLISH" : "ENGLISH", ru ? "РУССКИЙ" : "RUSSIAN"},
+                          pendingSettings.language,
+                          hoveredSegment,
+                          glm::vec3(0.36f, 0.42f, 0.72f));
+        } else if (entry == SettingsEntryId::kBlockGuides) {
+          int hoveredSegment = -1;
+          for (int i = 0; i < 2; ++i) {
+            if (pointInRect(cursorFbX, cursorFbY, settingsSegmentRect(controlRect, 2, i))) {
+              hoveredSegment = i;
+              break;
+            }
+          }
+          drawChoiceChips(controlRect,
+                          {ru ? "ВЫКЛ" : "OFF", ru ? "ВКЛ" : "ON"},
+                          pendingSettings.blockGuides ? 1 : 0,
+                          hoveredSegment,
+                          glm::vec3(0.26f, 0.52f, 0.32f));
+        } else {
+          glm::vec4 sliderRect = settingsSliderTrackRect(rect);
+          addQuad(sliderRect.x,
+                  sliderRect.y,
+                  sliderRect.z,
+                  sliderRect.w,
+                  glm::vec3(0.14f, 0.15f, 0.19f),
+                  backgroundTile);
+          float fill = sliderRect.z * std::clamp(sliderNormalized(entry), 0.0f, 1.0f);
+          addQuad(sliderRect.x,
+                  sliderRect.y,
+                  fill,
+                  sliderRect.w,
+                  glm::vec3(0.38f, 0.66f, 0.94f),
+                  backgroundTile);
+          float knobX = sliderRect.x + fill - 8.0f;
+          addQuad(knobX,
+                  sliderRect.y - 5.0f,
+                  16.0f,
+                  sliderRect.w + 10.0f,
+                  glm::vec3(0.92f, 0.95f, 0.99f),
+                  backgroundTile);
+        }
+      }
+
+      for (int actionIndex = 0; actionIndex < kSettingsActionCount; ++actionIndex) {
+        glm::vec4 rect = settingsActionRect(settingsLayout, actionIndex);
+        bool selected = focusArea == SettingsFocusArea::kActions && actionIndex == activeAction;
+        bool hovered = actionIndex == hoveredAction;
+        glm::vec3 color = glm::vec3(0.22f, 0.24f, 0.30f);
+        if (actionIndex == static_cast<int>(SettingsActionId::kApply)) {
+          color = glm::vec3(0.22f, 0.40f, 0.26f);
+        } else if (actionIndex == static_cast<int>(SettingsActionId::kReset)) {
+          color = glm::vec3(0.44f, 0.32f, 0.18f);
+        } else if (settingsReturnState == ScreenState::kPaused) {
+          color = glm::vec3(0.28f, 0.24f, 0.36f);
+        } else {
+          color = glm::vec3(0.36f, 0.22f, 0.22f);
+        }
+        if (hovered) {
+          color += glm::vec3(0.04f, 0.05f, 0.06f);
+        }
+        if (selected) {
+          addQuad(rect.x - 4.0f, rect.y - 4.0f, rect.z + 8.0f, rect.w + 8.0f,
+                  glm::vec3(0.82f, 0.88f, 0.96f), backgroundTile);
+        }
+        addQuad(rect.x, rect.y, rect.z, rect.w, color, backgroundTile);
+        drawText(actionLabel(actionIndex),
+                 rect.x + rect.z * 0.5f,
+                 rect.y + 10.0f,
+                 2.1f,
+                 glm::vec3(0.96f, 0.97f, 0.99f),
+                 true);
+      }
+
+      drawText(ru ? "КЛИК ПО КАТЕГОРИИ ОТКРЫВАЕТ ЕЕ НАСТРОЙКИ" : "CLICK A CATEGORY TO OPEN ITS SETTINGS",
+               settingsLayout.contentX,
+               settingsLayout.panelY + settingsLayout.panelH - 82.0f,
+               1.55f,
+               glm::vec3(0.68f, 0.74f, 0.82f),
+               false);
+      drawText(ru ? "ПОЛЗУНКИ МОЖНО ТЯНУТЬ МЫШКОЙ" : "SLIDERS CAN BE DRAGGED WITH THE MOUSE",
+               settingsLayout.contentX,
+               settingsLayout.panelY + settingsLayout.panelH - 64.0f,
+               1.55f,
+               glm::vec3(0.68f, 0.74f, 0.82f),
+               false);
     } else if (screenState == ScreenState::kCreateWorld) {
       drawText(ruUi ? "СОЗДАТЬ МИР" : "CREATE WORLD",
                panelX + panelWidth * 0.5f,
@@ -3647,6 +6619,421 @@ void App::rebuildUiMesh() {
             gridHeight + kPanelPadding * 2.0f,
             glm::vec3(0.15f, 0.15f, 0.18f),
             backgroundTile);
+    if (furnaceOpen) {
+      FurnaceUiLayout furnaceLayout = makeFurnaceUiLayout(width, height);
+      FurnaceState furnaceState{};
+      auto it = furnaceStates.find(furnaceKeyForBlock(activeFurnaceBlock));
+      if (it != furnaceStates.end()) {
+        furnaceState = it->second;
+      }
+      float smeltFill = std::clamp(furnaceState.smeltProgress / kFurnaceSmeltDuration, 0.0f, 1.0f);
+      float burnFill = furnaceState.burnDuration > 0.0f
+        ? std::clamp(furnaceState.burnTime / furnaceState.burnDuration, 0.0f, 1.0f)
+        : 0.0f;
+      int smeltPercent = static_cast<int>(std::lround(smeltFill * 100.0f));
+      int burnPercent = static_cast<int>(std::lround(burnFill * 100.0f));
+      bool furnaceReady = furnaceState.output.count > 0 && furnaceState.output.type != kAir;
+
+      addQuad(furnaceLayout.panelX,
+              furnaceLayout.panelY,
+              furnaceLayout.panelWidth,
+              furnaceLayout.panelHeight,
+              glm::vec3(0.13f, 0.14f, 0.17f),
+              backgroundTile);
+      drawText(appliedSettings.language == 1 ? "ПЕЧКА" : "FURNACE",
+               furnaceLayout.inputX,
+               furnaceLayout.panelY + 4.0f,
+               2.1f,
+               glm::vec3(0.92f, 0.94f, 0.98f),
+               false);
+      drawText(appliedSettings.language == 1 ? "ЖЕЛЕЗО ИЗ РУДЫ" : "SMELT IRON ORE",
+               furnaceLayout.infoX,
+               furnaceLayout.panelY + 4.0f,
+               1.8f,
+               glm::vec3(0.76f, 0.84f, 0.93f),
+               false);
+      drawText(appliedSettings.language == 1 ? "ТОПЛИВО: УГОЛЬ/ДЕРЕВО" : "FUEL: COAL/WOOD",
+               furnaceLayout.infoX,
+               furnaceLayout.infoY + 16.0f,
+               1.55f,
+               glm::vec3(0.86f, 0.84f, 0.66f),
+               false);
+      drawText(appliedSettings.language == 1 ? "ЛКМ ПЕРЕНОС ПКМ 1" : "LMB MOVE RMB 1",
+               furnaceLayout.infoX,
+               furnaceLayout.infoY + 34.0f,
+               1.55f,
+               glm::vec3(0.64f, 0.88f, 0.66f),
+               false);
+      if (furnaceReady) {
+        drawText(appliedSettings.language == 1 ? "ГОТОВО" : "READY",
+                 furnaceLayout.infoX,
+                 furnaceLayout.infoY + 54.0f,
+                 1.55f,
+                 glm::vec3(0.92f, 0.94f, 0.98f),
+                 false);
+        drawText(displayNameForBlock(furnaceState.output.type, appliedSettings.language == 1),
+                 furnaceLayout.infoX,
+                 furnaceLayout.infoY + 72.0f,
+                 1.55f,
+                 glm::vec3(0.86f, 0.90f, 0.98f),
+                 false);
+      }
+
+      if (furnaceReady) {
+        addSolidQuad(furnaceLayout.outputX - 5.0f,
+                     furnaceLayout.outputY - 5.0f,
+                     kSlotSize + 10.0f,
+                     kSlotSize + 10.0f,
+                     glm::vec3(0.88f, 0.72f, 0.24f));
+      }
+      addQuad(furnaceLayout.inputX, furnaceLayout.inputY, kSlotSize, kSlotSize, glm::vec3(0.25f, 0.25f, 0.28f), backgroundTile);
+      addQuad(furnaceLayout.fuelX, furnaceLayout.fuelY, kSlotSize, kSlotSize, glm::vec3(0.25f, 0.25f, 0.28f), backgroundTile);
+      addQuad(furnaceLayout.outputX,
+              furnaceLayout.outputY,
+              kSlotSize,
+              kSlotSize,
+              furnaceReady ? glm::vec3(0.28f, 0.40f, 0.24f) : glm::vec3(0.25f, 0.25f, 0.28f),
+              backgroundTile);
+      drawStack(furnaceState.input, furnaceLayout.inputX, furnaceLayout.inputY);
+      drawStack(furnaceState.fuel, furnaceLayout.fuelX, furnaceLayout.fuelY);
+      drawStack(furnaceState.output, furnaceLayout.outputX, furnaceLayout.outputY);
+
+      drawText(appliedSettings.language == 1 ? "ПЛАВКА" : "SMELT",
+               furnaceLayout.progressX,
+               furnaceLayout.progressY - 14.0f,
+               1.3f,
+               glm::vec3(0.92f, 0.90f, 0.66f),
+               false);
+      drawNumber(smeltPercent,
+                 furnaceLayout.progressX + furnaceLayout.progressW + 22.0f,
+                 furnaceLayout.progressY + 11.0f,
+                 1.7f,
+                 glm::vec3(0.96f, 0.96f, 0.98f),
+                 backgroundTile);
+      addSolidQuad(furnaceLayout.progressX - 2.0f,
+                   furnaceLayout.progressY - 2.0f,
+                   furnaceLayout.progressW + 4.0f,
+                   furnaceLayout.progressH + 4.0f,
+                   glm::vec3(0.34f, 0.26f, 0.10f));
+      addSolidQuad(furnaceLayout.progressX,
+                   furnaceLayout.progressY,
+                   furnaceLayout.progressW,
+                   furnaceLayout.progressH,
+                   glm::vec3(0.18f, 0.18f, 0.22f));
+      addSolidQuad(furnaceLayout.progressX,
+                   furnaceLayout.progressY,
+                   furnaceLayout.progressW * smeltFill,
+                   furnaceLayout.progressH,
+                   glm::vec3(0.90f, 0.72f, 0.28f));
+
+      drawText(appliedSettings.language == 1 ? "ТОПЛИВО" : "FUEL",
+               furnaceLayout.fuelBarX,
+               furnaceLayout.fuelBarY - 14.0f,
+               1.3f,
+               glm::vec3(0.94f, 0.80f, 0.54f),
+               false);
+      drawNumber(burnPercent,
+                 furnaceLayout.fuelBarX + furnaceLayout.fuelBarW + 22.0f,
+                 furnaceLayout.fuelBarY + 11.0f,
+                 1.7f,
+                 glm::vec3(0.96f, 0.96f, 0.98f),
+                 backgroundTile);
+      addSolidQuad(furnaceLayout.fuelBarX - 2.0f,
+                   furnaceLayout.fuelBarY - 2.0f,
+                   furnaceLayout.fuelBarW + 4.0f,
+                   furnaceLayout.fuelBarH + 4.0f,
+                   glm::vec3(0.30f, 0.16f, 0.08f));
+      addSolidQuad(furnaceLayout.fuelBarX,
+                   furnaceLayout.fuelBarY,
+                   furnaceLayout.fuelBarW,
+                   furnaceLayout.fuelBarH,
+                   glm::vec3(0.18f, 0.18f, 0.22f));
+      addSolidQuad(furnaceLayout.fuelBarX,
+                   furnaceLayout.fuelBarY,
+                   furnaceLayout.fuelBarW * burnFill,
+                   furnaceLayout.fuelBarH,
+                   burnFill > 0.0f ? glm::vec3(0.98f, 0.54f, 0.14f)
+                                   : glm::vec3(0.34f, 0.16f, 0.12f));
+
+      addSolidQuad(furnaceLayout.flameX - 2.0f,
+                   furnaceLayout.flameY - 2.0f,
+                   furnaceLayout.flameW + 4.0f,
+                   furnaceLayout.flameH + 4.0f,
+                   glm::vec3(0.28f, 0.16f, 0.08f));
+      addSolidQuad(furnaceLayout.flameX,
+                   furnaceLayout.flameY,
+                   furnaceLayout.flameW,
+                   furnaceLayout.flameH,
+                   glm::vec3(0.16f, 0.16f, 0.20f));
+      float flameFillH = furnaceLayout.flameH * burnFill;
+      addSolidQuad(furnaceLayout.flameX + 3.0f,
+                   furnaceLayout.flameY + (furnaceLayout.flameH - flameFillH),
+                   furnaceLayout.flameW - 6.0f,
+                   flameFillH,
+                   glm::vec3(0.98f, 0.56f, 0.16f));
+    } else {
+      int craftGridSize = activeCraftGridSize();
+      CraftUiLayout craftLayout = makeCraftUiLayout(width, height, craftGridSize);
+      CraftMatch craftMatch{};
+      bool hasCraftMatch = findCraftMatch(craftingSlots, craftGridSize, craftMatch);
+      float craftFlash = std::clamp(craftResultFlashTimer / kCraftResultFlashDuration, 0.0f, 1.0f);
+      addQuad(craftLayout.panelX,
+              craftLayout.panelY,
+              craftLayout.panelWidth,
+              craftLayout.panelHeight,
+              glm::vec3(0.13f, 0.14f, 0.17f),
+              backgroundTile);
+
+      drawText(workbenchOpen
+                 ? (appliedSettings.language == 1 ? "ВЕРСТАК" : "WORKBENCH")
+                 : (appliedSettings.language == 1 ? "КРАФТ" : "CRAFTING"),
+               craftLayout.inputX,
+               craftLayout.panelY + 4.0f,
+               2.1f,
+               glm::vec3(0.92f, 0.94f, 0.98f),
+               false);
+      drawText(craftGridSize == 3
+                 ? (appliedSettings.language == 1 ? "3X3 ВЕРСТАК РЯДОМ" : "3X3 NEAR WORKBENCH")
+                 : (appliedSettings.language == 1 ? "2X2 ИНВЕНТАРЬ" : "2X2 INVENTORY"),
+               craftLayout.infoX,
+               craftLayout.panelY + 4.0f,
+               1.8f,
+               glm::vec3(0.76f, 0.84f, 0.93f),
+               false);
+      drawText(appliedSettings.language == 1 ? "ЛКМ 1 ПКМ ВСЕ" : "LMB 1 RMB MAX",
+               craftLayout.infoX,
+               craftLayout.infoY + 16.0f,
+               1.55f,
+               glm::vec3(0.64f, 0.88f, 0.66f),
+               false);
+      drawText(craftGridSize == 3
+                 ? (appliedSettings.language == 1 ? "ВЕРСТАК АКТИВЕН" : "WORKBENCH ACTIVE")
+                 : (appliedSettings.language == 1 ? "ПОСТАВЬ ВЕРСТАК ДЛЯ 3X3" : "PLACE A WORKBENCH FOR 3X3"),
+               craftLayout.infoX,
+               craftLayout.infoY + 34.0f,
+               1.55f,
+               craftGridSize == 3 ? glm::vec3(0.70f, 0.86f, 0.70f)
+                                  : glm::vec3(0.92f, 0.74f, 0.54f),
+               false);
+      if (hasCraftMatch) {
+        drawText(appliedSettings.language == 1 ? "РЕЗУЛЬТАТ" : "RESULT",
+                 craftLayout.infoX,
+                 craftLayout.infoY + 52.0f,
+                 1.55f,
+                 glm::vec3(0.92f, 0.94f, 0.98f),
+                 false);
+        drawText(displayNameForBlock(craftMatch.output, appliedSettings.language == 1),
+                 craftLayout.infoX,
+                 craftLayout.infoY + 70.0f,
+                 1.55f,
+                 glm::vec3(0.86f, 0.90f, 0.98f),
+                 false);
+      }
+
+      std::array<int, 256> storedCounts{};
+      auto countSlots = [&](const auto& slots) {
+        for (const ItemStack& slot : slots) {
+          if (slot.type == kAir || slot.count == 0) {
+            continue;
+          }
+          storedCounts[static_cast<size_t>(slot.type)] += static_cast<int>(slot.count);
+        }
+      };
+      countSlots(hotbar);
+      countSlots(inventory);
+      countSlots(craftingSlots);
+      if (cursorStack.type != kAir && cursorStack.count > 0) {
+        storedCounts[static_cast<size_t>(cursorStack.type)] += static_cast<int>(cursorStack.count);
+      }
+
+      std::vector<const CraftRecipeDefinition*> hintRecipes;
+      hintRecipes.reserve(4);
+      for (const CraftRecipeDefinition& recipe : kCraftRecipes) {
+        if (craftGridSize < recipe.width || craftGridSize < recipe.height) {
+          continue;
+        }
+        if (hasCraftMatch && craftMatch.output == recipe.output) {
+          continue;
+        }
+
+        std::array<int, 256> required{};
+        for (uint8_t type : recipe.cells) {
+          if (type != kAir) {
+            required[static_cast<size_t>(type)] += 1;
+          }
+        }
+
+        bool canCraftSoon = true;
+        for (size_t type = 0; type < required.size(); ++type) {
+          if (required[type] > storedCounts[type]) {
+            canCraftSoon = false;
+            break;
+          }
+        }
+        if (!canCraftSoon) {
+          continue;
+        }
+
+        hintRecipes.push_back(&recipe);
+        if (hintRecipes.size() >= 4) {
+          break;
+        }
+      }
+
+      if (!hintRecipes.empty()) {
+        float hintHeaderY = craftLayout.panelY + craftLayout.panelHeight - 88.0f;
+        drawText(appliedSettings.language == 1 ? "ПОДСКАЗКИ" : "HINTS",
+                 craftLayout.inputX,
+                 hintHeaderY,
+                 1.5f,
+                 glm::vec3(0.90f, 0.86f, 0.66f),
+                 false);
+        for (size_t i = 0; i < hintRecipes.size(); ++i) {
+          const CraftRecipeDefinition& recipe = *hintRecipes[i];
+          std::array<std::pair<uint8_t, int>, 3> ingredients{};
+          int ingredientCount = 0;
+          for (uint8_t type : recipe.cells) {
+            if (type == kAir) {
+              continue;
+            }
+            bool merged = false;
+            for (int j = 0; j < ingredientCount; ++j) {
+              if (ingredients[static_cast<size_t>(j)].first == type) {
+                ingredients[static_cast<size_t>(j)].second += 1;
+                merged = true;
+                break;
+              }
+            }
+            if (!merged && ingredientCount < static_cast<int>(ingredients.size())) {
+              ingredients[static_cast<size_t>(ingredientCount++)] = {type, 1};
+            }
+          }
+
+          float rowY = hintHeaderY + 14.0f + static_cast<float>(i) * 20.0f;
+          float iconX = craftLayout.inputX;
+          for (int j = 0; j < ingredientCount; ++j) {
+            addQuad(iconX,
+                    rowY,
+                    18.0f,
+                    18.0f,
+                    glm::vec3(0.22f, 0.22f, 0.26f),
+                    backgroundTile);
+            addQuad(iconX + 3.0f,
+                    rowY + 3.0f,
+                    12.0f,
+                    12.0f,
+                    glm::vec3(1.0f),
+                    tileForBlock(ingredients[static_cast<size_t>(j)].first));
+            if (ingredients[static_cast<size_t>(j)].second > 1) {
+              drawNumber(ingredients[static_cast<size_t>(j)].second,
+                         iconX + 17.0f,
+                         rowY + 17.0f,
+                         1.35f,
+                         glm::vec3(0.96f, 0.96f, 0.98f),
+                         backgroundTile);
+            }
+            iconX += 22.0f;
+          }
+
+          drawText("TO",
+                   iconX + 2.0f,
+                   rowY + 4.0f,
+                   1.25f,
+                   glm::vec3(0.72f, 0.80f, 0.90f),
+                   false);
+          float resultX = iconX + 22.0f;
+          addQuad(resultX,
+                  rowY,
+                  18.0f,
+                  18.0f,
+                  glm::vec3(0.20f, 0.30f, 0.20f),
+                  backgroundTile);
+          addQuad(resultX + 3.0f,
+                  rowY + 3.0f,
+                  12.0f,
+                  12.0f,
+                  glm::vec3(1.0f),
+                  tileForBlock(recipe.output));
+          if (recipe.outputCount > 1) {
+            drawNumber(static_cast<int>(recipe.outputCount),
+                       resultX + 17.0f,
+                       rowY + 17.0f,
+                       1.35f,
+                       glm::vec3(0.96f, 0.96f, 0.98f),
+                       backgroundTile);
+          }
+          drawText(displayNameForBlock(recipe.output, appliedSettings.language == 1),
+                   resultX + 24.0f,
+                   rowY + 4.0f,
+                   1.2f,
+                   glm::vec3(0.86f, 0.90f, 0.98f),
+                   false);
+        }
+      }
+
+      for (int row = 0; row < craftGridSize; ++row) {
+        for (int col = 0; col < craftGridSize; ++col) {
+          int slotIndex = craftingSlotIndex(row, col);
+          float x = craftLayout.inputX + static_cast<float>(col) * (kSlotSize + kSlotPadding);
+          float y = craftLayout.inputY + static_cast<float>(row) * (kSlotSize + kSlotPadding);
+          addQuad(x,
+                  y,
+                  kSlotSize,
+                  kSlotSize,
+                  glm::vec3(0.25f, 0.25f, 0.28f),
+                  backgroundTile);
+          drawStack(craftingSlots[static_cast<size_t>(slotIndex)], x, y);
+        }
+      }
+
+      if (hasCraftMatch) {
+        addSolidQuad(craftLayout.resultX - 18.0f,
+                     craftLayout.resultY + (kSlotSize * 0.5f) - 2.0f,
+                     12.0f,
+                     4.0f,
+                     glm::vec3(0.78f, 0.72f, 0.30f));
+      }
+      if (hasCraftMatch || craftFlash > 0.0f) {
+        float auraPad = hasCraftMatch ? 5.0f : (3.0f + craftFlash * 5.0f);
+        glm::vec3 auraColor(
+          0.32f + craftFlash * 0.52f,
+          0.52f + craftFlash * 0.24f,
+          0.22f + craftFlash * 0.02f);
+        addSolidQuad(craftLayout.resultX - auraPad,
+                     craftLayout.resultY - auraPad,
+                     kSlotSize + auraPad * 2.0f,
+                     kSlotSize + auraPad * 2.0f,
+                     auraColor);
+      }
+      addQuad(craftLayout.resultX,
+              craftLayout.resultY,
+              kSlotSize,
+              kSlotSize,
+              hasCraftMatch
+                ? glm::vec3(0.30f + craftFlash * 0.18f,
+                            0.42f + craftFlash * 0.10f,
+                            0.24f)
+                : glm::vec3(0.24f, 0.24f, 0.28f),
+              backgroundTile);
+      if (hasCraftMatch) {
+        addSolidQuad(craftLayout.resultX + 6.0f,
+                     craftLayout.resultY + 6.0f,
+                     kSlotSize - 12.0f,
+                     4.0f,
+                     glm::vec3(0.88f, 0.82f, 0.42f));
+        drawStack(ItemStack{craftMatch.output, craftMatch.outputCount},
+                  craftLayout.resultX,
+                  craftLayout.resultY);
+        if (craftMatch.maxCrafts > 1) {
+          drawNumber(craftMatch.maxCrafts,
+                     craftLayout.resultX + 16.0f,
+                     craftLayout.resultY + 14.0f,
+                     2.0f,
+                     glm::vec3(0.96f, 0.96f, 0.98f),
+                     backgroundTile);
+        }
+      }
+    }
 
     size_t idx = 0;
     for (int row = 0; row < kInventoryRows; ++row) {
@@ -3700,6 +7087,35 @@ void App::rebuildUiMesh() {
              true);
   }
 
+  if (achievementPopupVisible) {
+    AchievementId popupId = static_cast<AchievementId>(std::clamp<int>(activeAchievementPopupId, 0, static_cast<int>(App::kAchievementCount) - 1));
+    bool ru = appliedSettings.language == 1;
+    std::string title = achievementTitle(popupId, ru);
+    std::string label = ru ? "ДОСТИЖЕНИЕ" : "ACHIEVEMENT";
+    float titlePixel = 1.9f;
+    float labelPixel = 1.45f;
+    float textWidth = std::max(measureTextWidth(title, titlePixel), measureTextWidth(label, labelPixel));
+    float boxW = textWidth + 88.0f;
+    float boxH = 54.0f;
+    float boxX = static_cast<float>(width) - boxW - 18.0f;
+    float boxY = 18.0f;
+    addQuad(boxX, boxY, boxW, boxH, glm::vec3(0.08f, 0.10f, 0.13f), backgroundTile);
+    addQuad(boxX + 8.0f, boxY + 8.0f, 38.0f, 38.0f, glm::vec3(0.20f, 0.22f, 0.26f), backgroundTile);
+    addQuad(boxX + 11.0f, boxY + 11.0f, 32.0f, 32.0f, glm::vec3(1.0f), achievementIconTile(popupId));
+    drawText(label,
+             boxX + 56.0f,
+             boxY + 10.0f,
+             labelPixel,
+             glm::vec3(0.86f, 0.88f, 0.92f),
+             false);
+    drawText(title,
+             boxX + 56.0f,
+             boxY + 24.0f,
+             titlePixel,
+             glm::vec3(0.96f, 0.86f, 0.38f),
+             false);
+  }
+
   if (inventoryOpen && cursorStack.count > 0 && cursorStack.type != kAir) {
     float cx = cursorFbX - kSlotSize * 0.5f;
     float cy = cursorFbY - kSlotSize * 0.5f;
@@ -3749,22 +7165,23 @@ void App::rebuildUiMesh() {
       }
       return m;
     };
+    bool ruDebug = appliedSettings.language == 1;
     auto biomeLabel = [&](uint8_t biome) -> std::string {
       switch (biome) {
         case 0:
-          return "OCEAN";
+          return ruDebug ? "ОКЕАН" : "OCEAN";
         case 1:
-          return "BEACH";
+          return ruDebug ? "ПЛЯЖ" : "BEACH";
         case 2:
-          return "PLAINS";
+          return ruDebug ? "РАВНИНЫ" : "PLAINS";
         case 3:
-          return "FOREST";
+          return ruDebug ? "ЛЕС" : "FOREST";
         case 4:
-          return "DESERT";
+          return ruDebug ? "ПУСТЫНЯ" : "DESERT";
         case 5:
-          return "MOUNTAINS";
+          return ruDebug ? "ГОРЫ" : "MOUNTAINS";
         default:
-          return "UNKNOWN";
+          return ruDebug ? "НЕИЗВЕСТНО" : "UNKNOWN";
       }
     };
 
@@ -3792,13 +7209,19 @@ void App::rebuildUiMesh() {
 
     std::vector<std::string> lines;
     lines.push_back("WORLDGEN DEBUG");
+    lines.push_back("XYZ " +
+                    toFixed(playerPos.x, 1) + " " +
+                    toFixed(playerPos.y, 1) + " " +
+                    toFixed(playerPos.z, 1));
     lines.push_back("CHUNK " + std::to_string(chunkX) + " " + std::to_string(chunkZ) +
                     " LOCAL " + std::to_string(localX) + " " + std::to_string(localZ));
     lines.push_back("BORDER DIST " + std::to_string(borderDistX) + " " + std::to_string(borderDistZ));
     lines.push_back("TIME " + formatClock(dayCycleTime) + " DAYL " + toFixed(dayLightFactor, 2));
     lines.push_back("WEATHER " + toFixed(weatherIntensity, 2) +
                     " TARGET " + toFixed(weatherTargetIntensity, 2));
-    lines.push_back("BIOME " + std::to_string(static_cast<int>(biomeId)) + " " + biomeLabel(biomeId));
+    lines.push_back((ruDebug ? "БИОМ " : "BIOME ") +
+                    biomeLabel(biomeId) +
+                    " (" + std::to_string(static_cast<int>(biomeId)) + ")");
     lines.push_back("SURFACE Y " + std::to_string(surfaceY) + " AQ Y " + std::to_string(aquiferY));
     if (debugWorldgenOverlayMode >= 1) {
       lines.push_back("CL T " + toFixed(climate.temperature, 2) +
@@ -3836,15 +7259,410 @@ void App::rebuildUiMesh() {
     }
   }
 
-  const float centerX = static_cast<float>(width) * 0.5f;
-  const float centerY = static_cast<float>(height) * 0.5f;
-  const float crossArm = 4.0f;
-  const float crossThickness = 2.0f;
-  const int crossTile = 13;
-  addQuad(centerX - crossArm, centerY - crossThickness * 0.5f,
-          crossArm * 2.0f, crossThickness, glm::vec3(0.97f), crossTile);
-  addQuad(centerX - crossThickness * 0.5f, centerY - crossArm,
-          crossThickness, crossArm * 2.0f, glm::vec3(0.97f), crossTile);
+  if (debugProfilerOverlay && (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused)) {
+    auto toFixed = [](double value, int precision) {
+      std::ostringstream ss;
+      ss.setf(std::ios::fixed, std::ios::floatfield);
+      ss.precision(precision);
+      ss << value;
+      return ss.str();
+    };
+    auto metricLine = [&](const std::string& label, const App::ProfilerMetric& metric) {
+      return label + " " + toFixed(metric.lastMs, 2) + " / " + toFixed(metric.avgMs, 2);
+    };
+
+    bool ru = appliedSettings.language == 1;
+    VulkanContext::RenderStats renderStats = vk.getLastRenderStats();
+    World::RuntimeStats worldStats = world.collectRuntimeStats();
+    std::string qualityLabel = "MED";
+    if (appliedSettings.graphicsQuality == 0) {
+      qualityLabel = ru ? "НИЗК" : "LOW";
+    } else if (appliedSettings.graphicsQuality == 2) {
+      qualityLabel = ru ? "ВЫС" : "HIGH";
+    }
+
+    std::vector<std::string> lines;
+    lines.push_back(ru ? "ПРОФАЙЛЕР КАДРА LAST/AVG MS" : "FRAME PROFILER LAST/AVG MS");
+    lines.push_back((ru ? "КАДР " : "FRAME ") +
+                    toFixed(profiler.frame.lastMs, 2) + " / " + toFixed(profiler.frame.avgMs, 2) +
+                    "  MAX " + toFixed(profiler.frame.maxMs, 2) +
+                    "  TGT " + toFixed(profiler.targetFrameMs, 2));
+    lines.push_back(metricLine(ru ? "ВВОД" : "INPUT", profiler.eventsInput));
+    lines.push_back(metricLine("ENV", profiler.environment));
+    lines.push_back(metricLine(ru ? "ИГРОК" : "PLAYER", profiler.player));
+    lines.push_back(metricLine(ru ? "СТРИМ" : "STREAM", profiler.streaming));
+    lines.push_back(metricLine("SIM", profiler.simulation));
+    lines.push_back(metricLine(ru ? "ГЕЙМ" : "GAME", profiler.gameplay));
+    lines.push_back(metricLine("MESH", profiler.mesh));
+    lines.push_back(metricLine("UI", profiler.ui));
+    lines.push_back(metricLine(ru ? "ФАКЕЛЫ" : "TORCH", profiler.torch));
+    lines.push_back(metricLine("DRAW", profiler.draw));
+    lines.push_back(metricLine(ru ? "СОН" : "SLEEP", profiler.sleep));
+    lines.push_back((ru ? "DRAWCALLS " : "DRAWCALLS ") +
+                    std::to_string(renderStats.totalDrawCalls) +
+                    " W " + std::to_string(renderStats.worldDrawCalls) +
+                    " UI " + std::to_string(renderStats.uiDrawCalls));
+    lines.push_back((ru ? "СЕКЦИИ " : "SECTIONS ") +
+                    std::to_string(renderStats.worldMeshesTracked) +
+                    " DR " + std::to_string(renderStats.worldMeshesDrawn) +
+                    " D " + std::to_string(renderStats.worldDistanceCulled) +
+                    " F " + std::to_string(renderStats.worldFrustumCulled));
+    lines.push_back((ru ? "ИНДЕКСЫ " : "INDICES ") +
+                    std::to_string(renderStats.worldIndicesDrawn) +
+                    " SP " + std::to_string(renderStats.worldSpecialMeshes));
+    lines.push_back((ru ? "ЧАНКИ " : "CHUNKS ") +
+                    std::to_string(worldStats.loadedChunks) +
+                    " GEN " + std::to_string(worldStats.generatingChunks) +
+                    " DIRTY " + std::to_string(worldStats.dirtySections) +
+                    " Q " + std::to_string(worldStats.queuedSections));
+    lines.push_back((ru ? "ОЧЕРЕДИ G " : "QUEUES G ") +
+                    std::to_string(worldStats.generationQueue) + "/" +
+                    std::to_string(worldStats.generationResults) +
+                    " S " + std::to_string(worldStats.pendingSectionRebuilds) + "/" +
+                    std::to_string(worldStats.sectionWorkerQueue) + "/" +
+                    std::to_string(worldStats.sectionWorkerResults));
+    lines.push_back((ru ? "MESH UP " : "MESH UP ") +
+                    std::to_string(worldStats.pendingMeshUploads) +
+                    " RM " + std::to_string(worldStats.pendingRemovedMeshes) +
+                    " GPU " + std::to_string(profiler.pendingGpuUploads) + "/" +
+                    std::to_string(profiler.pendingGpuRemovals));
+    lines.push_back((ru ? "КАДР UP " : "FRAME UP ") +
+                    std::to_string(profiler.chunkUpdates) +
+                    " RM " + std::to_string(profiler.chunkRemovals) +
+                    " LIGHTS " + std::to_string(profiler.torchLights));
+    lines.push_back((ru ? "FPS CAP " : "FPS CAP ") +
+                    toFixed(profiler.targetFps, 0) +
+                    " RD " + std::to_string(loadedChunkViewRadius) + "/" + std::to_string(activeChunkViewRadius) +
+                    " GFX " + qualityLabel);
+    lines.push_back(ru ? "F6 ПРОФАЙЛЕР" : "F6 PROFILER");
+
+    float textPixel = 1.55f;
+    float maxLineW = 0.0f;
+    for (const std::string& line : lines) {
+      maxLineW = std::max(maxLineW, measureTextWidth(line, textPixel));
+    }
+    float boxW = maxLineW + 20.0f;
+    float boxH = static_cast<float>(lines.size()) * (textPixel * static_cast<float>(kGlyphHeight) + 4.0f) + 14.0f;
+    float boxX = 14.0f;
+    float boxY = 42.0f;
+    addQuad(boxX, boxY, boxW, boxH, glm::vec3(0.05f, 0.07f, 0.10f), backgroundTile);
+    float lineY = boxY + 7.0f;
+    for (size_t i = 0; i < lines.size(); ++i) {
+      glm::vec3 color = (i == 0)
+        ? glm::vec3(0.92f, 0.95f, 0.99f)
+        : glm::vec3(0.75f, 0.86f, 0.95f);
+      drawText(lines[i], boxX + 10.0f, lineY, textPixel, color, false);
+      lineY += textPixel * static_cast<float>(kGlyphHeight) + 4.0f;
+    }
+  }
+
+  if (achievementTreeOpen && screenState == ScreenState::kPlaying) {
+    bool ru = appliedSettings.language == 1;
+    int paperTile = tileForBlock(kSand);
+    AchievementTreeUiLayout layout = makeAchievementTreeLayout(width, height);
+    glm::vec2 scroll =
+      clampAchievementTreeScroll(layout, {achievementTreeScrollX, achievementTreeScrollY});
+    achievementTreeScrollX = scroll.x;
+    achievementTreeScrollY = scroll.y;
+    int activeTab = activeAchievementTreeTab(layout, scroll.x);
+
+    auto addPaperQuad = [&](float x, float y, float w, float h, const glm::vec3& color) {
+      addQuad(x, y, w, h, color, paperTile);
+    };
+
+    auto addClippedSolidQuad = [&](float x, float y, float w, float h, const glm::vec3& color) {
+      float clipX0 = std::max(x, layout.viewportX);
+      float clipY0 = std::max(y, layout.viewportY);
+      float clipX1 = std::min(x + w, layout.viewportX + layout.viewportW);
+      float clipY1 = std::min(y + h, layout.viewportY + layout.viewportH);
+      if (clipX1 <= clipX0 || clipY1 <= clipY0) {
+        return;
+      }
+      addSolidQuad(clipX0, clipY0, clipX1 - clipX0, clipY1 - clipY0, color);
+    };
+
+    addSolidQuad(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), glm::vec3(0.03f, 0.04f, 0.05f));
+    addSolidQuad(layout.frameX + 12.0f,
+                 layout.frameY + 14.0f,
+                 layout.frameW,
+                 layout.frameH,
+                 glm::vec3(0.03f, 0.03f, 0.04f));
+    addQuad(layout.frameX,
+            layout.frameY,
+            layout.frameW,
+            layout.frameH,
+            glm::vec3(0.84f, 0.84f, 0.86f),
+            backgroundTile);
+    addSolidQuad(layout.frameX + 6.0f,
+                 layout.frameY + 6.0f,
+                 layout.frameW - 12.0f,
+                 layout.frameH - 12.0f,
+                 glm::vec3(0.72f, 0.72f, 0.74f));
+    addPaperQuad(layout.viewportX,
+                 layout.viewportY,
+                 layout.viewportW,
+                 layout.viewportH,
+                 glm::vec3(0.95f, 0.91f, 0.76f));
+    addSolidQuad(layout.viewportX + 5.0f,
+                 layout.viewportY + 5.0f,
+                 layout.viewportW - 10.0f,
+                 layout.viewportH - 10.0f,
+                 glm::vec3(0.92f, 0.89f, 0.73f));
+
+    float graphX = layout.viewportX + layout.contentPadX - scroll.x;
+    float graphY = layout.viewportY + layout.contentPadY - scroll.y;
+
+    int completedCount = 0;
+    for (const AchievementTreeNodeView& node : kAchievementTreeNodes) {
+      if ((achievementMask & achievementBit(node.id)) != 0u) {
+        ++completedCount;
+      }
+    }
+
+    for (const auto& edge : kAchievementTreeEdges) {
+      const AchievementTreeNodeView& a = kAchievementTreeNodes[static_cast<size_t>(edge.first)];
+      const AchievementTreeNodeView& b = kAchievementTreeNodes[static_cast<size_t>(edge.second)];
+      float x0 = graphX + a.x * layout.spacingX + kAchievementNodeSize * 0.5f;
+      float y0 = graphY + a.y * layout.spacingY + kAchievementNodeSize * 0.5f;
+      float x1 = graphX + b.x * layout.spacingX + kAchievementNodeSize * 0.5f;
+      float y1 = graphY + b.y * layout.spacingY + kAchievementNodeSize * 0.5f;
+      bool lit = ((achievementMask & achievementBit(a.id)) != 0u) &&
+                 ((achievementMask & achievementBit(b.id)) != 0u);
+      glm::vec3 lineColor = lit ? glm::vec3(0.86f, 0.75f, 0.26f)
+                                : glm::vec3(0.22f, 0.18f, 0.12f);
+      if (std::abs(y1 - y0) < 1.0f) {
+        addClippedSolidQuad(std::min(x0, x1), y0 - 3.0f, std::abs(x1 - x0), 6.0f, lineColor);
+      } else {
+        addClippedSolidQuad(x0 - 3.0f, std::min(y0, y1), 6.0f, std::abs(y1 - y0), lineColor);
+        addClippedSolidQuad(std::min(x0, x1), y1 - 3.0f, std::abs(x1 - x0), 6.0f, lineColor);
+      }
+    }
+
+    const AchievementTreeNodeView* hoveredNode = nullptr;
+    for (const AchievementTreeNodeView& node : kAchievementTreeNodes) {
+      bool completed = (achievementMask & achievementBit(node.id)) != 0u;
+      bool available = completed || ((achievementMask & node.prereqMask) == node.prereqMask);
+      float x = graphX + node.x * layout.spacingX;
+      float y = graphY + node.y * layout.spacingY;
+      bool visible = x + kAchievementNodeSize + 8.0f >= layout.viewportX &&
+                     x - 8.0f <= layout.viewportX + layout.viewportW &&
+                     y + kAchievementNodeSize + 8.0f >= layout.viewportY &&
+                     y - 8.0f <= layout.viewportY + layout.viewportH;
+      if (!visible) {
+        continue;
+      }
+
+      bool hovered = !achievementTreeDragging &&
+                     cursorFbX >= x - 5.0f &&
+                     cursorFbX <= x + kAchievementNodeSize + 5.0f &&
+                     cursorFbY >= y - 5.0f &&
+                     cursorFbY <= y + kAchievementNodeSize + 5.0f &&
+                     cursorFbX >= layout.viewportX &&
+                     cursorFbX <= layout.viewportX + layout.viewportW &&
+                     cursorFbY >= layout.viewportY &&
+                     cursorFbY <= layout.viewportY + layout.viewportH;
+      glm::vec3 frame = completed ? glm::vec3(0.76f, 0.56f, 0.06f)
+                                  : (available ? glm::vec3(0.86f, 0.86f, 0.88f)
+                                               : glm::vec3(0.42f, 0.42f, 0.44f));
+      glm::vec3 fill = completed ? glm::vec3(0.76f, 0.56f, 0.06f)
+                                 : glm::vec3(0.80f, 0.80f, 0.82f);
+      if (hovered) {
+        frame = glm::min(frame + glm::vec3(0.08f), glm::vec3(1.0f));
+        fill = glm::min(fill + glm::vec3(0.06f), glm::vec3(1.0f));
+      }
+
+      addSolidQuad(x + 4.0f,
+                   y + 4.0f,
+                   kAchievementNodeSize + 4.0f,
+                   kAchievementNodeSize + 4.0f,
+                   glm::vec3(0.04f, 0.04f, 0.05f));
+      addQuad(x - 2.0f,
+              y - 2.0f,
+              kAchievementNodeSize + 4.0f,
+              kAchievementNodeSize + 4.0f,
+              frame,
+              backgroundTile);
+      addQuad(x + 2.0f,
+              y + 2.0f,
+              kAchievementNodeSize - 4.0f,
+              kAchievementNodeSize - 4.0f,
+              fill,
+              backgroundTile);
+      addQuad(x + 7.0f,
+              y + 7.0f,
+              kAchievementNodeSize - 14.0f,
+              kAchievementNodeSize - 14.0f,
+              glm::vec3(completed ? 1.0f : (available ? 0.94f : 0.55f)),
+              achievementIconTile(node.id));
+
+      if (hovered) {
+        hoveredNode = &node;
+      }
+    }
+
+    glm::vec3 frameMask = glm::vec3(0.72f, 0.72f, 0.74f);
+    float innerX = layout.frameX + 6.0f;
+    float innerY = layout.frameY + 6.0f;
+    float innerW = layout.frameW - 12.0f;
+    float innerH = layout.frameH - 12.0f;
+    addSolidQuad(innerX, innerY, innerW, layout.viewportY - innerY, frameMask);
+    addSolidQuad(innerX,
+                 layout.viewportY + layout.viewportH,
+                 innerW,
+                 innerY + innerH - (layout.viewportY + layout.viewportH),
+                 frameMask);
+    addSolidQuad(innerX, layout.viewportY, layout.viewportX - innerX, layout.viewportH, frameMask);
+    addSolidQuad(layout.viewportX + layout.viewportW,
+                 layout.viewportY,
+                 innerX + innerW - (layout.viewportX + layout.viewportW),
+                 layout.viewportH,
+                 frameMask);
+
+    for (int tab = 0; tab < 3; ++tab) {
+      glm::vec4 rect = achievementTreeTabRect(layout, tab);
+      bool selected = tab == activeTab;
+      glm::vec3 tabFrame = selected ? glm::vec3(0.92f, 0.92f, 0.94f)
+                                    : glm::vec3(0.76f, 0.76f, 0.78f);
+      glm::vec3 tabFill = selected ? glm::vec3(0.82f, 0.82f, 0.84f)
+                                   : glm::vec3(0.66f, 0.66f, 0.69f);
+      int iconTile = tab == 0 ? tileForBlock(kGrass)
+                   : (tab == 1 ? achievementIconTile(kAchievementCraftStonePickaxe)
+                               : achievementIconTile(kAchievementGetDiamond));
+      addSolidQuad(rect.x + 4.0f, rect.y + 6.0f, rect.z, rect.w, glm::vec3(0.04f, 0.04f, 0.05f));
+      addQuad(rect.x, rect.y, rect.z, rect.w, tabFrame, backgroundTile);
+      addQuad(rect.x + 4.0f, rect.y + 4.0f, rect.z - 8.0f, rect.w - 8.0f, tabFill, backgroundTile);
+      addQuad(rect.x + 15.0f, rect.y + 12.0f, rect.z - 30.0f, rect.w - 24.0f, glm::vec3(1.0f), iconTile);
+    }
+
+    addQuad(layout.headerX,
+            layout.headerY,
+            layout.headerW,
+            layout.headerH,
+            glm::vec3(0.82f, 0.82f, 0.84f),
+            backgroundTile);
+    addSolidQuad(layout.headerX + 5.0f,
+                 layout.headerY + 5.0f,
+                 layout.headerW - 10.0f,
+                 layout.headerH - 10.0f,
+                 glm::vec3(0.74f, 0.74f, 0.76f));
+    drawText(ru ? "ДОСТИЖЕНИЯ" : "ACHIEVEMENTS",
+             layout.headerX + 18.0f,
+             layout.headerY + 12.0f,
+             3.2f,
+             glm::vec3(0.28f, 0.28f, 0.30f),
+             false);
+    drawText((ru ? "ПРОГРЕСС " : "PROGRESS ") +
+               std::to_string(completedCount) + "/" + std::to_string(kAchievementTreeNodes.size()),
+             layout.headerX + layout.headerW - 178.0f,
+             layout.headerY + 18.0f,
+             1.85f,
+             glm::vec3(0.52f, 0.42f, 0.10f),
+             false);
+    drawText(ru ? "КОЛЕСО ИЛИ ТЯНИ МЫШКОЙ" : "WHEEL OR DRAG TO SCROLL",
+             layout.frameX + layout.frameW * 0.5f,
+             layout.frameY + layout.frameH - 28.0f,
+             1.55f,
+             glm::vec3(0.30f, 0.30f, 0.34f),
+             true);
+    drawText(ru ? "L ИЛИ ESC ЗАКРЫТЬ" : "L OR ESC TO CLOSE",
+             layout.frameX + layout.frameW - 182.0f,
+             layout.frameY + layout.frameH - 28.0f,
+             1.55f,
+             glm::vec3(0.34f, 0.34f, 0.38f),
+             false);
+
+    float maxScrollX = std::max(0.0f, layout.contentW - layout.viewportW);
+    float maxScrollY = std::max(0.0f, layout.contentH - layout.viewportH);
+    if (maxScrollX > 0.0f) {
+      float trackX = layout.viewportX + 20.0f;
+      float trackY = layout.viewportY + layout.viewportH - 12.0f;
+      float trackW = layout.viewportW - 40.0f;
+      addSolidQuad(trackX, trackY, trackW, 4.0f, glm::vec3(0.60f, 0.55f, 0.42f));
+      float thumbW = std::max(48.0f, trackW * (layout.viewportW / layout.contentW));
+      float thumbX = trackX + (trackW - thumbW) * (scroll.x / maxScrollX);
+      addSolidQuad(thumbX, trackY - 1.0f, thumbW, 6.0f, glm::vec3(0.80f, 0.70f, 0.24f));
+    }
+    if (maxScrollY > 0.0f) {
+      float trackX = layout.viewportX + layout.viewportW - 12.0f;
+      float trackY = layout.viewportY + 20.0f;
+      float trackH = layout.viewportH - 40.0f;
+      addSolidQuad(trackX, trackY, 4.0f, trackH, glm::vec3(0.60f, 0.55f, 0.42f));
+      float thumbH = std::max(36.0f, trackH * (layout.viewportH / layout.contentH));
+      float thumbY = trackY + (trackH - thumbH) * (scroll.y / maxScrollY);
+      addSolidQuad(trackX - 1.0f, thumbY, 6.0f, thumbH, glm::vec3(0.80f, 0.70f, 0.24f));
+    }
+
+    if (hoveredNode) {
+      bool completed = (achievementMask & achievementBit(hoveredNode->id)) != 0u;
+      bool available = completed || ((achievementMask & hoveredNode->prereqMask) == hoveredNode->prereqMask);
+      std::string title = achievementTitle(hoveredNode->id, ru);
+      std::string description = achievementDescription(hoveredNode->id, ru);
+      std::string state = completed
+        ? (ru ? "ГОТОВО" : "DONE")
+        : (available ? (ru ? "ДОСТУПНО" : "AVAILABLE")
+                     : (ru ? "ЗАКРЫТО" : "LOCKED"));
+      float titlePixel = 1.95f;
+      float descPixel = 1.55f;
+      float boxW = std::max({measureTextWidth(title, titlePixel),
+                             measureTextWidth(description, descPixel),
+                             measureTextWidth(state, descPixel)}) + 28.0f;
+      float boxH = titlePixel * static_cast<float>(kGlyphHeight) +
+                   descPixel * static_cast<float>(kGlyphHeight) * 2.0f + 34.0f;
+      float tipX = std::clamp(cursorFbX + 18.0f,
+                              layout.frameX + 16.0f,
+                              layout.frameX + layout.frameW - boxW - 16.0f);
+      float tipY = std::clamp(cursorFbY + 16.0f,
+                              layout.frameY + 72.0f,
+                              layout.frameY + layout.frameH - boxH - 18.0f);
+      addSolidQuad(tipX + 4.0f, tipY + 6.0f, boxW, boxH, glm::vec3(0.04f, 0.04f, 0.05f));
+      addQuad(tipX,
+              tipY,
+              boxW,
+              boxH,
+              completed ? glm::vec3(0.78f, 0.60f, 0.12f)
+                        : (available ? glm::vec3(0.84f, 0.84f, 0.86f)
+                                     : glm::vec3(0.56f, 0.56f, 0.58f)),
+              backgroundTile);
+      addPaperQuad(tipX + 4.0f,
+                   tipY + 4.0f,
+                   boxW - 8.0f,
+                   boxH - 8.0f,
+                   glm::vec3(0.95f, 0.91f, 0.76f));
+      drawText(title,
+               tipX + 12.0f,
+               tipY + 10.0f,
+               titlePixel,
+               glm::vec3(0.24f, 0.24f, 0.28f),
+               false);
+      drawText(description,
+               tipX + 12.0f,
+               tipY + 12.0f + titlePixel * static_cast<float>(kGlyphHeight) + 6.0f,
+               descPixel,
+               glm::vec3(0.34f, 0.34f, 0.38f),
+               false);
+      drawText(state,
+               tipX + 12.0f,
+               tipY + boxH - descPixel * static_cast<float>(kGlyphHeight) - 10.0f,
+               descPixel,
+               completed ? glm::vec3(0.66f, 0.50f, 0.06f)
+                         : (available ? glm::vec3(0.28f, 0.44f, 0.22f)
+                                      : glm::vec3(0.56f, 0.26f, 0.26f)),
+               false);
+    }
+  }
+
+  if (!inventoryOpen && !achievementTreeOpen) {
+    const float centerX = static_cast<float>(width) * 0.5f;
+    const float centerY = static_cast<float>(height) * 0.5f;
+    const float crossArm = 5.0f;
+    const float crossThickness = 2.6f;
+    const int crossTile = 13;
+    addQuad(centerX - crossArm, centerY - crossThickness * 0.5f,
+            crossArm * 2.0f, crossThickness, glm::vec3(0.97f), crossTile);
+    addQuad(centerX - crossThickness * 0.5f, centerY - crossArm,
+            crossThickness, crossArm * 2.0f, glm::vec3(0.97f), crossTile);
+  }
+
 }
 
 void App::composeMeshData() {
@@ -3863,6 +7681,7 @@ void App::composeMeshData() {
 }
 
 void App::refreshSelectedBlock() {
+  uint8_t previousSelectedBlock = selectedBlock;
   if (selectedSlot < 0 || selectedSlot >= static_cast<int>(hotbar.size())) {
     selectedSlot = 0;
   }
@@ -3872,12 +7691,81 @@ void App::refreshSelectedBlock() {
   } else {
     selectedBlock = stack.type;
   }
+  if (selectedBlock != previousSelectedBlock) {
+    torchLightsCacheValid = false;
+    torchLightRefreshTimer = 0.0f;
+  }
 }
 
 void App::showSelectedItemToast() {
-  selectedItemToastText = displayNameForBlock(selectedBlock, appliedSettings.language == 1);
-  selectedItemToastTimer = 2.0f;
+  showToast(displayNameForBlock(selectedBlock, appliedSettings.language == 1), 2.0f);
+}
+
+void App::showToast(const std::string& text, float duration) {
+  selectedItemToastText = text;
+  selectedItemToastTimer = std::max(0.0f, duration);
   uiDirty = true;
+}
+
+bool App::unlockAchievement(uint8_t id) {
+  AchievementId achievementId =
+    static_cast<AchievementId>(std::clamp<int>(id, 0, static_cast<int>(App::kAchievementCount) - 1));
+  uint32_t bit = achievementBit(achievementId);
+  if ((achievementMask & bit) != 0u) {
+    return false;
+  }
+  achievementMask |= bit;
+  if (achievementPopupVisible) {
+    achievementPopupQueue.push_back(static_cast<uint8_t>(achievementId));
+  } else {
+    activeAchievementPopupId = static_cast<uint8_t>(achievementId);
+    achievementPopupVisible = true;
+    achievementPopupTimer = kAchievementPopupDuration;
+  }
+  uiDirty = true;
+  return true;
+}
+
+void App::refreshAchievementsProgress() {
+  if (countStoredItem(kWood) > 0) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementGetWood));
+  }
+  if (countStoredItem(kPlanks) > 0) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementCraftPlanks));
+  }
+  if (countStoredItem(kStick) > 0) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementCraftSticks));
+  }
+  if (countStoredItem(kWorkbench) > 0 || hasWorkbenchAccess()) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementCraftWorkbench));
+  }
+  if (countStoredItem(kWoodPickaxe) > 0) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementCraftWoodPickaxe));
+  }
+  if (countStoredItem(kStone) > 0) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementGetStone));
+  }
+  if (countStoredItem(kStonePickaxe) > 0) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementCraftStonePickaxe));
+  }
+  if (countStoredItem(kFurnace) > 0 || hasFurnaceAccess()) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementCraftFurnace));
+  }
+  if (countStoredItem(kTorch) > 0) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementCraftTorch));
+  }
+  if (playerPos.y <= 36.0f) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementFindCave));
+  }
+  if (countStoredItem(kIronIngot) > 0) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementSmeltIron));
+  }
+  if (countStoredItem(kIronPickaxe) > 0) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementCraftIronPickaxe));
+  }
+  if (countStoredItem(kDiamond) > 0) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementGetDiamond));
+  }
 }
 
 void App::renderLoadingFrame(float progress, const std::string& message) {
@@ -3907,7 +7795,7 @@ void App::renderLoadingFrame(float progress, const std::string& message) {
                                     200.0f);
   proj[1][1] *= -1.0f;
   vk.setEnvironmentState(dayLightFactor, weatherIntensity, dayCycleTime);
-  vk.setCameraWorldState(eye, false);
+  vk.setCameraWorldState(eye, front, false);
   vk.setCameraMatrices(view, proj);
   vk.drawFrame();
 }
@@ -3959,6 +7847,7 @@ bool App::addToInventory(uint8_t type, uint16_t count, uint16_t* outRemaining) {
 
   if (changed) {
     refreshSelectedBlock();
+    refreshAchievementsProgress();
     uiDirty = true;
   }
 
@@ -3967,6 +7856,138 @@ bool App::addToInventory(uint8_t type, uint16_t count, uint16_t* outRemaining) {
   }
 
   return count == 0;
+}
+
+int App::countStoredItem(uint8_t type) const {
+  int total = 0;
+  auto countIn = [&](const auto& slots) {
+    for (const ItemStack& slot : slots) {
+      if (slot.type == type && slot.count > 0) {
+        total += slot.count;
+      }
+    }
+  };
+  countIn(hotbar);
+  countIn(inventory);
+  countIn(craftingSlots);
+  if (cursorStack.type == type && cursorStack.count > 0) {
+    total += cursorStack.count;
+  }
+  return total;
+}
+
+bool App::consumeStoredItem(uint8_t type, uint16_t count) {
+  if (type == kAir || count == 0) {
+    return true;
+  }
+  if (countStoredItem(type) < count) {
+    return false;
+  }
+
+  auto consumeFrom = [&](auto& slots) {
+    for (ItemStack& slot : slots) {
+      if (count == 0) {
+        return;
+      }
+      if (slot.type != type || slot.count == 0) {
+        continue;
+      }
+      uint16_t used = std::min<uint16_t>(slot.count, count);
+      slot.count = static_cast<uint16_t>(slot.count - used);
+      count = static_cast<uint16_t>(count - used);
+      if (slot.count == 0) {
+        slot.type = kAir;
+      }
+    }
+  };
+
+  if (cursorStack.type == type && cursorStack.count > 0 && count > 0) {
+    uint16_t used = std::min<uint16_t>(cursorStack.count, count);
+    cursorStack.count = static_cast<uint16_t>(cursorStack.count - used);
+    count = static_cast<uint16_t>(count - used);
+    if (cursorStack.count == 0) {
+      cursorStack.type = kAir;
+    }
+  }
+  consumeFrom(hotbar);
+  consumeFrom(inventory);
+  consumeFrom(craftingSlots);
+  refreshSelectedBlock();
+  uiDirty = true;
+  return count == 0;
+}
+
+int App::activeCraftGridSize() const {
+  return workbenchOpen ? 3 : 2;
+}
+
+bool App::tryReturnCraftingItemsToInventory() {
+  bool allReturned = true;
+  glm::ivec3 dropPos(static_cast<int>(std::floor(playerPos.x)),
+                     static_cast<int>(std::floor(playerPos.y + 1.0f)),
+                     static_cast<int>(std::floor(playerPos.z)));
+  for (ItemStack& slot : craftingSlots) {
+    if (slot.type == kAir || slot.count == 0) {
+      continue;
+    }
+    uint16_t remaining = 0;
+    addToInventory(slot.type, slot.count, &remaining);
+    if (remaining > 0) {
+      allReturned = false;
+      for (uint16_t i = 0; i < remaining; ++i) {
+        spawnDroppedItem(slot.type, dropPos);
+      }
+    }
+    slot.type = kAir;
+    slot.count = 0;
+  }
+  return allReturned;
+}
+
+void App::returnCraftingItemsToInventory() {
+  (void)tryReturnCraftingItemsToInventory();
+}
+
+bool App::hasWorkbenchAccess() const {
+  return workbenchOpen && canUseWorkbenchAt(activeWorkbenchBlock);
+}
+
+bool App::hasFurnaceAccess() const {
+  return furnaceOpen && canUseFurnaceAt(activeFurnaceBlock);
+}
+
+bool App::canUseWorkbenchAt(const glm::ivec3& block) const {
+  if (!world.inBounds(block.x, block.y, block.z)) {
+    return false;
+  }
+  if (!isWorkbenchBlock(world.getBlock(block.x, block.y, block.z))) {
+    return false;
+  }
+
+  glm::vec3 workbenchCenter(block.x + 0.5f, block.y + 0.5f, block.z + 0.5f);
+  glm::vec3 playerCenter = playerPos + glm::vec3(0.0f, 0.9f, 0.0f);
+  glm::vec3 delta = workbenchCenter - playerCenter;
+  if (std::abs(delta.y) > 3.0f) {
+    return false;
+  }
+  return glm::dot(delta, delta) <= 25.0f;
+}
+
+bool App::canUseFurnaceAt(const glm::ivec3& block) const {
+  if (!world.inBounds(block.x, block.y, block.z)) {
+    return false;
+  }
+  if (!isFurnaceBlock(world.getBlock(block.x, block.y, block.z))) {
+    return false;
+  }
+
+  glm::vec3 furnaceCenter(block.x + 0.5f, block.y + 0.5f, block.z + 0.5f);
+  glm::vec3 playerCenter = playerPos + glm::vec3(0.0f, 0.9f, 0.0f);
+  glm::vec3 delta = furnaceCenter - playerCenter;
+  if (std::abs(delta.y) > 3.0f) {
+    return false;
+  }
+  return glm::dot(delta, delta) <= 25.0f;
 }
 
 void App::spawnDroppedItem(uint8_t type, const glm::ivec3& blockPos) {
@@ -4034,7 +8055,7 @@ bool App::droppedItemCollidesAt(const glm::vec3& pos) const {
           return true;
         }
         uint8_t block = world.getBlock(x, y, z);
-        if (block != kAir && !isWaterBlock(block) && !isUnderwaterPlantBlock(block)) {
+        if (block != kAir && !isWaterBlock(block) && !isDecorationBlock(block)) {
           return true;
         }
       }
@@ -4170,7 +8191,11 @@ void App::syncDroppedItemMesh(bool force) {
     float bob = 0.14f + std::sin(item.age * 3.9f + item.spinPhase) * 0.07f;
     float spin = item.age * 2.8f + item.spinPhase;
     glm::vec3 center = item.pos + glm::vec3(0.0f, bob, 0.0f);
-    appendDroppedItemCube(vertices, indices, center, spin, item.type);
+    if (shouldRenderDroppedItemAsSprite(item.type)) {
+      appendDroppedItemSprite(vertices, indices, center, spin, item.type);
+    } else {
+      appendDroppedItemCube(vertices, indices, center, spin, item.type);
+    }
   }
 
   if (vertices.empty() || indices.empty()) {
@@ -4194,17 +8219,308 @@ void App::syncDroppedItemMesh(bool force) {
   droppedItemMeshTimer = 0.0f;
 }
 
+bool App::claimLootCache(const glm::ivec3& block) {
+  if (!world.inBounds(block.x, block.y, block.z) ||
+      world.getBlock(block.x, block.y, block.z) != kLootCache) {
+    return false;
+  }
+
+  uint32_t state = lootCacheStateForBlock(block, world.getSeed());
+  std::vector<std::pair<uint8_t, uint16_t>> rewards;
+  rewards.reserve(6);
+
+  auto addReward = [&](uint8_t type, uint16_t minCount, uint16_t maxCount, float chance) {
+    if (type == kAir || maxCount == 0 || nextUnitRandom(state) > chance) {
+      return;
+    }
+    uint16_t count = minCount;
+    if (maxCount > minCount) {
+      count = static_cast<uint16_t>(minCount +
+                                    static_cast<uint16_t>(nextUnitRandom(state) *
+                                                          static_cast<float>(maxCount - minCount + 1)));
+      count = std::clamp<uint16_t>(count, minCount, maxCount);
+    }
+    rewards.push_back({type, count});
+  };
+
+  if (nextUnitRandom(state) < 0.55f) {
+    addReward(kTorch, 3, 6, 1.0f);
+  } else {
+    addReward(kCoalOre, 2, 4, 1.0f);
+  }
+  addReward(kCoalOre, 1, 3, 0.72f);
+  if (nextUnitRandom(state) < 0.58f) {
+    addReward(kIronOre, 1, 3, 1.0f);
+  } else {
+    addReward(kIronIngot, 1, 2, 1.0f);
+  }
+  addReward(kTorch, 2, 4, 0.36f);
+  if (nextUnitRandom(state) < 0.08f) {
+    addReward(kIronPickaxe, 1, 1, 1.0f);
+  } else {
+    addReward(kStonePickaxe, 1, 1, 0.26f);
+  }
+  addReward(kDiamond, 1, 1, 0.14f);
+
+  if (rewards.empty()) {
+    rewards.push_back({kTorch, 3});
+  }
+
+  audio.playCue(AudioSystem::Cue::kChestOpen, 1.0f);
+  world.setBlock(block.x, block.y, block.z, kAir);
+  waterSimBoostTimer = std::max(waterSimBoostTimer, 2.0f);
+
+  uint8_t featuredType = rewards.front().first;
+  for (const auto& reward : rewards) {
+    if (reward.first == kDiamond || reward.first == kIronPickaxe) {
+      featuredType = reward.first;
+      break;
+    }
+  }
+
+  for (const auto& reward : rewards) {
+    uint16_t remaining = 0;
+    addToInventory(reward.first, reward.second, &remaining);
+    while (remaining > 0) {
+      spawnDroppedItem(reward.first, block);
+      --remaining;
+    }
+  }
+
+  showToast((appliedSettings.language == 1 ? "СУНДУК " : "CHEST ") +
+            displayNameForBlock(featuredType, appliedSettings.language == 1),
+            2.3f);
+  return true;
+}
+
+void App::clearInteractionOverlayMesh() {
+  pendingWorldChunkUploads.erase(kInteractionOverlayMeshKey);
+  pendingWorldChunkRemovals.insert(kInteractionOverlayMeshKey);
+  interactionOverlayUploaded = false;
+  interactionOutlineActive = false;
+  interactionPreviewActive = false;
+  interactionPreviewType = kAir;
+}
+
+void App::updateInteractionOverlayMesh() {
+  bool active = screenState == ScreenState::kPlaying &&
+                !inventoryOpen &&
+                !achievementTreeOpen &&
+                appliedSettings.blockGuides;
+  if (!active) {
+    if (interactionOverlayUploaded || interactionOutlineActive || interactionPreviewActive) {
+      clearInteractionOverlayMesh();
+    }
+    return;
+  }
+
+  glm::vec3 origin = playerPos + glm::vec3(0.0f, cameraEyeHeight(), 0.0f);
+  glm::vec3 lookDir = cameraFront();
+  RaycastHit hit = raycast(origin, lookDir, kBreakMaxDistance);
+
+  bool outlineActive = false;
+  glm::ivec3 outlineBlock{};
+  bool previewActive = false;
+  glm::ivec3 previewBlock{};
+  uint8_t previewType = kAir;
+
+  if (hit.hit) {
+    glm::ivec3 targetBlock = hit.block;
+    uint8_t hitType = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+
+    if (isWaterBlock(hitType)) {
+      glm::ivec3 lastVoxel = hit.block;
+      for (float d = 0.06f; d <= kBreakMaxDistance; d += 0.06f) {
+        glm::vec3 sample = origin + lookDir * d;
+        glm::ivec3 voxel(static_cast<int>(std::floor(sample.x)),
+                         static_cast<int>(std::floor(sample.y)),
+                         static_cast<int>(std::floor(sample.z)));
+        if (voxel == lastVoxel) {
+          continue;
+        }
+        lastVoxel = voxel;
+        if (!world.inBounds(voxel.x, voxel.y, voxel.z)) {
+          break;
+        }
+        uint8_t candidate = world.getBlock(voxel.x, voxel.y, voxel.z);
+        if (candidate == kAir || isWaterBlock(candidate) || isDecorationBlock(candidate)) {
+          continue;
+        }
+        targetBlock = voxel;
+        hitType = candidate;
+        break;
+      }
+    }
+
+    if (hitType != kAir && !isWaterBlock(hitType)) {
+      outlineActive = true;
+      outlineBlock = targetBlock;
+    }
+
+    if (selectedBlock != kAir && isPlaceableItem(selectedBlock)) {
+      glm::ivec3 target = hit.block + hit.normal;
+      if (isWaterBlock(world.getBlock(hit.block.x, hit.block.y, hit.block.z))) {
+        bool foundPlace = false;
+        glm::ivec3 lastReplaceable = hit.block;
+        glm::ivec3 lastVoxel = hit.block;
+        for (float d = 0.06f; d <= kBreakMaxDistance; d += 0.06f) {
+          glm::vec3 sample = origin + lookDir * d;
+          glm::ivec3 voxel(static_cast<int>(std::floor(sample.x)),
+                           static_cast<int>(std::floor(sample.y)),
+                           static_cast<int>(std::floor(sample.z)));
+          if (voxel == lastVoxel) {
+            continue;
+          }
+          lastVoxel = voxel;
+          if (!world.inBounds(voxel.x, voxel.y, voxel.z)) {
+            break;
+          }
+          uint8_t candidate = world.getBlock(voxel.x, voxel.y, voxel.z);
+          if (candidate == kAir || isWaterBlock(candidate) || isDecorationBlock(candidate)) {
+            lastReplaceable = voxel;
+            continue;
+          }
+
+          uint8_t replaceType = world.getBlock(lastReplaceable.x, lastReplaceable.y, lastReplaceable.z);
+          if (replaceType == kAir || isWaterBlock(replaceType) || isDecorationBlock(replaceType)) {
+            target = lastReplaceable;
+            foundPlace = true;
+          }
+          break;
+        }
+        if (!foundPlace) {
+          target = hit.block;
+        }
+      }
+
+      uint8_t targetType = world.getBlock(target.x, target.y, target.z);
+      bool targetReplaceable = targetType == kAir ||
+                               isWaterBlock(targetType) ||
+                               isDecorationBlock(targetType);
+      bool supported = true;
+      if (selectedBlock == kTorch) {
+        uint8_t below = world.getBlock(target.x, target.y - 1, target.z);
+        supported = target.y > world.getGenerationSettings().minY &&
+                    below != kAir &&
+                    !isWaterBlock(below) &&
+                    !isDecorationBlock(below);
+      }
+      glm::vec3 adjustedPlayerPos = playerPos;
+      if (world.inBounds(target.x, target.y, target.z) &&
+          targetReplaceable &&
+          supported &&
+          canPlaceBlockAt(target.x, target.y, target.z, selectedBlock, &adjustedPlayerPos)) {
+        previewActive = true;
+        previewBlock = target;
+        previewType = selectedBlock;
+      }
+    }
+  }
+
+  if (!outlineActive && !previewActive) {
+    if (interactionOverlayUploaded || interactionOutlineActive || interactionPreviewActive) {
+      clearInteractionOverlayMesh();
+    }
+    return;
+  }
+
+  bool unchanged = interactionOverlayUploaded &&
+                   interactionOutlineActive == outlineActive &&
+                   interactionPreviewActive == previewActive &&
+                   (!outlineActive || interactionOutlineBlock == outlineBlock) &&
+                   (!previewActive || (interactionPreviewBlock == previewBlock &&
+                                       interactionPreviewType == previewType));
+  if (unchanged) {
+    return;
+  }
+
+  std::vector<Vertex> vertices;
+  std::vector<uint32_t> indices;
+  vertices.reserve(768);
+  indices.reserve(1152);
+
+  if (outlineActive) {
+    glm::vec3 minCorner = glm::vec3(outlineBlock) - glm::vec3(0.012f);
+    glm::vec3 maxCorner = glm::vec3(outlineBlock) + glm::vec3(1.012f);
+    appendOverlayWireCube(vertices, indices, minCorner, maxCorner, 0.014f, glm::vec3(0.96f, 0.80f, 0.22f));
+  }
+  if (previewActive) {
+    glm::vec3 tint = glm::mix(droppedItemColor(previewType), glm::vec3(0.96f), 0.28f);
+    glm::vec3 minCorner = glm::vec3(previewBlock) + glm::vec3(0.028f);
+    glm::vec3 maxCorner = glm::vec3(previewBlock) + glm::vec3(0.972f);
+    appendOverlayWireCube(vertices, indices, minCorner, maxCorner, 0.018f, tint);
+  }
+
+  if (vertices.empty() || indices.empty()) {
+    clearInteractionOverlayMesh();
+    return;
+  }
+
+  VulkanContext::WorldChunkMeshUpload upload;
+  upload.key = kInteractionOverlayMeshKey;
+  upload.vertices = std::move(vertices);
+  upload.indices = std::move(indices);
+  pendingWorldChunkRemovals.erase(kInteractionOverlayMeshKey);
+  pendingWorldChunkUploads[kInteractionOverlayMeshKey] = std::move(upload);
+  interactionOverlayUploaded = true;
+  interactionOutlineActive = outlineActive;
+  interactionOutlineBlock = outlineBlock;
+  interactionPreviewActive = previewActive;
+  interactionPreviewBlock = previewBlock;
+  interactionPreviewType = previewType;
+}
+
+void App::refreshCursorMode() {
+  if (!window) {
+    return;
+  }
+  bool lockCursor = screenState == ScreenState::kPlaying &&
+                    !inventoryOpen &&
+                    !achievementTreeOpen;
+  glfwSetInputMode(window, GLFW_CURSOR, lockCursor ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+}
+
+void App::setAchievementTreeOpen(bool open) {
+  if (achievementTreeOpen == open) {
+    return;
+  }
+  if (open && inventoryOpen) {
+    setInventoryOpen(false);
+  }
+  achievementTreeOpen = open;
+  if (achievementTreeOpen && window) {
+    AchievementTreeUiLayout layout = makeAchievementTreeLayout(width, height);
+    glm::vec2 clamped = clampAchievementTreeScroll(layout, {achievementTreeScrollX, achievementTreeScrollY});
+    achievementTreeScrollX = clamped.x;
+    achievementTreeScrollY = clamped.y;
+    achievementTreeDragging = false;
+    double xpos = 0.0;
+    double ypos = 0.0;
+    glfwGetCursorPos(window, &xpos, &ypos);
+    glm::vec2 fb = cursorToFramebuffer(xpos, ypos);
+    cursorFbX = fb.x;
+    cursorFbY = fb.y;
+    achievementTreeDragLastX = cursorFbX;
+    achievementTreeDragLastY = cursorFbY;
+  }
+  if (!achievementTreeOpen) {
+    achievementTreeDragging = false;
+    firstMouse = true;
+  }
+  refreshCursorMode();
+  uiDirty = true;
+}
+
 void App::setInventoryOpen(bool open) {
   if (inventoryOpen == open) {
     return;
   }
 
   inventoryOpen = open;
-  if (window) {
-    glfwSetInputMode(window,
-                     GLFW_CURSOR,
-                     inventoryOpen ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+  if (inventoryOpen) {
+    achievementTreeOpen = false;
   }
+  refreshCursorMode();
   if (inventoryOpen && window) {
     double xpos = 0.0;
     double ypos = 0.0;
@@ -4214,6 +8530,9 @@ void App::setInventoryOpen(bool open) {
     cursorFbY = fb.y;
   }
   if (!inventoryOpen) {
+    workbenchOpen = false;
+    furnaceOpen = false;
+    craftResultFlashTimer = 0.0f;
     if (cursorStack.count > 0 && cursorStack.type != kAir) {
       uint16_t remaining = 0;
       addToInventory(cursorStack.type, cursorStack.count, &remaining);
@@ -4224,6 +8543,7 @@ void App::setInventoryOpen(bool open) {
         cursorStack.count = remaining;
       }
     }
+    returnCraftingItemsToInventory();
     firstMouse = true;
   }
   uiDirty = true;
@@ -4311,111 +8631,383 @@ bool App::hitTestInventory(float x, float y, int& outIndex) const {
   return true;
 }
 
+bool App::hitTestCraftInput(float x, float y, int& outIndex) const {
+  if (!inventoryOpen || width <= 0 || height <= 0) {
+    return false;
+  }
+
+  CraftUiLayout layout = makeCraftUiLayout(width, height, activeCraftGridSize());
+  if (x < layout.inputX || x > layout.inputX + layout.inputWidth ||
+      y < layout.inputY || y > layout.inputY + layout.inputHeight) {
+    return false;
+  }
+
+  float localX = x - layout.inputX;
+  float localY = y - layout.inputY;
+  int col = static_cast<int>(localX / (kSlotSize + kSlotPadding));
+  int row = static_cast<int>(localY / (kSlotSize + kSlotPadding));
+  if (col < 0 || col >= layout.gridSize || row < 0 || row >= layout.gridSize) {
+    return false;
+  }
+
+  float colX = static_cast<float>(col) * (kSlotSize + kSlotPadding);
+  float rowY = static_cast<float>(row) * (kSlotSize + kSlotPadding);
+  if (localX > colX + kSlotSize || localY > rowY + kSlotSize) {
+    return false;
+  }
+
+  outIndex = craftingSlotIndex(row, col);
+  return true;
+}
+
+bool App::hitTestCraftResult(float x, float y) const {
+  if (!inventoryOpen || width <= 0 || height <= 0) {
+    return false;
+  }
+
+  CraftUiLayout layout = makeCraftUiLayout(width, height, activeCraftGridSize());
+  return x >= layout.resultX &&
+         x <= layout.resultX + kSlotSize &&
+         y >= layout.resultY &&
+         y <= layout.resultY + kSlotSize;
+}
+
+bool App::hitTestFurnaceSlot(float x, float y, int& outIndex) const {
+  if (!inventoryOpen || !furnaceOpen || width <= 0 || height <= 0) {
+    return false;
+  }
+
+  FurnaceUiLayout layout = makeFurnaceUiLayout(width, height);
+  const std::array<std::pair<float, float>, App::kFurnaceSlotCount> slots = {{
+    {layout.inputX, layout.inputY},
+    {layout.fuelX, layout.fuelY},
+    {layout.outputX, layout.outputY}
+  }};
+
+  for (size_t i = 0; i < slots.size(); ++i) {
+    float sx = slots[i].first;
+    float sy = slots[i].second;
+    if (x >= sx && x <= sx + kSlotSize &&
+        y >= sy && y <= sy + kSlotSize) {
+      outIndex = static_cast<int>(i);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 bool App::handleInventoryClick(double xpos, double ypos, bool rightClick) {
   glm::vec2 pos = cursorToFramebuffer(xpos, ypos);
   cursorFbX = pos.x;
   cursorFbY = pos.y;
-  int index = -1;
-  bool onHotbar = hitTestHotbar(pos.x, pos.y, index);
-  bool onInventory = false;
-  if (!onHotbar) {
-    onInventory = hitTestInventory(pos.x, pos.y, index);
-  }
-
-  if (!onHotbar && !onInventory) {
-    return false;
-  }
-
-  bool selectionChanged = false;
-  if (onHotbar) {
-    if (selectedSlot != index) {
-      selectedSlot = index;
-      selectionChanged = true;
-      refreshSelectedBlock();
-      showSelectedItemToast();
-    }
-  }
 
   auto clearStack = [](ItemStack& stack) {
     stack.type = kAir;
     stack.count = 0;
   };
 
-  ItemStack& slot = onHotbar
-    ? hotbar[static_cast<size_t>(index)]
-    : inventory[static_cast<size_t>(index)];
+  auto interactWithSlot = [&](ItemStack& slot) {
+    bool slotEmpty = (slot.count == 0 || slot.type == kAir);
+    bool cursorEmpty = (cursorStack.count == 0 || cursorStack.type == kAir);
 
-  bool slotEmpty = (slot.count == 0 || slot.type == kAir);
-  bool cursorEmpty = (cursorStack.count == 0 || cursorStack.type == kAir);
+    if (!rightClick) {
+      if (cursorEmpty) {
+        if (slotEmpty) {
+          return false;
+        }
+        cursorStack = slot;
+        clearStack(slot);
+        return true;
+      }
 
-  if (!rightClick) {
+      if (slotEmpty) {
+        slot = cursorStack;
+        clearStack(cursorStack);
+        return true;
+      }
+
+      if (slot.type == cursorStack.type) {
+        uint16_t space = static_cast<uint16_t>(kMaxStack - slot.count);
+        if (space == 0) {
+          return false;
+        }
+        uint16_t toMove = std::min(space, cursorStack.count);
+        slot.count = static_cast<uint16_t>(slot.count + toMove);
+        cursorStack.count = static_cast<uint16_t>(cursorStack.count - toMove);
+        if (cursorStack.count == 0) {
+          cursorStack.type = kAir;
+        }
+        return true;
+      }
+
+      std::swap(slot, cursorStack);
+      return true;
+    }
+
     if (cursorEmpty) {
       if (slotEmpty) {
         return false;
       }
-      cursorStack = slot;
-      clearStack(slot);
+      uint16_t take = static_cast<uint16_t>((slot.count + 1) / 2);
+      cursorStack.type = slot.type;
+      cursorStack.count = take;
+      slot.count = static_cast<uint16_t>(slot.count - take);
+      if (slot.count == 0) {
+        slot.type = kAir;
+      }
       return true;
     }
 
     if (slotEmpty) {
-      slot = cursorStack;
-      clearStack(cursorStack);
-      return true;
-    }
-
-    if (slot.type == cursorStack.type) {
-      uint16_t space = static_cast<uint16_t>(kMaxStack - slot.count);
-      if (space == 0) {
-        return false;
-      }
-      uint16_t toMove = std::min(space, cursorStack.count);
-      slot.count = static_cast<uint16_t>(slot.count + toMove);
-      cursorStack.count = static_cast<uint16_t>(cursorStack.count - toMove);
+      slot.type = cursorStack.type;
+      slot.count = 1;
+      cursorStack.count = static_cast<uint16_t>(cursorStack.count - 1);
       if (cursorStack.count == 0) {
         cursorStack.type = kAir;
       }
       return true;
     }
 
-    std::swap(slot, cursorStack);
-    return true;
-  }
+    if (slot.type == cursorStack.type && slot.count < kMaxStack) {
+      slot.count = static_cast<uint16_t>(slot.count + 1);
+      cursorStack.count = static_cast<uint16_t>(cursorStack.count - 1);
+      if (cursorStack.count == 0) {
+        cursorStack.type = kAir;
+      }
+      return true;
+    }
 
-  if (cursorEmpty) {
+    return false;
+  };
+
+  auto takeOutputFromSlot = [&](ItemStack& slot) {
+    bool slotEmpty = (slot.count == 0 || slot.type == kAir);
+    bool cursorEmpty = (cursorStack.count == 0 || cursorStack.type == kAir);
     if (slotEmpty) {
       return false;
     }
-    uint16_t take = static_cast<uint16_t>((slot.count + 1) / 2);
-    cursorStack.type = slot.type;
-    cursorStack.count = take;
-    slot.count = static_cast<uint16_t>(slot.count - take);
+
+    if (!rightClick) {
+      if (cursorEmpty) {
+        cursorStack = slot;
+        clearStack(slot);
+        return true;
+      }
+      if (cursorStack.type != slot.type || cursorStack.count >= kMaxStack) {
+        return false;
+      }
+      uint16_t space = static_cast<uint16_t>(kMaxStack - cursorStack.count);
+      uint16_t toMove = std::min(space, slot.count);
+      cursorStack.count = static_cast<uint16_t>(cursorStack.count + toMove);
+      slot.count = static_cast<uint16_t>(slot.count - toMove);
+      if (slot.count == 0) {
+        slot.type = kAir;
+      }
+      return toMove > 0;
+    }
+
+    if (cursorEmpty) {
+      cursorStack.type = slot.type;
+      cursorStack.count = 1;
+      slot.count = static_cast<uint16_t>(slot.count - 1);
+      if (slot.count == 0) {
+        slot.type = kAir;
+      }
+      return true;
+    }
+    if (cursorStack.type != slot.type || cursorStack.count >= kMaxStack) {
+      return false;
+    }
+    cursorStack.count = static_cast<uint16_t>(cursorStack.count + 1);
+    slot.count = static_cast<uint16_t>(slot.count - 1);
     if (slot.count == 0) {
       slot.type = kAir;
     }
     return true;
+  };
+
+  if (furnaceOpen) {
+    int furnaceIndex = -1;
+    if (hitTestFurnaceSlot(pos.x, pos.y, furnaceIndex)) {
+      App::FurnaceState& furnace = furnaceStates[furnaceKeyForBlock(activeFurnaceBlock)];
+      ItemStack& slot =
+        furnaceIndex == 0 ? furnace.input :
+        furnaceIndex == 1 ? furnace.fuel :
+                            furnace.output;
+      bool changed = false;
+
+      if (furnaceIndex == 2) {
+        changed = takeOutputFromSlot(slot);
+      } else {
+        auto canPlaceType = [&](uint8_t type) {
+          if (type == kAir) {
+            return false;
+          }
+          if (furnaceIndex == 0) {
+            uint8_t resultType = kAir;
+            return furnaceResultForInput(type, resultType);
+          }
+          return isFurnaceFuel(type);
+        };
+
+        bool slotEmpty = (slot.count == 0 || slot.type == kAir);
+        bool cursorEmpty = (cursorStack.count == 0 || cursorStack.type == kAir);
+
+        if (!rightClick) {
+          if (cursorEmpty) {
+            if (!slotEmpty) {
+              cursorStack = slot;
+              clearStack(slot);
+              changed = true;
+            }
+          } else if (slotEmpty) {
+            if (canPlaceType(cursorStack.type)) {
+              slot = cursorStack;
+              clearStack(cursorStack);
+              changed = true;
+            }
+          } else if (slot.type == cursorStack.type) {
+            uint16_t space = static_cast<uint16_t>(kMaxStack - slot.count);
+            if (space > 0) {
+              uint16_t toMove = std::min(space, cursorStack.count);
+              slot.count = static_cast<uint16_t>(slot.count + toMove);
+              cursorStack.count = static_cast<uint16_t>(cursorStack.count - toMove);
+              if (cursorStack.count == 0) {
+                cursorStack.type = kAir;
+              }
+              changed = toMove > 0;
+            }
+          } else if (canPlaceType(cursorStack.type)) {
+            std::swap(slot, cursorStack);
+            changed = true;
+          }
+        } else {
+          if (cursorEmpty) {
+            if (!slotEmpty) {
+              uint16_t take = static_cast<uint16_t>((slot.count + 1) / 2);
+              cursorStack.type = slot.type;
+              cursorStack.count = take;
+              slot.count = static_cast<uint16_t>(slot.count - take);
+              if (slot.count == 0) {
+                slot.type = kAir;
+              }
+              changed = true;
+            }
+          } else if ((slotEmpty || slot.type == cursorStack.type) &&
+                     canPlaceType(cursorStack.type) &&
+                     (slotEmpty || slot.count < kMaxStack)) {
+            if (slotEmpty) {
+              slot.type = cursorStack.type;
+              slot.count = 1;
+            } else {
+              slot.count = static_cast<uint16_t>(slot.count + 1);
+            }
+            cursorStack.count = static_cast<uint16_t>(cursorStack.count - 1);
+            if (cursorStack.count == 0) {
+              cursorStack.type = kAir;
+            }
+            changed = true;
+          }
+        }
+      }
+
+      if (changed) {
+        refreshAchievementsProgress();
+        uiDirty = true;
+      }
+      return changed;
+    }
   }
 
-  if (slotEmpty) {
-    slot.type = cursorStack.type;
-    slot.count = 1;
-    cursorStack.count = static_cast<uint16_t>(cursorStack.count - 1);
-    if (cursorStack.count == 0) {
-      cursorStack.type = kAir;
+  if (!furnaceOpen && hitTestCraftResult(pos.x, pos.y)) {
+    CraftMatch match{};
+    if (!findCraftMatch(craftingSlots, activeCraftGridSize(), match)) {
+      return false;
     }
+    if (cursorStack.count > 0 && cursorStack.type != match.output) {
+      return false;
+    }
+    int cursorSpace = cursorStack.count > 0
+      ? static_cast<int>(kMaxStack - cursorStack.count)
+      : static_cast<int>(kMaxStack);
+    int maxByCursor = match.outputCount > 0 ? cursorSpace / static_cast<int>(match.outputCount) : 0;
+    int craftCount = rightClick ? match.maxCrafts : 1;
+    craftCount = std::min(craftCount, match.maxCrafts);
+    craftCount = std::min(craftCount, maxByCursor);
+    if (craftCount <= 0) {
+      return false;
+    }
+
+    if (cursorStack.count == 0 || cursorStack.type == kAir) {
+      cursorStack.type = match.output;
+      cursorStack.count = 0;
+    }
+    cursorStack.count = static_cast<uint16_t>(
+      cursorStack.count + craftCount * static_cast<int>(match.outputCount));
+
+    for (size_t i = 0; i < craftingSlots.size(); ++i) {
+      uint8_t useCount = match.useCounts[i];
+      if (useCount == 0) {
+        continue;
+      }
+      ItemStack& slot = craftingSlots[i];
+      uint16_t consumed = static_cast<uint16_t>(craftCount * static_cast<int>(useCount));
+      slot.count = static_cast<uint16_t>(slot.count - consumed);
+      if (slot.count == 0) {
+        slot.type = kAir;
+      }
+    }
+
+    craftResultFlashTimer = kCraftResultFlashDuration;
+    audio.playCue(AudioSystem::Cue::kCraftComplete, rightClick ? 1.08f : 1.0f);
+    refreshAchievementsProgress();
+    uiDirty = true;
     return true;
   }
 
-  if (slot.type == cursorStack.type && slot.count < kMaxStack) {
-    slot.count = static_cast<uint16_t>(slot.count + 1);
-    cursorStack.count = static_cast<uint16_t>(cursorStack.count - 1);
-    if (cursorStack.count == 0) {
-      cursorStack.type = kAir;
+  int index = -1;
+  bool onCraft = !furnaceOpen && hitTestCraftInput(pos.x, pos.y, index);
+  bool onHotbar = false;
+  bool onInventory = false;
+  if (!onCraft) {
+    onHotbar = hitTestHotbar(pos.x, pos.y, index);
+    if (!onHotbar) {
+      onInventory = hitTestInventory(pos.x, pos.y, index);
     }
-    return true;
   }
 
-  return selectionChanged;
+  if (!onCraft && !onHotbar && !onInventory) {
+    return false;
+  }
+
+  bool selectionChanged = false;
+  if (onHotbar && selectedSlot != index) {
+    selectedSlot = index;
+    selectionChanged = true;
+  }
+
+  ItemStack& slot = onCraft
+    ? craftingSlots[static_cast<size_t>(index)]
+    : (onHotbar
+         ? hotbar[static_cast<size_t>(index)]
+         : inventory[static_cast<size_t>(index)]);
+
+  bool changed = interactWithSlot(slot);
+
+  if (onHotbar && (changed || selectionChanged)) {
+    refreshSelectedBlock();
+    if (selectionChanged) {
+      showSelectedItemToast();
+    }
+  }
+
+  if (changed) {
+    refreshAchievementsProgress();
+    uiDirty = true;
+  }
+
+  return changed || selectionChanged;
 }
 
 bool App::collidesAt(const glm::vec3& pos) const {
@@ -4449,7 +9041,52 @@ bool App::collidesAt(const glm::vec3& pos) const {
           return true;
         }
         uint8_t block = world.getBlock(x, y, z);
-        if (block != kAir && !isWaterBlock(block) && !isUnderwaterPlantBlock(block)) {
+        if (block != kAir && !isWaterBlock(block) && !isDecorationBlock(block)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+bool App::collidesAtWithPlacedBlock(const glm::vec3& pos,
+                                    int blockX,
+                                    int blockY,
+                                    int blockZ,
+                                    uint8_t placedType) const {
+  const float halfWidth = 0.3f;
+  const float height = 1.8f;
+
+  glm::vec3 min = {pos.x - halfWidth, pos.y, pos.z - halfWidth};
+  glm::vec3 max = {pos.x + halfWidth, pos.y + height, pos.z + halfWidth};
+
+  int minX = static_cast<int>(std::floor(min.x));
+  int maxX = static_cast<int>(std::floor(max.x));
+  int minY = static_cast<int>(std::floor(min.y));
+  int maxY = static_cast<int>(std::floor(max.y));
+  int minZ = static_cast<int>(std::floor(min.z));
+  int maxZ = static_cast<int>(std::floor(max.z));
+
+  auto chunkReadyAt = [&](int worldX, int worldZ) {
+    int cx = static_cast<int>(std::floor(static_cast<float>(worldX) / static_cast<float>(kChunkSize)));
+    int cz = static_cast<int>(std::floor(static_cast<float>(worldZ) / static_cast<float>(kChunkSize)));
+    return world.getChunkGenerationStatus(cx, cz) >= ChunkGenStatus::kNoise;
+  };
+
+  for (int y = minY; y <= maxY; ++y) {
+    for (int z = minZ; z <= maxZ; ++z) {
+      for (int x = minX; x <= maxX; ++x) {
+        if (!world.inBounds(x, y, z)) {
+          return true;
+        }
+        if (!chunkReadyAt(x, z)) {
+          return true;
+        }
+        bool placedBlock = x == blockX && y == blockY && z == blockZ;
+        uint8_t block = placedBlock ? placedType : world.getBlock(x, y, z);
+        if (block != kAir && !isWaterBlock(block) && !isDecorationBlock(block)) {
           return true;
         }
       }
@@ -4500,12 +9137,45 @@ bool App::blockIntersectsPlayer(int x, int y, int z) const {
          z + 1.0f > min.z && z < max.z;
 }
 
+bool App::canPlaceBlockAt(int x, int y, int z, uint8_t placedType, glm::vec3* outAdjustedPlayerPos) const {
+  glm::vec3 adjustedPos = playerPos;
+  if (placedType == kAir || isWaterBlock(placedType) || isDecorationBlock(placedType)) {
+    if (outAdjustedPlayerPos) {
+      *outAdjustedPlayerPos = adjustedPos;
+    }
+    return true;
+  }
+  if (!blockIntersectsPlayer(x, y, z)) {
+    if (outAdjustedPlayerPos) {
+      *outAdjustedPlayerPos = adjustedPos;
+    }
+    return true;
+  }
+
+  float blockTop = static_cast<float>(y + 1) + 0.001f;
+  if (blockTop <= playerPos.y + 1.05f) {
+    adjustedPos.y = std::max(playerPos.y, blockTop);
+    if (!collidesAtWithPlacedBlock(adjustedPos, x, y, z, placedType)) {
+      if (outAdjustedPlayerPos) {
+        *outAdjustedPlayerPos = adjustedPos;
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
 glm::vec3 App::cameraFront() const {
   glm::vec3 front;
   front.x = std::cos(glm::radians(yaw)) * std::cos(glm::radians(pitch));
   front.y = std::sin(glm::radians(pitch));
   front.z = std::sin(glm::radians(yaw)) * std::cos(glm::radians(pitch));
   return glm::normalize(front);
+}
+
+float App::cameraEyeHeight() const {
+  return crouching ? 1.52f : 1.8f;
 }
 
 App::RaycastHit App::raycast(const glm::vec3& origin,
@@ -4555,7 +9225,8 @@ App::RaycastHit App::raycast(const glm::vec3& origin,
       return result;
     }
 
-    if (world.getBlock(voxel.x, voxel.y, voxel.z) != kAir) {
+    uint8_t block = world.getBlock(voxel.x, voxel.y, voxel.z);
+    if (block != kAir && !isWaterBlock(block)) {
       result.hit = true;
       result.block = voxel;
       result.normal = -lastStep;
@@ -4597,10 +9268,14 @@ void App::cleanup() {
        screenState == ScreenState::kPaused ||
        screenState == ScreenState::kLoadingWorld) &&
       !currentWorldPath.empty()) {
+    if (inventoryOpen) {
+      setInventoryOpen(false);
+    }
     saveCurrentPlayerState();
     saveWorldWithWarning(world, currentWorldPath, "app cleanup");
   }
   saveSettingsWithWarning("app cleanup");
+  audio.shutdown();
   vk.cleanup();
 
   if (window) {
@@ -4609,6 +9284,21 @@ void App::cleanup() {
   }
 
   glfwTerminate();
+}
+
+void App::windowSizeCallback(GLFWwindow* window, int width, int height) {
+  auto* app = reinterpret_cast<App*>(glfwGetWindowUserPointer(window));
+  if (!app) {
+    return;
+  }
+
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+
+  app->width = width;
+  app->height = height;
+  app->uiDirty = true;
 }
 
 void App::framebufferResizeCallback(GLFWwindow* window, int width, int height) {
@@ -4621,10 +9311,96 @@ void App::framebufferResizeCallback(GLFWwindow* window, int width, int height) {
     return;
   }
 
-  app->width = width;
-  app->height = height;
+  app->framebufferWidth = width;
+  app->framebufferHeight = height;
   app->framebufferResized = true;
   app->uiDirty = true;
+}
+
+void App::scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
+  (void)xoffset;
+
+  auto* app = reinterpret_cast<App*>(glfwGetWindowUserPointer(window));
+  if (!app || yoffset == 0.0) {
+    return;
+  }
+
+  int direction = yoffset > 0.0 ? -1 : 1;
+  int stepCount = scrollStepsFromOffset(yoffset);
+  int delta = direction * stepCount;
+
+  if (app->achievementTreeOpen && app->screenState == ScreenState::kPlaying) {
+    AchievementTreeUiLayout layout = makeAchievementTreeLayout(app->width, app->height);
+    glm::vec2 scroll =
+      clampAchievementTreeScroll(layout, {app->achievementTreeScrollX, app->achievementTreeScrollY});
+    bool shiftPressed =
+      glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+      glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+    float horizontalStep = 88.0f * static_cast<float>(stepCount);
+    float verticalStep = 72.0f * static_cast<float>(stepCount);
+    if (shiftPressed || layout.contentH > layout.viewportH + 8.0f) {
+      scroll.y += verticalStep * static_cast<float>(delta);
+    } else {
+      scroll.x += horizontalStep * static_cast<float>(delta);
+    }
+    scroll = clampAchievementTreeScroll(layout, scroll);
+    if (std::abs(scroll.x - app->achievementTreeScrollX) > 0.01f ||
+        std::abs(scroll.y - app->achievementTreeScrollY) > 0.01f) {
+      app->achievementTreeScrollX = scroll.x;
+      app->achievementTreeScrollY = scroll.y;
+      app->uiDirty = true;
+    }
+  } else if (app->screenState == ScreenState::kWorldSelect) {
+    int rowCount = static_cast<int>(app->worldSelectEntries.size()) + 2;
+    if (rowCount <= 0) {
+      return;
+    }
+    int nextSelection = std::clamp(app->worldSelectSelection + delta, 0, rowCount - 1);
+    if (nextSelection == app->worldSelectSelection) {
+      return;
+    }
+    app->worldSelectSelection = nextSelection;
+    int visibleRows = computeWorldSelectVisibleRows(app->height, rowCount);
+    if (rowCount <= visibleRows) {
+      app->worldSelectScroll = 0;
+    } else {
+      int maxScroll = rowCount - visibleRows;
+      if (app->worldSelectSelection < app->worldSelectScroll) {
+        app->worldSelectScroll = app->worldSelectSelection;
+      } else if (app->worldSelectSelection >= app->worldSelectScroll + visibleRows) {
+        app->worldSelectScroll = app->worldSelectSelection - visibleRows + 1;
+      }
+      app->worldSelectScroll = std::clamp(app->worldSelectScroll, 0, maxScroll);
+    }
+    app->updateWindowTitle();
+    app->uiDirty = true;
+  } else if (app->screenState == ScreenState::kSettings) {
+    int focusArea = std::clamp(app->settingsFocusArea,
+                               static_cast<int>(SettingsFocusArea::kCategories),
+                               static_cast<int>(SettingsFocusArea::kActions));
+    if (focusArea == static_cast<int>(SettingsFocusArea::kCategories)) {
+      int nextCategory = std::clamp(app->settingsCategory + delta, 0, kSettingsCategoryCount - 1);
+      if (nextCategory == app->settingsCategory) {
+        return;
+      }
+      app->settingsCategory = nextCategory;
+      app->settingsOptionSelection = 0;
+    } else if (focusArea == static_cast<int>(SettingsFocusArea::kActions)) {
+      int nextAction = std::clamp(app->settingsActionSelection + delta, 0, kSettingsActionCount - 1);
+      if (nextAction == app->settingsActionSelection) {
+        return;
+      }
+      app->settingsActionSelection = nextAction;
+    } else {
+      int optionCount = settingsEntryCountForCategory(app->settingsCategory);
+      int nextOption = std::clamp(app->settingsOptionSelection + delta, 0, std::max(0, optionCount - 1));
+      if (nextOption == app->settingsOptionSelection) {
+        return;
+      }
+      app->settingsOptionSelection = nextOption;
+    }
+    app->uiDirty = true;
+  }
 }
 
 void App::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
@@ -4640,13 +9416,11 @@ void App::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
     return;
   }
 
-  if (app->inventoryOpen) {
+  if (app->inventoryOpen || app->achievementTreeOpen) {
     glm::vec2 fb = app->cursorToFramebuffer(xpos, ypos);
     app->cursorFbX = fb.x;
     app->cursorFbY = fb.y;
-    if (app->cursorStack.count > 0 && app->cursorStack.type != kAir) {
-      app->uiDirty = true;
-    }
+    app->uiDirty = true;
     app->lastMouseX = static_cast<float>(xpos);
     app->lastMouseY = static_cast<float>(ypos);
     return;

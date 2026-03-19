@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 # CMake 4.x dropped compatibility with <3.5. Keep deps like older GLM working.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
-set(CUBEOS_VERSION "0.2.1")
+set(CUBEOS_VERSION "0.2.2")
 set(CUBEOS_MACOS_APP_NAME "CubeOS v${CUBEOS_VERSION} Beta")
 
 project(cubeos_voxel VERSION ${CUBEOS_VERSION} LANGUAGES C CXX)
@@ -107,12 +107,14 @@ endif()
 add_executable(cubeos_voxel
   src/main.cpp
   src/app.cpp
+  src/audio.cpp
   src/vk_context.cpp
   src/world.cpp
 )
 
 target_include_directories(cubeos_voxel PRIVATE src)
 target_include_directories(cubeos_voxel PRIVATE ${CUBEOS_VULKAN_INCLUDE_DIR})
+target_include_directories(cubeos_voxel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party)
 target_link_libraries(cubeos_voxel PRIVATE glfw volk::volk glm::glm Threads::Threads)
 target_compile_definitions(cubeos_voxel PRIVATE GLFW_INCLUDE_NONE)
 target_compile_definitions(cubeos_voxel PRIVATE GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
@@ -133,6 +135,15 @@ endif()
 
 if (APPLE)
   target_compile_definitions(cubeos_voxel PRIVATE VK_USE_PLATFORM_MACOS_MVK)
+  target_link_libraries(cubeos_voxel PRIVATE
+    "-framework AudioToolbox"
+    "-framework AudioUnit"
+    "-framework CoreAudio"
+    "-framework CoreGraphics"
+    "-framework CoreText"
+    "-framework CoreFoundation"
+    "-framework ImageIO"
+  )
   set_target_properties(cubeos_voxel PROPERTIES
     MACOSX_BUNDLE TRUE
     OUTPUT_NAME "${CUBEOS_MACOS_APP_NAME}"
@@ -154,11 +165,35 @@ if (APPLE)
   endif()
 endif()
 
+if (UNIX AND NOT APPLE)
+  target_link_libraries(cubeos_voxel PRIVATE dl m)
+endif()
+
 if (CUBEOS_BUILD_SHADERS)
   add_custom_command(
     TARGET cubeos_voxel POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:cubeos_voxel>/shaders
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SHADER_BINARIES} $<TARGET_FILE_DIR:cubeos_voxel>/shaders
+  )
+endif()
+
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/textures")
+  add_custom_command(
+    TARGET cubeos_voxel POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:cubeos_voxel>/textures
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/assets/textures"
+      "$<TARGET_FILE_DIR:cubeos_voxel>/textures"
+  )
+endif()
+
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/audio")
+  add_custom_command(
+    TARGET cubeos_voxel POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:cubeos_voxel>/audio
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/assets/audio"
+      "$<TARGET_FILE_DIR:cubeos_voxel>/audio"
   )
 endif()
 

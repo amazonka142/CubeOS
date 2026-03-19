@@ -10,9 +10,13 @@ layout(binding = 0) uniform UBO {
   mat4 model;
   mat4 view;
   mat4 proj;
+  mat4 invView;
+  mat4 invProj;
   vec4 params;
   vec4 cameraData;
   vec4 weatherData;
+  vec4 torchMeta;
+  vec4 torchLights[16];
 } ubo;
 
 layout(binding = 1) uniform sampler2D texSampler;
@@ -78,9 +82,9 @@ void main() {
     float t = ubo.params.x;
 
     vec4 clipPos = vec4(ndc, 1.0, 1.0);
-    vec4 viewPos = inverse(ubo.proj) * clipPos;
+    vec4 viewPos = ubo.invProj * clipPos;
     vec3 viewDir = normalize(viewPos.xyz / max(viewPos.w, 0.0001));
-    vec3 worldDir = normalize((inverse(ubo.view) * vec4(viewDir, 0.0)).xyz);
+    vec3 worldDir = normalize((ubo.invView * vec4(viewDir, 0.0)).xyz);
 
     if (worldDir.y <= 0.03) {
       outColor = vec4(0.0);
@@ -159,10 +163,31 @@ void main() {
   if (vUiPass < 0.5) {
     float ambient = mix(0.24, 1.0, daylight);
     ambient *= mix(1.0, 0.78, weather);
+
+    float torchLight = 0.0;
+    int torchCount = int(ubo.torchMeta.x + 0.5);
+    for (int i = 0; i < 16; ++i) {
+      if (i >= torchCount) {
+        break;
+      }
+      vec4 light = ubo.torchLights[i];
+      float range = max(light.w, 0.001);
+      float dist = distance(vWorldPos, light.xyz);
+      if (dist >= range) {
+        continue;
+      }
+      float falloff = 1.0 - (dist / range);
+      torchLight = max(torchLight, falloff * falloff);
+    }
+
     if (looksLikeWater) {
       ambient = mix(ambient, min(1.12, ambient + 0.10), 0.45);
+      torchLight *= 0.45;
     }
-    outColor.rgb *= ambient;
+    vec3 baseLit = outColor.rgb * ambient;
+    vec3 torchTint = vec3(1.18, 0.94, 0.62);
+    baseLit += outColor.rgb * torchLight * 1.55 * torchTint;
+    outColor.rgb = baseLit;
   }
 
   if (ubo.cameraData.w <= 0.5 && vUiPass < 0.5) {

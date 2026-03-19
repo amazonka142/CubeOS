@@ -2,6 +2,7 @@
 
 #include "mesh.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -17,6 +18,30 @@ public:
     uint64_t key = 0;
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
+  };
+
+  struct RenderStats {
+    uint32_t totalDrawCalls = 0;
+    uint32_t worldDrawCalls = 0;
+    uint32_t uiDrawCalls = 0;
+    uint32_t worldMeshesTracked = 0;
+    uint32_t worldMeshesDrawn = 0;
+    uint32_t worldSpecialMeshes = 0;
+    uint32_t worldDistanceCulled = 0;
+    uint32_t worldFrustumCulled = 0;
+    uint32_t worldIndicesDrawn = 0;
+  };
+
+  struct UiGlyphInfo {
+    float uMin = 0.0f;
+    float vMin = 0.0f;
+    float uMax = 0.0f;
+    float vMax = 0.0f;
+    float advance = 0.0f;
+    float bearingX = 0.0f;
+    float bearingTop = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
   };
 
   void init(GLFWwindow* window, bool* framebufferResizedFlag);
@@ -37,8 +62,14 @@ public:
   void updateWorldChunkMeshes(const std::vector<WorldChunkMeshUpload>& uploads,
                               const std::vector<uint64_t>& removedKeys);
   void setCameraMatrices(const glm::mat4& view, const glm::mat4& proj);
-  void setCameraWorldState(const glm::vec3& eyePosition, bool underwater);
+  void setCameraWorldState(const glm::vec3& eyePosition, const glm::vec3& forwardDirection, bool underwater);
   void setEnvironmentState(float daylight, float weatherIntensity, float dayCycleTime);
+  void setTorchLights(const std::vector<glm::vec4>& lights);
+  RenderStats getLastRenderStats() const;
+  const UiGlyphInfo* findUiGlyph(uint32_t codepoint) const;
+  float uiFontLineHeight() const;
+  float uiFontAscent() const;
+  bool hasUiFont() const;
 
 private:
   struct QueueFamilyIndices {
@@ -198,10 +229,17 @@ private:
   glm::mat4 cameraView{1.0f};
   glm::mat4 cameraProj{1.0f};
   glm::vec3 cameraWorldPos{0.0f};
+  glm::vec3 cameraForward{0.0f, 0.0f, 1.0f};
   bool cameraUnderwater = false;
   float environmentDaylight = 1.0f;
   float environmentWeatherIntensity = 0.0f;
   float environmentDayCycleTime = 0.32f;
+  std::array<glm::vec4, 16> environmentTorchLights{};
+  uint32_t environmentTorchLightCount = 0;
+  RenderStats lastRenderStats{};
+  std::unordered_map<uint32_t, UiGlyphInfo> uiGlyphs;
+  float uiFontLineHeightPx = 0.0f;
+  float uiFontAscentPx = 0.0f;
 
   std::vector<VkSemaphore> imageAvailableSemaphores;
   std::vector<VkSemaphore> renderFinishedSemaphores;

@@ -87,15 +87,184 @@ enum BlockType : uint8_t {
   kWaterFlow6 = 17,
   kWaterFlow7 = 18,
   kSeagrass = 19,
-  kCoral = 20
+  kCoral = 20,
+  kDiamondOre = 21,
+  kWorkbench = 22,
+  kPlanks = 23,
+  kStick = 24,
+  kIronIngot = 25,
+  kDiamond = 26,
+  kWoodPickaxe = 27,
+  kStonePickaxe = 28,
+  kIronPickaxe = 29,
+  kTorch = 30,
+  kFurnace = 31,
+  kLootCache = 32,
+  kWorkbenchNorth = 33,
+  kWorkbenchEast = 34,
+  kWorkbenchSouth = 35,
+  kWorkbenchWest = 36,
+  kFurnaceNorth = 37,
+  kFurnaceEast = 38,
+  kFurnaceSouth = 39,
+  kFurnaceWest = 40
 };
+
+enum HorizontalFacing : uint8_t {
+  kFacingNorth = 0,
+  kFacingEast = 1,
+  kFacingSouth = 2,
+  kFacingWest = 3
+};
+
+constexpr bool isWorkbenchBlock(uint8_t type) {
+  return type == kWorkbench ||
+         type == kWorkbenchNorth ||
+         type == kWorkbenchEast ||
+         type == kWorkbenchSouth ||
+         type == kWorkbenchWest;
+}
+
+constexpr bool isFurnaceBlock(uint8_t type) {
+  return type == kFurnace ||
+         type == kFurnaceNorth ||
+         type == kFurnaceEast ||
+         type == kFurnaceSouth ||
+         type == kFurnaceWest;
+}
+
+constexpr uint8_t blockFacingIndex(uint8_t type) {
+  switch (type) {
+    case kWorkbenchNorth:
+    case kFurnaceNorth:
+      return kFacingNorth;
+    case kWorkbenchEast:
+    case kFurnaceEast:
+      return kFacingEast;
+    case kWorkbenchWest:
+    case kFurnaceWest:
+      return kFacingWest;
+    case kWorkbench:
+    case kWorkbenchSouth:
+    case kFurnace:
+    case kFurnaceSouth:
+    default:
+      return kFacingSouth;
+  }
+}
+
+constexpr bool faceMatchesFacing(uint8_t facing, int axis, bool positive) {
+  return (facing == kFacingNorth && axis == 2 && !positive) ||
+         (facing == kFacingEast && axis == 0 && positive) ||
+         (facing == kFacingSouth && axis == 2 && positive) ||
+         (facing == kFacingWest && axis == 0 && !positive);
+}
+
+constexpr uint8_t workbenchBlockForFacing(uint8_t facing) {
+  switch (facing) {
+    case kFacingNorth:
+      return kWorkbenchNorth;
+    case kFacingEast:
+      return kWorkbenchEast;
+    case kFacingWest:
+      return kWorkbenchWest;
+    case kFacingSouth:
+    default:
+      return kWorkbenchSouth;
+  }
+}
+
+constexpr uint8_t furnaceBlockForFacing(uint8_t facing) {
+  switch (facing) {
+    case kFacingNorth:
+      return kFurnaceNorth;
+    case kFacingEast:
+      return kFurnaceEast;
+    case kFacingWest:
+      return kFurnaceWest;
+    case kFacingSouth:
+    default:
+      return kFurnaceSouth;
+  }
+}
+
+constexpr uint8_t itemTypeForPlacedBlock(uint8_t type) {
+  if (isWorkbenchBlock(type)) {
+    return kWorkbench;
+  }
+  if (isFurnaceBlock(type)) {
+    return kFurnace;
+  }
+  return type;
+}
+
+constexpr bool isStructureRewardBlock(uint8_t type) {
+  return type == kLootCache;
+}
 
 constexpr bool isWaterBlock(uint8_t type) {
   return type == kWater || (type >= kWaterFlow1 && type <= kWaterFlow7);
 }
 
+constexpr bool isBlockType(uint8_t type) {
+  switch (type) {
+    case kGrass:
+    case kDirt:
+    case kStone:
+    case kSand:
+    case kGravel:
+    case kWood:
+    case kLeaves:
+    case kWater:
+    case kCoalOre:
+    case kIronOre:
+    case kGoldOre:
+    case kWaterFlow1:
+    case kWaterFlow2:
+    case kWaterFlow3:
+    case kWaterFlow4:
+    case kWaterFlow5:
+    case kWaterFlow6:
+    case kWaterFlow7:
+    case kSeagrass:
+    case kCoral:
+    case kDiamondOre:
+    case kWorkbench:
+    case kWorkbenchNorth:
+    case kWorkbenchEast:
+    case kWorkbenchSouth:
+    case kWorkbenchWest:
+    case kPlanks:
+    case kTorch:
+    case kFurnace:
+    case kFurnaceNorth:
+    case kFurnaceEast:
+    case kFurnaceSouth:
+    case kFurnaceWest:
+    case kLootCache:
+      return true;
+    default:
+      return false;
+  }
+}
+
 constexpr bool isUnderwaterPlantBlock(uint8_t type) {
   return type == kSeagrass || type == kCoral;
+}
+
+constexpr bool isDecorationBlock(uint8_t type) {
+  return isUnderwaterPlantBlock(type) || type == kTorch;
+}
+
+constexpr bool isToolItem(uint8_t type) {
+  return type >= kWoodPickaxe && type <= kIronPickaxe;
+}
+
+constexpr bool isPlaceableItem(uint8_t type) {
+  return isBlockType(type) &&
+         type != kAir &&
+         !isStructureRewardBlock(type) &&
+         !(type >= kWaterFlow1 && type <= kWaterFlow7);
 }
 
 constexpr uint8_t waterLevelFromBlock(uint8_t type) {
@@ -126,6 +295,20 @@ struct ChunkMeshUpload {
 
 class World {
 public:
+  struct RuntimeStats {
+    size_t loadedChunks = 0;
+    size_t generatingChunks = 0;
+    size_t dirtySections = 0;
+    size_t queuedSections = 0;
+    size_t pendingSectionRebuilds = 0;
+    size_t pendingMeshUploads = 0;
+    size_t pendingRemovedMeshes = 0;
+    size_t sectionWorkerQueue = 0;
+    size_t sectionWorkerResults = 0;
+    size_t generationQueue = 0;
+    size_t generationResults = 0;
+  };
+
   World(int initialChunksX, int initialChunksZ, int seed = 1337);
   ~World();
 
@@ -141,10 +324,15 @@ public:
                                int uploadBudget);
   bool save(const std::string& path) const;
   bool load(const std::string& path);
+  void requestChunkToStatus(int chunkX, int chunkZ, ChunkGenStatus targetStatus);
   void generateChunkToStatus(int chunkX, int chunkZ, ChunkGenStatus targetStatus);
   ChunkGenStatus getChunkGenerationStatus(int chunkX, int chunkZ) const;
   void updateActiveChunks(int centerChunkX, int centerChunkZ, int radius);
-  bool waitForChunkRegion(int centerChunkX, int centerChunkZ, int radius, int maxWaitMs);
+  bool waitForChunkRegion(int centerChunkX,
+                          int centerChunkZ,
+                          int radius,
+                          int maxWaitMs,
+                          ChunkGenStatus minStatus = ChunkGenStatus::kNoise);
   void simulateWater(int centerX, int centerZ, int radiusXZ, int maxUpdates);
   void simulateFallingBlocks(int centerX, int centerZ, int radiusXZ, int maxUpdates);
   bool consumeMeshDirty();
@@ -162,6 +350,7 @@ public:
   int getSeed() const { return seed; }
   void setGenerationSettings(const WorldGenSettings& settings);
   const WorldGenSettings& getGenerationSettings() const { return genSettings; }
+  RuntimeStats collectRuntimeStats() const;
 
   int height() const { return kChunkHeight; }
   int chunkCount() const { return static_cast<int>(chunks.size()); }
@@ -195,6 +384,7 @@ private:
   void stopMeshWorkers();
   void startChunkWorkers();
   void stopChunkWorkers();
+  int generationTaskPriority(int cx, int cz, ChunkGenStatus targetStatus) const;
   void queueChunkGeneration(int cx, int cz, uint32_t epoch, ChunkGenStatus targetStatus);
   void resetChunkGeneration();
   void pumpChunkGeneration();
@@ -207,6 +397,17 @@ private:
     uint32_t epoch = 0;
     uint64_t key = 0;
     ChunkGenStatus targetStatus = ChunkGenStatus::kFull;
+    int priority = 0;
+    uint64_t sequence = 0;
+  };
+
+  struct ChunkGenerationTaskCompare {
+    bool operator()(const ChunkGenerationTask& lhs, const ChunkGenerationTask& rhs) const {
+      if (lhs.priority != rhs.priority) {
+        return lhs.priority < rhs.priority;
+      }
+      return lhs.sequence < rhs.sequence;
+    }
   };
 
   struct ChunkGenerationResult {
@@ -290,8 +491,13 @@ private:
   mutable std::mutex sectionRebuildMutex;
   std::condition_variable sectionRebuildCv;
   uint32_t generationEpoch = 1;
+  int generationFocusChunkX = 0;
+  int generationFocusChunkZ = 0;
+  uint64_t generationTaskSequence = 0;
   std::unordered_map<uint64_t, uint32_t> pendingGenerationEpochByKey;
-  std::queue<ChunkGenerationTask> generationQueue;
+  std::priority_queue<ChunkGenerationTask,
+                      std::vector<ChunkGenerationTask>,
+                      ChunkGenerationTaskCompare> generationQueue;
   std::queue<ChunkGenerationResult> generationResults;
   std::vector<std::thread> generationWorkers;
   bool stopGenerationWorkers = false;

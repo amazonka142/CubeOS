@@ -18,7 +18,7 @@ CubeOS is about exploring and shaping a procedural block world:
 Current scope is core sandbox gameplay and engine foundations, not a content-
 complete survival game yet.
 
-## Current Feature Set (v0.2.1)
+## Current Feature Set (v0.2.2)
 
 - Procedural chunked world generation.
 - Multi-noise climate sampling (`temperature/humidity/continentalness/erosion/depth/weirdness`) with deterministic biome mapping.
@@ -31,6 +31,10 @@ complete survival game yet.
 - Voxel meshing with block atlas texturing.
 - Basic water and falling-sand simulation.
 - First-person movement, collision, and block raycast interaction.
+- Crafting/workbench panel with highlighted result feedback plus furnace smelting UI.
+- Early progression loop: wood -> stone -> caves -> iron -> diamonds.
+- Reward chests and basic interaction sound effects.
+- Achievement tree overlay (`L`) for milestone tracking.
 - Main menu, world creation, world selection, pause, and settings screens.
 - Worldgen debug overlay (`F3`/`F4` + density slice controls).
 - Deterministic worldgen regression suite target (`cubeos_worldgen_regression`).
@@ -122,7 +126,7 @@ cmake -S . -B build -DCUBEOS_BUILD_WORLDGEN_REGRESSION=OFF
 - macOS binary:
   - `build/cubeos_voxel`
 - macOS app bundle (from this repo build setup):
-  - `build/CubeOS v0.2.1 Beta.app`
+  - `build/CubeOS v0.2.2 Beta.app`
 
 ## Save Data Layout
 
