@@ -107,7 +107,11 @@ enum BlockType : uint8_t {
   kFurnaceNorth = 37,
   kFurnaceEast = 38,
   kFurnaceSouth = 39,
-  kFurnaceWest = 40
+  kFurnaceWest = 40,
+  kTorchNorth = 41,
+  kTorchEast = 42,
+  kTorchSouth = 43,
+  kTorchWest = 44
 };
 
 enum HorizontalFacing : uint8_t {
@@ -131,6 +135,98 @@ constexpr bool isFurnaceBlock(uint8_t type) {
          type == kFurnaceEast ||
          type == kFurnaceSouth ||
          type == kFurnaceWest;
+}
+
+constexpr bool isTorchBlock(uint8_t type) {
+  return type == kTorch ||
+         type == kTorchNorth ||
+         type == kTorchEast ||
+         type == kTorchSouth ||
+         type == kTorchWest;
+}
+
+constexpr bool isWallTorchBlock(uint8_t type) {
+  return type == kTorchNorth ||
+         type == kTorchEast ||
+         type == kTorchSouth ||
+         type == kTorchWest;
+}
+
+constexpr uint8_t torchFacingIndex(uint8_t type) {
+  switch (type) {
+    case kTorchNorth:
+      return kFacingNorth;
+    case kTorchEast:
+      return kFacingEast;
+    case kTorchWest:
+      return kFacingWest;
+    case kTorchSouth:
+    default:
+      return kFacingSouth;
+  }
+}
+
+constexpr uint8_t torchBlockForFacing(uint8_t facing) {
+  switch (facing) {
+    case kFacingNorth:
+      return kTorchNorth;
+    case kFacingEast:
+      return kTorchEast;
+    case kFacingWest:
+      return kTorchWest;
+    case kFacingSouth:
+    default:
+      return kTorchSouth;
+  }
+}
+
+inline glm::ivec3 torchFacingVector(uint8_t type) {
+  switch (torchFacingIndex(type)) {
+    case kFacingNorth:
+      return {0, 0, -1};
+    case kFacingEast:
+      return {1, 0, 0};
+    case kFacingWest:
+      return {-1, 0, 0};
+    case kFacingSouth:
+    default:
+      return {0, 0, 1};
+  }
+}
+
+inline glm::ivec3 torchSupportOffset(uint8_t type) {
+  if (!isWallTorchBlock(type)) {
+    return {0, -1, 0};
+  }
+  glm::ivec3 facing = torchFacingVector(type);
+  return {-facing.x, 0, -facing.z};
+}
+
+inline glm::vec3 torchBaseOffset(uint8_t type) {
+  if (!isWallTorchBlock(type)) {
+    return {0.5f, 0.02f, 0.5f};
+  }
+  glm::ivec3 facing = torchFacingVector(type);
+  glm::vec3 forward(static_cast<float>(facing.x), 0.0f, static_cast<float>(facing.z));
+  return {0.5f - forward.x * 0.18f, 0.22f, 0.5f - forward.z * 0.18f};
+}
+
+inline glm::vec3 torchTopOffset(uint8_t type) {
+  if (!isWallTorchBlock(type)) {
+    return {0.5f, 0.78f, 0.5f};
+  }
+  glm::ivec3 facing = torchFacingVector(type);
+  glm::vec3 forward(static_cast<float>(facing.x), 0.0f, static_cast<float>(facing.z));
+  return {0.5f + forward.x * 0.06f, 0.88f, 0.5f + forward.z * 0.06f};
+}
+
+inline glm::vec3 torchLightOffset(uint8_t type) {
+  if (!isWallTorchBlock(type)) {
+    return {0.5f, 0.78f, 0.5f};
+  }
+  glm::ivec3 facing = torchFacingVector(type);
+  glm::vec3 forward(static_cast<float>(facing.x), 0.0f, static_cast<float>(facing.z));
+  return {0.5f + forward.x * 0.10f, 0.84f, 0.5f + forward.z * 0.10f};
 }
 
 constexpr uint8_t blockFacingIndex(uint8_t type) {
@@ -195,6 +291,9 @@ constexpr uint8_t itemTypeForPlacedBlock(uint8_t type) {
   if (isFurnaceBlock(type)) {
     return kFurnace;
   }
+  if (isTorchBlock(type)) {
+    return kTorch;
+  }
   return type;
 }
 
@@ -236,6 +335,10 @@ constexpr bool isBlockType(uint8_t type) {
     case kWorkbenchWest:
     case kPlanks:
     case kTorch:
+    case kTorchNorth:
+    case kTorchEast:
+    case kTorchSouth:
+    case kTorchWest:
     case kFurnace:
     case kFurnaceNorth:
     case kFurnaceEast:
@@ -252,8 +355,30 @@ constexpr bool isUnderwaterPlantBlock(uint8_t type) {
   return type == kSeagrass || type == kCoral;
 }
 
+constexpr bool isWaterVolumeBlock(uint8_t type) {
+  return isWaterBlock(type) || isUnderwaterPlantBlock(type);
+}
+
+constexpr bool canSupportSeagrassBlock(uint8_t ground) {
+  return ground == kGrass || ground == kDirt || ground == kSand || ground == kGravel;
+}
+
+constexpr bool canSupportCoralBlock(uint8_t ground) {
+  return ground == kSand || ground == kGravel || ground == kStone || ground == kDirt;
+}
+
+constexpr bool canSupportUnderwaterPlant(uint8_t plantType, uint8_t ground) {
+  if (plantType == kSeagrass) {
+    return canSupportSeagrassBlock(ground);
+  }
+  if (plantType == kCoral) {
+    return canSupportCoralBlock(ground);
+  }
+  return false;
+}
+
 constexpr bool isDecorationBlock(uint8_t type) {
-  return isUnderwaterPlantBlock(type) || type == kTorch;
+  return isUnderwaterPlantBlock(type) || isTorchBlock(type);
 }
 
 constexpr bool isToolItem(uint8_t type) {
@@ -346,6 +471,7 @@ public:
   int sampleSurfaceHeightAt(int x, int z) const;
   float sampleDensityAt(int x, int y, int z) const;
   int sampleAquiferLevelAt(int x, int z) const;
+  std::vector<glm::ivec3> collectTorchBlocks() const;
   void setSeed(int newSeed) { seed = newSeed; }
   int getSeed() const { return seed; }
   void setGenerationSettings(const WorldGenSettings& settings);
@@ -367,6 +493,7 @@ private:
   Chunk* findChunk(int cx, int cz);
   const Chunk* findChunk(int cx, int cz) const;
   Chunk& ensureChunk(int cx, int cz, ChunkGenStatus targetStatus = ChunkGenStatus::kFull);
+  void rebuildChunkTorchIndices(Chunk& chunk);
   void generateChunk(Chunk& chunk, ChunkGenStatus targetStatus = ChunkGenStatus::kFull);
   bool buildChunkSectionMeshNow(Chunk& chunk, int sectionY);
   void buildChunkMesh(Chunk& chunk);
@@ -441,6 +568,7 @@ private:
     int sectionY = 0;
     uint32_t version = 0;
     std::array<uint8_t, kSectionSampleCount> samples{};
+    std::array<float, kSectionSampleCount> skyLightSamples{};
     bool overlayActive = false;
     glm::ivec3 overlayBlock{};
     int overlayStage = 0;
@@ -459,6 +587,7 @@ private:
     int cx = 0;
     int cz = 0;
     std::vector<uint8_t> blocks;
+    std::vector<uint16_t> torchLocalIndices;
     std::array<SectionRenderData, kChunkSectionCount> sectionMeshes{};
     bool dirty = true;
     bool modified = false;

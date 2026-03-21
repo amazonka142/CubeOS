@@ -58,6 +58,7 @@ private:
     int renderDistance = 8;    // chunk view radius
     float sensitivity = 0.10f; // mouse look sensitivity
     int audioVolume = 80;      // placeholder value, reserved for audio system
+    float uiScale = 1.0f;      // logical UI scale multiplier
     int language = 0;          // 0=English, 1=Russian
     bool blockGuides = true;   // block outline + placement preview
   };
@@ -109,6 +110,12 @@ private:
   void resetEnvironmentForSession();
   float computeDaylightFactor() const;
   void spawnDroppedItem(uint8_t type, const glm::ivec3& blockPos);
+  void spawnDroppedStack(const ItemStack& stack, const glm::ivec3& blockPos);
+  void spawnDroppedItemWithPhysics(uint8_t type,
+                                   const glm::vec3& position,
+                                   const glm::vec3& velocity,
+                                   float pickupDelay,
+                                   uint16_t count = 1);
   void updateDroppedItems(float deltaTime);
   void syncDroppedItemMesh(bool force);
   void updateInteractionOverlayMesh();
@@ -134,6 +141,9 @@ private:
   bool canUseWorkbenchAt(const glm::ivec3& block) const;
   bool canUseFurnaceAt(const glm::ivec3& block) const;
   bool handleInventoryClick(double xpos, double ypos, bool rightClick);
+  float uiScaleFactor() const;
+  int uiLayoutWidth() const;
+  int uiLayoutHeight() const;
   glm::vec2 cursorToFramebuffer(double xpos, double ypos) const;
   bool hitTestHotbar(float x, float y, int& outSlot) const;
   bool hitTestInventory(float x, float y, int& outIndex) const;

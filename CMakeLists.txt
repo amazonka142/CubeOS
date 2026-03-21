@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 # CMake 4.x dropped compatibility with <3.5. Keep deps like older GLM working.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
-set(CUBEOS_VERSION "0.2.2")
+set(CUBEOS_VERSION "0.2.3")
 set(CUBEOS_MACOS_APP_NAME "CubeOS v${CUBEOS_VERSION} Beta")
 
 project(cubeos_voxel VERSION ${CUBEOS_VERSION} LANGUAGES C CXX)

@@ -1848,11 +1848,16 @@ void VulkanContext::createTextureImage() {
   const int waterTileY = (waterTileIndex / kAtlasCols) * kAtlasTileSize;
   for (int y = 0; y < kAtlasTileSize; ++y) {
     for (int x = 0; x < kAtlasTileSize; ++x) {
-      bool stripe = ((x + y * 2) % 5) == 0;
-      uint8_t r = stripe ? 44 : 34;
-      uint8_t g = stripe ? 98 : 84;
-      uint8_t b = stripe ? 196 : 180;
-      uint8_t a = stripe ? 212 : 196;
+      float fx = static_cast<float>(x) / static_cast<float>(kAtlasTileSize);
+      float fy = static_cast<float>(y) / static_cast<float>(kAtlasTileSize);
+      float waveA = 0.5f + 0.5f * std::sin((fx * 6.2831853f * 1.7f) + fy * 5.6f);
+      float waveB = 0.5f + 0.5f * std::sin((fy * 6.2831853f * 1.3f) - fx * 4.2f + 1.4f);
+      float ripple = (waveA * 0.58f + waveB * 0.42f);
+      float highlight = std::clamp((ripple - 0.68f) / 0.32f, 0.0f, 1.0f);
+      uint8_t r = static_cast<uint8_t>(std::lround(34.0f + ripple * 10.0f + highlight * 6.0f));
+      uint8_t g = static_cast<uint8_t>(std::lround(96.0f + ripple * 20.0f + highlight * 8.0f));
+      uint8_t b = static_cast<uint8_t>(std::lround(182.0f + ripple * 26.0f + highlight * 10.0f));
+      uint8_t a = static_cast<uint8_t>(std::lround(202.0f + ripple * 18.0f));
       putPixel(waterTileX + x, waterTileY + y, r, g, b, a);
     }
   }

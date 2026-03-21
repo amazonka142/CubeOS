@@ -150,7 +150,8 @@ void main() {
     vec3 waterTint = vColor + vec3(0.03, 0.07, 0.11) * shimmer;
     outColor = vec4(waterTint, 1.0) * texColor;
     if (ubo.cameraData.w > 0.5) {
-      outColor.a = max(outColor.a, 0.84);
+      outColor.a = clamp(outColor.a * 0.34, 0.16, 0.34);
+      outColor.rgb = mix(outColor.rgb, vec3(0.09, 0.24, 0.44), 0.10);
     } else {
       // Keep water almost opaque from above to avoid ore "x-ray" effect.
       outColor.a = max(outColor.a, 0.97);
@@ -202,12 +203,16 @@ void main() {
 
   if (ubo.cameraData.w > 0.5 && vUiPass < 0.5) {
     float distToCamera = distance(vWorldPos, ubo.cameraData.xyz);
-    // Minecraft-like underwater look: readable nearby blocks + strong blue falloff.
-    float fog = 1.0 - exp(-max(0.0, distToCamera - 0.9) * 1.15);
-    fog = clamp(fog, 0.0, 1.0);
-    vec3 fogColor = vec3(0.08, 0.33, 0.56);
-    vec3 tinted = outColor.rgb * vec3(0.84, 0.93, 1.05);
+    // Keep the underwater look blue, but preserve nearby readability.
+    float fogStart = looksLikeWater ? 1.8 : 2.8;
+    float fogDensity = looksLikeWater ? 0.16 : 0.20;
+    float fog = 1.0 - exp(-max(0.0, distToCamera - fogStart) * fogDensity);
+    fog = clamp(fog, 0.0, looksLikeWater ? 0.42 : 0.76);
+    vec3 fogColor = vec3(0.09, 0.30, 0.50);
+    vec3 tinted = outColor.rgb * vec3(0.94, 0.98, 1.03) + vec3(0.008, 0.018, 0.028);
     outColor.rgb = mix(tinted, fogColor, fog);
-    outColor.a = 1.0;
+    if (!looksLikeWater) {
+      outColor.a = 1.0;
+    }
   }
 }
