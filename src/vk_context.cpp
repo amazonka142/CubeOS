@@ -46,6 +46,7 @@ constexpr int64_t kSectionKeyCoordBias = static_cast<int64_t>(1) << (kSectionKey
 constexpr uint64_t kSectionKeyCoordMask = (static_cast<uint64_t>(1) << kSectionKeyCoordBits) - 1u;
 constexpr float kChunkDrawDistanceBlocks = 220.0f;
 constexpr float kChunkDrawDistanceBlocksSq = kChunkDrawDistanceBlocks * kChunkDrawDistanceBlocks;
+constexpr uint64_t kFirstPersonMeshKey = std::numeric_limits<uint64_t>::max() - 3ull;
 
 #ifdef CUBEOS_ENABLE_VALIDATION
 constexpr bool kEnableValidationLayers = true;
@@ -78,6 +79,11 @@ struct UniformBufferObject {
 };
 
 const auto kStartTime = std::chrono::high_resolution_clock::now();
+
+enum class MeshRenderLayer : uint8_t {
+  kWorld = 0,
+  kFirstPerson = 1
+};
 
 bool unpackSectionKey(uint64_t key, int& outCx, int& outCz, int& outSectionY) {
   uint64_t ux = (key >> 34) & kSectionKeyCoordMask;
@@ -136,6 +142,10 @@ bool aabbIntersectsFrustum(const std::array<glm::vec4, 6>& planes,
 bool isSpecialWorldMeshKey(uint64_t key) {
   // Reserve the top key range for non-chunk meshes (dropped items, debug overlays, etc).
   return key >= (std::numeric_limits<uint64_t>::max() - 16ull);
+}
+
+bool isFirstPersonMeshKey(uint64_t key) {
+  return key == kFirstPersonMeshKey;
 }
 
 void checkVk(VkResult result, const char* message) {
@@ -996,6 +1006,8 @@ void VulkanContext::updateMesh(const std::vector<Vertex>& vertices,
 bool VulkanContext::uploadChunkGpuMesh(const WorldChunkMeshUpload& upload, ChunkGpuMesh& outMesh) {
   outMesh.chunkX = 0;
   outMesh.chunkZ = 0;
+  outMesh.renderLayer = static_cast<uint8_t>(
+    isFirstPersonMeshKey(upload.key) ? MeshRenderLayer::kFirstPerson : MeshRenderLayer::kWorld);
   outMesh.alwaysVisible = isSpecialWorldMeshKey(upload.key);
   if (!outMesh.alwaysVisible) {
     int sectionY = 0;
@@ -1011,6 +1023,8 @@ bool VulkanContext::uploadChunkGpuMesh(const WorldChunkMeshUpload& upload, Chunk
   VkDeviceSize vertexSize = sizeof(Vertex) * upload.vertices.size();
   VkDeviceSize indexSize = sizeof(uint32_t) * upload.indices.size();
   if (vertexSize == 0 || indexSize == 0) {
+    outMesh.vertexBufferSize = 0;
+    outMesh.indexBufferSize = 0;
     outMesh.indexCount = 0;
     return true;
   }
@@ -1037,6 +1051,8 @@ bool VulkanContext::uploadChunkGpuMesh(const WorldChunkMeshUpload& upload, Chunk
   vkUnmapMemory(device, outMesh.indexMemory);
 
   outMesh.indexCount = static_cast<uint32_t>(upload.indices.size());
+  outMesh.vertexBufferSize = vertexSize;
+  outMesh.indexBufferSize = indexSize;
   return true;
 }
 
@@ -1057,6 +1073,8 @@ void VulkanContext::destroyChunkGpuMesh(ChunkGpuMesh& mesh) {
     vkFreeMemory(device, mesh.indexMemory, nullptr);
     mesh.indexMemory = VK_NULL_HANDLE;
   }
+  mesh.vertexBufferSize = 0;
+  mesh.indexBufferSize = 0;
   mesh.indexCount = 0;
 }
 
@@ -1158,6 +1176,27 @@ void VulkanContext::updateWorldChunkMeshes(const std::vector<WorldChunkMeshUploa
   for (const WorldChunkMeshUpload& upload : uploads) {
     auto existing = worldChunkMeshes.find(upload.key);
     if (existing != worldChunkMeshes.end()) {
+      VkDeviceSize uploadVertexSize = sizeof(Vertex) * upload.vertices.size();
+      VkDeviceSize uploadIndexSize = sizeof(uint32_t) * upload.indices.size();
+      if (existing->second.renderLayer == static_cast<uint8_t>(MeshRenderLayer::kFirstPerson) &&
+          existing->second.vertexBuffer != VK_NULL_HANDLE &&
+          existing->second.indexBuffer != VK_NULL_HANDLE &&
+          existing->second.vertexMemory != VK_NULL_HANDLE &&
+          existing->second.indexMemory != VK_NULL_HANDLE &&
+          existing->second.vertexBufferSize == uploadVertexSize &&
+          existing->second.indexBufferSize == uploadIndexSize &&
+          existing->second.indexCount == static_cast<uint32_t>(upload.indices.size())) {
+        void* vertexData = nullptr;
+        vkMapMemory(device, existing->second.vertexMemory, 0, uploadVertexSize, 0, &vertexData);
+        std::memcpy(vertexData, upload.vertices.data(), static_cast<size_t>(uploadVertexSize));
+        vkUnmapMemory(device, existing->second.vertexMemory);
+
+        void* indexData = nullptr;
+        vkMapMemory(device, existing->second.indexMemory, 0, uploadIndexSize, 0, &indexData);
+        std::memcpy(indexData, upload.indices.data(), static_cast<size_t>(uploadIndexSize));
+        vkUnmapMemory(device, existing->second.indexMemory);
+        continue;
+      }
       retireChunkGpuMesh(existing->second);
       worldChunkMeshes.erase(existing);
       removeDrawKey(upload.key);
@@ -1179,6 +1218,11 @@ void VulkanContext::updateWorldChunkMeshes(const std::vector<WorldChunkMeshUploa
 void VulkanContext::setCameraMatrices(const glm::mat4& view, const glm::mat4& proj) {
   cameraView = view;
   cameraProj = proj;
+}
+
+void VulkanContext::setFirstPersonMatrices(const glm::mat4& view, const glm::mat4& proj) {
+  firstPersonView = view;
+  firstPersonProj = proj;
 }
 
 void VulkanContext::setCameraWorldState(const glm::vec3& eyePosition,
@@ -1646,6 +1690,8 @@ void VulkanContext::createGraphicsPipeline() {
   depthStencilUi.depthTestEnable = VK_FALSE;
   depthStencilUi.depthWriteEnable = VK_FALSE;
 
+  VkPipelineDepthStencilStateCreateInfo depthStencilFirstPerson = depthStencilUi;
+
   VkPipelineColorBlendAttachmentState colorBlendAttachment{};
   colorBlendAttachment.colorWriteMask =
     VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -1703,6 +1749,14 @@ void VulkanContext::createGraphicsPipeline() {
   checkVk(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
                                     nullptr, &graphicsPipeline),
           "Failed to create graphics pipeline.");
+
+  VkGraphicsPipelineCreateInfo firstPersonPipelineInfo = pipelineInfo;
+  firstPersonPipelineInfo.pRasterizationState = &rasterizerUi;
+  firstPersonPipelineInfo.pDepthStencilState = &depthStencilFirstPerson;
+
+  checkVk(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &firstPersonPipelineInfo,
+                                    nullptr, &firstPersonPipeline),
+          "Failed to create first-person graphics pipeline.");
 
   VkGraphicsPipelineCreateInfo uiPipelineInfo = pipelineInfo;
   uiPipelineInfo.pStages = uiShaderStages;
@@ -2399,6 +2453,9 @@ void VulkanContext::createUniformBuffers() {
   uniformBuffers.resize(swapchainImages.size());
   uniformBuffersMemory.resize(swapchainImages.size());
   uniformBuffersMapped.resize(swapchainImages.size());
+  firstPersonUniformBuffers.resize(swapchainImages.size());
+  firstPersonUniformBuffersMemory.resize(swapchainImages.size());
+  firstPersonUniformBuffersMapped.resize(swapchainImages.size());
 
   for (size_t i = 0; i < swapchainImages.size(); ++i) {
     createBuffer(bufferSize,
@@ -2408,21 +2465,34 @@ void VulkanContext::createUniformBuffers() {
                  uniformBuffersMemory[i]);
 
     vkMapMemory(device, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+
+    createBuffer(bufferSize,
+                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 firstPersonUniformBuffers[i],
+                 firstPersonUniformBuffersMemory[i]);
+
+    vkMapMemory(device,
+                firstPersonUniformBuffersMemory[i],
+                0,
+                bufferSize,
+                0,
+                &firstPersonUniformBuffersMapped[i]);
   }
 }
 
 void VulkanContext::createDescriptorPool() {
   std::array<VkDescriptorPoolSize, 2> poolSizes{};
   poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  poolSizes[0].descriptorCount = static_cast<uint32_t>(swapchainImages.size());
+  poolSizes[0].descriptorCount = static_cast<uint32_t>(swapchainImages.size() * 2);
   poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  poolSizes[1].descriptorCount = static_cast<uint32_t>(swapchainImages.size());
+  poolSizes[1].descriptorCount = static_cast<uint32_t>(swapchainImages.size() * 2);
 
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
   poolInfo.pPoolSizes = poolSizes.data();
-  poolInfo.maxSets = static_cast<uint32_t>(swapchainImages.size());
+  poolInfo.maxSets = static_cast<uint32_t>(swapchainImages.size() * 2);
 
   checkVk(vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool),
           "Failed to create descriptor pool.");
@@ -2436,45 +2506,56 @@ void VulkanContext::createDescriptorSets() {
   allocInfo.descriptorSetCount = static_cast<uint32_t>(swapchainImages.size());
   allocInfo.pSetLayouts = layouts.data();
 
-  descriptorSets.resize(swapchainImages.size());
-  checkVk(vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()),
-          "Failed to allocate descriptor sets.");
+  auto allocateDescriptorSetBatch =
+    [&](std::vector<VkDescriptorSet>& outSets,
+        const std::vector<VkBuffer>& sourceUniformBuffers,
+        const char* errorMessage) {
+      outSets.resize(swapchainImages.size());
+      checkVk(vkAllocateDescriptorSets(device, &allocInfo, outSets.data()), errorMessage);
 
-  for (size_t i = 0; i < swapchainImages.size(); ++i) {
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = uniformBuffers[i];
-    bufferInfo.offset = 0;
-    bufferInfo.range = sizeof(UniformBufferObject);
+      for (size_t i = 0; i < swapchainImages.size(); ++i) {
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = sourceUniformBuffers[i];
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(UniformBufferObject);
 
-    VkDescriptorImageInfo imageInfo{};
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageInfo.imageView = textureImageView;
-    imageInfo.sampler = textureSampler;
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageView = textureImageView;
+        imageInfo.sampler = textureSampler;
 
-    std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+        std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
 
-    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrites[0].dstSet = descriptorSets[i];
-    descriptorWrites[0].dstBinding = 0;
-    descriptorWrites[0].dstArrayElement = 0;
-    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    descriptorWrites[0].descriptorCount = 1;
-    descriptorWrites[0].pBufferInfo = &bufferInfo;
+        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[0].dstSet = outSets[i];
+        descriptorWrites[0].dstBinding = 0;
+        descriptorWrites[0].dstArrayElement = 0;
+        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrites[0].descriptorCount = 1;
+        descriptorWrites[0].pBufferInfo = &bufferInfo;
 
-    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrites[1].dstSet = descriptorSets[i];
-    descriptorWrites[1].dstBinding = 1;
-    descriptorWrites[1].dstArrayElement = 0;
-    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptorWrites[1].descriptorCount = 1;
-    descriptorWrites[1].pImageInfo = &imageInfo;
+        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[1].dstSet = outSets[i];
+        descriptorWrites[1].dstBinding = 1;
+        descriptorWrites[1].dstArrayElement = 0;
+        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[1].descriptorCount = 1;
+        descriptorWrites[1].pImageInfo = &imageInfo;
 
-    vkUpdateDescriptorSets(device,
-                           static_cast<uint32_t>(descriptorWrites.size()),
-                           descriptorWrites.data(),
-                           0,
-                           nullptr);
-  }
+        vkUpdateDescriptorSets(device,
+                               static_cast<uint32_t>(descriptorWrites.size()),
+                               descriptorWrites.data(),
+                               0,
+                               nullptr);
+      }
+    };
+
+  allocateDescriptorSetBatch(descriptorSets,
+                             uniformBuffers,
+                             "Failed to allocate descriptor sets.");
+  allocateDescriptorSetBatch(firstPersonDescriptorSets,
+                             firstPersonUniformBuffers,
+                             "Failed to allocate first-person descriptor sets.");
 }
 
 void VulkanContext::createCommandBuffers() {
@@ -2492,7 +2573,15 @@ void VulkanContext::createCommandBuffers() {
 
 void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
   RenderStats renderStats{};
-  renderStats.worldMeshesTracked = static_cast<uint32_t>(worldChunkDrawOrder.size());
+  for (uint64_t key : worldChunkDrawOrder) {
+    auto it = worldChunkMeshes.find(key);
+    if (it == worldChunkMeshes.end()) {
+      continue;
+    }
+    if (it->second.renderLayer == static_cast<uint8_t>(MeshRenderLayer::kWorld)) {
+      renderStats.worldMeshesTracked += 1;
+    }
+  }
   VkCommandBufferBeginInfo beginInfo{};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
@@ -2587,6 +2676,9 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
         continue;
       }
       const ChunkGpuMesh& mesh = it->second;
+      if (mesh.renderLayer != static_cast<uint8_t>(MeshRenderLayer::kWorld)) {
+        continue;
+      }
       if (mesh.vertexBuffer == VK_NULL_HANDLE || mesh.indexBuffer == VK_NULL_HANDLE || mesh.indexCount == 0) {
         continue;
       }
@@ -2626,6 +2718,40 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
       renderStats.worldDrawCalls += 1;
       renderStats.totalDrawCalls += 1;
       renderStats.worldIndicesDrawn += mesh.indexCount;
+    }
+  }
+
+  if (!worldChunkDrawOrder.empty() &&
+      firstPersonPipeline != VK_NULL_HANDLE &&
+      !firstPersonDescriptorSets.empty()) {
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, firstPersonPipeline);
+    vkCmdBindDescriptorSets(commandBuffer,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineLayout,
+                            0,
+                            1,
+                            &firstPersonDescriptorSets[imageIndex],
+                            0,
+                            nullptr);
+
+    VkDeviceSize offset = 0;
+    for (uint64_t key : worldChunkDrawOrder) {
+      auto it = worldChunkMeshes.find(key);
+      if (it == worldChunkMeshes.end()) {
+        continue;
+      }
+      const ChunkGpuMesh& mesh = it->second;
+      if (mesh.renderLayer != static_cast<uint8_t>(MeshRenderLayer::kFirstPerson) ||
+          mesh.vertexBuffer == VK_NULL_HANDLE ||
+          mesh.indexBuffer == VK_NULL_HANDLE ||
+          mesh.indexCount == 0) {
+        continue;
+      }
+      vkCmdBindVertexBuffers(commandBuffer, 0, 1, &mesh.vertexBuffer, &offset);
+      vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+      vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+      renderStats.firstPersonDrawCalls += 1;
+      renderStats.totalDrawCalls += 1;
     }
   }
 
@@ -2671,27 +2797,38 @@ void VulkanContext::updateUniformBuffer(uint32_t imageIndex) {
     dayCycle += 1.0f;
   }
 
-  UniformBufferObject ubo{};
-  ubo.model = glm::mat4(1.0f);
-  ubo.view = cameraView;
-  ubo.proj = cameraProj;
-  ubo.invView = glm::inverse(cameraView);
-  ubo.invProj = glm::inverse(cameraProj);
-  ubo.params = glm::vec4(time,
-                         std::max(1.0f, static_cast<float>(swapchainExtent.width)),
-                         std::max(1.0f, static_cast<float>(swapchainExtent.height)),
-                         daylight);
-  ubo.cameraData = glm::vec4(cameraWorldPos, cameraUnderwater ? 1.0f : 0.0f);
-  ubo.weatherData = glm::vec4(weather,
-                              std::clamp(0.22f + weather * 0.78f, 0.0f, 1.0f),
-                              dayCycle,
-                              0.0f);
-  ubo.torchMeta = glm::vec4(static_cast<float>(environmentTorchLightCount), 0.0f, 0.0f, 0.0f);
-  for (size_t i = 0; i < environmentTorchLights.size(); ++i) {
-    ubo.torchLights[i] = environmentTorchLights[i];
-  }
+  auto buildUbo = [&](const glm::mat4& view,
+                      const glm::mat4& proj,
+                      bool firstPersonPass) {
+    UniformBufferObject ubo{};
+    ubo.model = glm::mat4(1.0f);
+    ubo.view = view;
+    ubo.proj = proj;
+    ubo.invView = glm::inverse(view);
+    ubo.invProj = glm::inverse(proj);
+    ubo.params = glm::vec4(time,
+                           std::max(1.0f, static_cast<float>(swapchainExtent.width)),
+                           std::max(1.0f, static_cast<float>(swapchainExtent.height)),
+                           daylight);
+    ubo.cameraData = glm::vec4(cameraWorldPos, cameraUnderwater ? 1.0f : 0.0f);
+    ubo.weatherData = glm::vec4(weather,
+                                std::clamp(0.22f + weather * 0.78f, 0.0f, 1.0f),
+                                dayCycle,
+                                firstPersonPass ? 1.0f : 0.0f);
+    ubo.torchMeta = glm::vec4(static_cast<float>(environmentTorchLightCount), 0.0f, 0.0f, 0.0f);
+    for (size_t i = 0; i < environmentTorchLights.size(); ++i) {
+      ubo.torchLights[i] = environmentTorchLights[i];
+    }
+    return ubo;
+  };
 
-  std::memcpy(uniformBuffersMapped[imageIndex], &ubo, sizeof(ubo));
+  UniformBufferObject worldUbo = buildUbo(cameraView, cameraProj, false);
+  std::memcpy(uniformBuffersMapped[imageIndex], &worldUbo, sizeof(worldUbo));
+
+  UniformBufferObject firstPersonUbo = buildUbo(firstPersonView, firstPersonProj, true);
+  std::memcpy(firstPersonUniformBuffersMapped[imageIndex],
+              &firstPersonUbo,
+              sizeof(firstPersonUbo));
 }
 
 void VulkanContext::createSyncObjects() {
@@ -2737,6 +2874,8 @@ void VulkanContext::cleanupSwapchain() {
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     descriptorPool = VK_NULL_HANDLE;
   }
+  descriptorSets.clear();
+  firstPersonDescriptorSets.clear();
 
   for (size_t i = 0; i < uniformBuffers.size(); ++i) {
     if (uniformBuffersMapped[i]) {
@@ -2749,6 +2888,18 @@ void VulkanContext::cleanupSwapchain() {
   uniformBuffers.clear();
   uniformBuffersMemory.clear();
   uniformBuffersMapped.clear();
+
+  for (size_t i = 0; i < firstPersonUniformBuffers.size(); ++i) {
+    if (firstPersonUniformBuffersMapped[i]) {
+      vkUnmapMemory(device, firstPersonUniformBuffersMemory[i]);
+      firstPersonUniformBuffersMapped[i] = nullptr;
+    }
+    vkDestroyBuffer(device, firstPersonUniformBuffers[i], nullptr);
+    vkFreeMemory(device, firstPersonUniformBuffersMemory[i], nullptr);
+  }
+  firstPersonUniformBuffers.clear();
+  firstPersonUniformBuffersMemory.clear();
+  firstPersonUniformBuffersMapped.clear();
 
   if (depthImageView != VK_NULL_HANDLE) {
     vkDestroyImageView(device, depthImageView, nullptr);
@@ -2766,6 +2917,10 @@ void VulkanContext::cleanupSwapchain() {
   if (graphicsPipeline != VK_NULL_HANDLE) {
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     graphicsPipeline = VK_NULL_HANDLE;
+  }
+  if (firstPersonPipeline != VK_NULL_HANDLE) {
+    vkDestroyPipeline(device, firstPersonPipeline, nullptr);
+    firstPersonPipeline = VK_NULL_HANDLE;
   }
   if (uiPipeline != VK_NULL_HANDLE) {
     vkDestroyPipeline(device, uiPipeline, nullptr);

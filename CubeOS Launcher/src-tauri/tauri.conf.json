@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CubeOS Launcher",
+  "version": "0.1.0",
+  "identifier": "com.cubeos.launcher",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "CubeOS Launcher",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 980,
+        "minHeight": 720,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' asset: tauri: http://tauri.localhost https://tauri.localhost; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost https://api.github.com https://github.com https://objects.githubusercontent.com https://*.githubusercontent.com https://github-releases.githubusercontent.com; script-src 'self' 'wasm-unsafe-eval'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

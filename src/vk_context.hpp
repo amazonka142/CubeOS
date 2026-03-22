@@ -23,6 +23,7 @@ public:
   struct RenderStats {
     uint32_t totalDrawCalls = 0;
     uint32_t worldDrawCalls = 0;
+    uint32_t firstPersonDrawCalls = 0;
     uint32_t uiDrawCalls = 0;
     uint32_t worldMeshesTracked = 0;
     uint32_t worldMeshesDrawn = 0;
@@ -62,6 +63,7 @@ public:
   void updateWorldChunkMeshes(const std::vector<WorldChunkMeshUpload>& uploads,
                               const std::vector<uint64_t>& removedKeys);
   void setCameraMatrices(const glm::mat4& view, const glm::mat4& proj);
+  void setFirstPersonMatrices(const glm::mat4& view, const glm::mat4& proj);
   void setCameraWorldState(const glm::vec3& eyePosition, const glm::vec3& forwardDirection, bool underwater);
   void setEnvironmentState(float daylight, float weatherIntensity, float dayCycleTime);
   void setTorchLights(const std::vector<glm::vec4>& lights);
@@ -162,10 +164,13 @@ private:
     VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
     VkBuffer indexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory indexMemory = VK_NULL_HANDLE;
+    VkDeviceSize vertexBufferSize = 0;
+    VkDeviceSize indexBufferSize = 0;
     uint32_t indexCount = 0;
     int chunkX = 0;
     int chunkZ = 0;
     bool alwaysVisible = false;
+    uint8_t renderLayer = 0;
   };
   bool uploadChunkGpuMesh(const WorldChunkMeshUpload& upload, ChunkGpuMesh& outMesh);
   void destroyChunkGpuMesh(ChunkGpuMesh& mesh);
@@ -191,6 +196,7 @@ private:
   VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
   VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+  VkPipeline firstPersonPipeline = VK_NULL_HANDLE;
   VkPipeline uiPipeline = VK_NULL_HANDLE;
   std::vector<VkFramebuffer> swapchainFramebuffers;
 
@@ -213,9 +219,13 @@ private:
   std::vector<VkBuffer> uniformBuffers;
   std::vector<VkDeviceMemory> uniformBuffersMemory;
   std::vector<void*> uniformBuffersMapped;
+  std::vector<VkBuffer> firstPersonUniformBuffers;
+  std::vector<VkDeviceMemory> firstPersonUniformBuffersMemory;
+  std::vector<void*> firstPersonUniformBuffersMapped;
 
   VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
   std::vector<VkDescriptorSet> descriptorSets;
+  std::vector<VkDescriptorSet> firstPersonDescriptorSets;
 
   std::vector<Vertex> meshVertices;
   std::vector<uint32_t> meshIndices;
@@ -228,6 +238,8 @@ private:
   std::vector<ChunkGpuMesh> retiredWorldChunkMeshes;
   glm::mat4 cameraView{1.0f};
   glm::mat4 cameraProj{1.0f};
+  glm::mat4 firstPersonView{1.0f};
+  glm::mat4 firstPersonProj{1.0f};
   glm::vec3 cameraWorldPos{0.0f};
   glm::vec3 cameraForward{0.0f, 0.0f, 1.0f};
   bool cameraUnderwater = false;

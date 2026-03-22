@@ -1,5 +1,7 @@
 /build/
 /build-win/
+/build-macos-fix/
+/build-mingw/
 /cmake-build-*/
 /out/
 /dist/

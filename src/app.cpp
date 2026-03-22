@@ -42,6 +42,7 @@ constexpr int kMinRenderDistance = 4;
 constexpr int kMaxRenderDistance = 14;
 constexpr uint64_t kDroppedItemsMeshKey = std::numeric_limits<uint64_t>::max() - 1ull;
 constexpr uint64_t kInteractionOverlayMeshKey = std::numeric_limits<uint64_t>::max() - 2ull;
+constexpr uint64_t kFirstPersonMeshKey = std::numeric_limits<uint64_t>::max() - 3ull;
 constexpr int kMaxTorchLights = 16;
 constexpr float kTorchLightRange = 8.5f;
 constexpr float kTorchLightCandidateRange = 512.0f;
@@ -76,6 +77,11 @@ constexpr float kStreamingProbeBlocks = 9.0f;
 constexpr int kStreamingWarmRadius = 1;
 constexpr float kTorchLightRefreshMoveThreshold = 0.55f;
 constexpr float kTorchLightRefreshForwardDot = 0.992f;
+constexpr float kFirstPersonEquipRaiseSpeed = 6.8f;
+constexpr float kFirstPersonEquipLowerSpeed = 10.5f;
+constexpr float kFirstPersonSwingDuration = 0.26f;
+constexpr float kFirstPersonUseDuration = 0.20f;
+constexpr float kFirstPersonProjectionFovDeg = 62.0f;
 
 float clampUiScaleValue(float value) {
   float clamped = std::clamp(value, kMinUiScale, kMaxUiScale);
@@ -1826,6 +1832,103 @@ void appendDroppedItemSprite(std::vector<Vertex>& vertices,
   appendDroppedItemQuad(vertices, indices, v0, v1, v2, v3, base, tile);
 }
 
+glm::vec3 transformPoint(const glm::mat4& transform, const glm::vec3& point) {
+  glm::vec4 result = transform * glm::vec4(point, 1.0f);
+  return glm::vec3(result);
+}
+
+void appendFirstPersonPrism(std::vector<Vertex>& vertices,
+                            std::vector<uint32_t>& indices,
+                            const glm::mat4& transform,
+                            const glm::vec3& center,
+                            const glm::vec3& halfExtents,
+                            const glm::vec3& baseColor,
+                            int tile) {
+  glm::vec3 p000 = transformPoint(transform, center + glm::vec3(-halfExtents.x, -halfExtents.y, -halfExtents.z));
+  glm::vec3 p001 = transformPoint(transform, center + glm::vec3(-halfExtents.x, -halfExtents.y, halfExtents.z));
+  glm::vec3 p010 = transformPoint(transform, center + glm::vec3(-halfExtents.x, halfExtents.y, -halfExtents.z));
+  glm::vec3 p011 = transformPoint(transform, center + glm::vec3(-halfExtents.x, halfExtents.y, halfExtents.z));
+  glm::vec3 p100 = transformPoint(transform, center + glm::vec3(halfExtents.x, -halfExtents.y, -halfExtents.z));
+  glm::vec3 p101 = transformPoint(transform, center + glm::vec3(halfExtents.x, -halfExtents.y, halfExtents.z));
+  glm::vec3 p110 = transformPoint(transform, center + glm::vec3(halfExtents.x, halfExtents.y, -halfExtents.z));
+  glm::vec3 p111 = transformPoint(transform, center + glm::vec3(halfExtents.x, halfExtents.y, halfExtents.z));
+
+  appendDroppedItemQuad(vertices, indices, p100, p110, p111, p101, baseColor * 0.84f, tile);
+  appendDroppedItemQuad(vertices, indices, p001, p011, p010, p000, baseColor * 0.82f, tile);
+  appendDroppedItemQuad(vertices, indices, p010, p011, p111, p110, baseColor * 1.03f, tile);
+  appendDroppedItemQuad(vertices, indices, p000, p100, p101, p001, baseColor * 0.60f, tile);
+  appendDroppedItemQuad(vertices, indices, p101, p111, p011, p001, baseColor * 0.92f, tile);
+  appendDroppedItemQuad(vertices, indices, p000, p010, p110, p100, baseColor * 0.72f, tile);
+}
+
+glm::vec3 firstPersonToolHandleColor(uint8_t type) {
+  switch (type) {
+    case kIronPickaxe:
+      return glm::vec3(0.64f, 0.46f, 0.24f);
+    case kStonePickaxe:
+      return glm::vec3(0.62f, 0.44f, 0.22f);
+    case kWoodPickaxe:
+    default:
+      return glm::vec3(0.70f, 0.50f, 0.24f);
+  }
+}
+
+glm::vec3 firstPersonToolHeadColor(uint8_t type) {
+  switch (type) {
+    case kIronPickaxe:
+      return glm::vec3(0.86f, 0.88f, 0.92f);
+    case kStonePickaxe:
+      return glm::vec3(0.56f, 0.58f, 0.62f);
+    case kWoodPickaxe:
+    default:
+      return glm::vec3(0.78f, 0.60f, 0.30f);
+  }
+}
+
+void appendFirstPersonPickaxe(std::vector<Vertex>& vertices,
+                              std::vector<uint32_t>& indices,
+                              const glm::mat4& transform,
+                              uint8_t type) {
+  const glm::vec3 handleColor = firstPersonToolHandleColor(type);
+  const glm::vec3 headColor = firstPersonToolHeadColor(type);
+
+  appendFirstPersonPrism(vertices,
+                         indices,
+                         transform,
+                         glm::vec3(0.0f, -0.14f, 0.0f),
+                         glm::vec3(0.024f, 0.30f, 0.024f),
+                         handleColor,
+                         kTileUiWhite);
+  appendFirstPersonPrism(vertices,
+                         indices,
+                         transform,
+                         glm::vec3(0.0f, 0.18f, 0.0f),
+                         glm::vec3(0.030f, 0.048f, 0.028f),
+                         headColor * 0.92f,
+                         kTileUiWhite);
+  appendFirstPersonPrism(vertices,
+                         indices,
+                         transform,
+                         glm::vec3(0.0f, 0.28f, 0.0f),
+                         glm::vec3(0.15f, 0.026f, 0.028f),
+                         headColor,
+                         kTileUiWhite);
+  appendFirstPersonPrism(vertices,
+                         indices,
+                         transform,
+                         glm::vec3(-0.11f, 0.21f, 0.0f),
+                         glm::vec3(0.020f, 0.060f, 0.020f),
+                         headColor * 0.96f,
+                         kTileUiWhite);
+  appendFirstPersonPrism(vertices,
+                         indices,
+                         transform,
+                         glm::vec3(0.11f, 0.21f, 0.0f),
+                         glm::vec3(0.020f, 0.060f, 0.020f),
+                         headColor * 0.96f,
+                         kTileUiWhite);
+}
+
 uint32_t mixLootHash(uint32_t value) {
   value ^= value >> 16;
   value *= 0x7FEB352Du;
@@ -2304,7 +2407,7 @@ void App::updateWindowTitle() {
       : std::string(label);
   };
 
-  std::string title = "CubeOS v0.2.3 Beta";
+  std::string title = "CubeOS v0.3.0 Snapshot 1";
   switch (screenState) {
     case ScreenState::kMainMenu:
       title += " | " + loc("Menu: ", "Меню: ") + mark(mainMenuSelection, 0, loc("Start", "Начать")) + "  "
@@ -4785,6 +4888,8 @@ void App::mainLoop() {
     }
     syncAudioState();
     syncDroppedItemMesh(false);
+    updateFirstPersonState(deltaTime);
+    syncFirstPersonMesh();
     updateInteractionOverlayMesh();
     recordProfilerMetric(profiler.gameplay,
                          (glfwGetTime() - gameplayStart) * 1000.0,
@@ -4885,6 +4990,12 @@ void App::mainLoop() {
                                       0.1f,
                                       200.0f);
     proj[1][1] *= -1.0f;
+    glm::mat4 firstPersonView(1.0f);
+    glm::mat4 firstPersonProj = glm::perspective(glm::radians(kFirstPersonProjectionFovDeg),
+                                                 width / static_cast<float>(height),
+                                                 0.01f,
+                                                 12.0f);
+    firstPersonProj[1][1] *= -1.0f;
 
     double torchStart = glfwGetTime();
     vk.setEnvironmentState(dayLightFactor, weatherIntensity, dayCycleTime);
@@ -4922,6 +5033,7 @@ void App::mainLoop() {
     double drawStart = glfwGetTime();
     vk.setCameraWorldState(eye, front, cameraInWater);
     vk.setCameraMatrices(view, proj);
+    vk.setFirstPersonMatrices(firstPersonView, firstPersonProj);
     vk.drawFrame();
     recordProfilerMetric(profiler.draw,
                          (glfwGetTime() - drawStart) * 1000.0,
@@ -5451,6 +5563,7 @@ void App::processInput(float deltaTime) {
         glm::vec3(playerVel.x, 0.0f, playerVel.z) * 0.45f +
         glm::vec3(0.0f, kThrownItemUpwardSpeed, 0.0f);
       spawnDroppedItemWithPhysics(stack.type, dropSource, dropVelocity, kThrownItemPickupDelay);
+      triggerFirstPersonUseAnimation(0.55f);
       stack.count = static_cast<uint16_t>(stack.count - 1);
       if (stack.count == 0) {
         stack.type = kAir;
@@ -5547,6 +5660,9 @@ void App::processInput(float deltaTime) {
       };
 
       auto breakTarget = [&](const glm::ivec3& blockPos, uint8_t blockType) {
+        if (!firstPersonSwingActive || firstPersonSwingProgress >= 0.72f) {
+          triggerFirstPersonSwing(1.0f);
+        }
         if (breaksInstantly(blockType)) {
           completeBreakTarget(blockPos);
           return;
@@ -5657,6 +5773,7 @@ void App::processInput(float deltaTime) {
 
       if (hitType == kLootCache && !crouching) {
         if (claimLootCache(hit.block)) {
+          triggerFirstPersonUseAnimation(0.75f);
           mouseLeftDown = leftPressed;
           mouseRightDown = rightPressed;
           return;
@@ -5666,6 +5783,7 @@ void App::processInput(float deltaTime) {
         activeWorkbenchBlock = hit.block;
         furnaceOpen = false;
         workbenchOpen = true;
+        triggerFirstPersonUseAnimation(0.70f);
         setInventoryOpen(true);
         mouseLeftDown = leftPressed;
         mouseRightDown = rightPressed;
@@ -5676,6 +5794,7 @@ void App::processInput(float deltaTime) {
         workbenchOpen = false;
         furnaceOpen = true;
         returnCraftingItemsToInventory();
+        triggerFirstPersonUseAnimation(0.70f);
         setInventoryOpen(true);
         mouseLeftDown = leftPressed;
         mouseRightDown = rightPressed;
@@ -5738,6 +5857,7 @@ void App::processInput(float deltaTime) {
           }
           world.setBlock(target.x, target.y, target.z, placedType);
           audio.playCue(placeCueForBlock(placedType), placeGainForBlock(placedType));
+          triggerFirstPersonUseAnimation(0.82f);
           waterSimBoostTimer = std::max(waterSimBoostTimer, 2.0f);
           if (adjustedPlayerPos.y > playerPos.y + 0.0001f) {
             playerPos = adjustedPlayerPos;
@@ -6314,7 +6434,7 @@ void App::rebuildUiMesh() {
             40.0f,
             glm::vec3(0.16f, 0.19f, 0.24f),
             backgroundTile);
-    drawText("CubeOS v0.2.3 Beta", panelX + panelWidth * 0.5f, panelY + 18.0f, 3.0f,
+    drawText("CubeOS v0.3.0 Snapshot 1", panelX + panelWidth * 0.5f, panelY + 18.0f, 3.0f,
              glm::vec3(0.91f, 0.94f, 0.98f), true);
 
     auto drawMenuRow = [&](int index,
@@ -7887,6 +8007,7 @@ void App::rebuildUiMesh() {
     lines.push_back((ru ? "DRAWCALLS " : "DRAWCALLS ") +
                     std::to_string(renderStats.totalDrawCalls) +
                     " W " + std::to_string(renderStats.worldDrawCalls) +
+                    " FP " + std::to_string(renderStats.firstPersonDrawCalls) +
                     " UI " + std::to_string(renderStats.uiDrawCalls));
     lines.push_back((ru ? "СЕКЦИИ " : "SECTIONS ") +
                     std::to_string(renderStats.worldMeshesTracked) +
@@ -8844,6 +8965,249 @@ void App::syncDroppedItemMesh(bool force) {
   pendingWorldChunkUploads[kDroppedItemsMeshKey] = std::move(upload);
   droppedItemMeshUploaded = true;
   droppedItemMeshTimer = 0.0f;
+}
+
+void App::triggerFirstPersonSwing(float strength) {
+  if (screenState != ScreenState::kPlaying || inventoryOpen || achievementTreeOpen) {
+    return;
+  }
+  firstPersonSwingActive = true;
+  firstPersonSwingProgress = 0.0f;
+  firstPersonSwingStrength = std::clamp(strength, 0.35f, 1.35f);
+}
+
+void App::triggerFirstPersonUseAnimation(float strength) {
+  if (screenState != ScreenState::kPlaying || inventoryOpen || achievementTreeOpen) {
+    return;
+  }
+  firstPersonUseActive = true;
+  firstPersonUseProgress = 0.0f;
+  firstPersonUseStrength = std::clamp(strength, 0.35f, 1.20f);
+}
+
+void App::updateFirstPersonState(float deltaTime) {
+  bool renderActive = screenState == ScreenState::kPlaying && !inventoryOpen && !achievementTreeOpen;
+  if (!renderActive) {
+    firstPersonVisibleItem = selectedBlock;
+    firstPersonEquipProgress = 0.0f;
+    firstPersonSwingProgress = 0.0f;
+    firstPersonSwingStrength = 1.0f;
+    firstPersonSwingActive = false;
+    firstPersonUseProgress = 0.0f;
+    firstPersonUseStrength = 1.0f;
+    firstPersonUseActive = false;
+    firstPersonWalkBobAmount = 0.0f;
+    return;
+  }
+
+  firstPersonIdleTime += deltaTime;
+
+  uint8_t targetItem = selectedBlock;
+  if (firstPersonVisibleItem != targetItem) {
+    firstPersonEquipProgress =
+      std::max(0.0f, firstPersonEquipProgress - deltaTime * kFirstPersonEquipLowerSpeed);
+    if (firstPersonEquipProgress <= 0.08f) {
+      firstPersonVisibleItem = targetItem;
+    }
+  } else {
+    firstPersonEquipProgress =
+      std::min(1.0f, firstPersonEquipProgress + deltaTime * kFirstPersonEquipRaiseSpeed);
+  }
+
+  if (firstPersonSwingActive) {
+    firstPersonSwingProgress += deltaTime / kFirstPersonSwingDuration;
+    if (firstPersonSwingProgress >= 1.0f) {
+      firstPersonSwingProgress = 0.0f;
+      firstPersonSwingStrength = 1.0f;
+      firstPersonSwingActive = false;
+    }
+  } else {
+    firstPersonSwingProgress = 0.0f;
+  }
+
+  if (firstPersonUseActive) {
+    firstPersonUseProgress += deltaTime / kFirstPersonUseDuration;
+    if (firstPersonUseProgress >= 1.0f) {
+      firstPersonUseProgress = 0.0f;
+      firstPersonUseStrength = 1.0f;
+      firstPersonUseActive = false;
+    }
+  } else {
+    firstPersonUseProgress = 0.0f;
+  }
+
+  float horizontalSpeed = glm::length(glm::vec2(playerVel.x, playerVel.z));
+  bool swimming = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.20f, 0.0f));
+  float targetBobAmount = 0.0f;
+  if (onGround) {
+    targetBobAmount = std::clamp(horizontalSpeed / 6.0f, 0.0f, 1.0f);
+  } else if (swimming) {
+    targetBobAmount = std::clamp(horizontalSpeed / 3.2f, 0.0f, 0.42f);
+  }
+  float bobBlend = std::clamp(deltaTime * 8.5f, 0.0f, 1.0f);
+  firstPersonWalkBobAmount = glm::mix(firstPersonWalkBobAmount, targetBobAmount, bobBlend);
+  if (firstPersonWalkBobAmount > 0.001f) {
+    firstPersonWalkBobPhase += deltaTime * (6.4f + horizontalSpeed * 0.55f);
+  }
+}
+
+void App::syncFirstPersonMesh() {
+  bool renderActive = screenState == ScreenState::kPlaying && !inventoryOpen && !achievementTreeOpen;
+  if (!renderActive || firstPersonEquipProgress <= 0.001f) {
+    if (firstPersonMeshUploaded) {
+      pendingWorldChunkUploads.erase(kFirstPersonMeshKey);
+      pendingWorldChunkRemovals.insert(kFirstPersonMeshKey);
+      firstPersonMeshUploaded = false;
+    }
+    return;
+  }
+
+  std::vector<Vertex> vertices;
+  std::vector<uint32_t> indices;
+  vertices.reserve(160);
+  indices.reserve(240);
+
+  float equip = std::clamp(firstPersonEquipProgress, 0.0f, 1.0f);
+  float swing = std::clamp(firstPersonSwingProgress, 0.0f, 1.0f);
+  float use = std::clamp(firstPersonUseProgress, 0.0f, 1.0f);
+  float swingArc = std::sin(std::sqrt(swing) * (kTau * 0.5f)) * firstPersonSwingStrength;
+  float swingLift = std::sin(swing * (kTau * 0.5f)) * firstPersonSwingStrength;
+  float useArc = std::sin(use * (kTau * 0.5f)) * firstPersonUseStrength;
+  float bobSide = std::sin(firstPersonWalkBobPhase * 1.65f) * 0.026f * firstPersonWalkBobAmount;
+  float bobLift = std::abs(std::cos(firstPersonWalkBobPhase * 1.65f)) * 0.034f * firstPersonWalkBobAmount;
+  float bobDepth = std::sin(firstPersonWalkBobPhase * 1.65f + 0.70f) * 0.016f * firstPersonWalkBobAmount;
+  float idleSide = std::sin(firstPersonIdleTime * 1.45f) * 0.008f;
+  float idleLift = std::cos(firstPersonIdleTime * 1.10f) * 0.010f;
+  uint8_t itemType = firstPersonVisibleItem;
+  bool toolItem = itemType != kAir && isToolItem(itemType);
+  bool blockItem = itemType != kAir &&
+                   isPlaceableItem(itemType) &&
+                   !shouldRenderDroppedItemAsSprite(itemType);
+
+  glm::mat4 handTransform(1.0f);
+  handTransform = glm::translate(handTransform,
+                                 glm::vec3(0.50f + bobSide + idleSide + swingArc * 0.03f,
+                                           -0.54f + bobLift + idleLift - (1.0f - equip) * 0.56f - useArc * 0.05f,
+                                           -0.92f + bobDepth + swingArc * 0.06f + useArc * 0.04f));
+  handTransform = glm::rotate(handTransform, glm::radians(16.0f + bobSide * 80.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+  handTransform = glm::rotate(handTransform, glm::radians(-24.0f + swingArc * 12.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+  handTransform = glm::rotate(handTransform,
+                              glm::radians(-28.0f - swingLift * 30.0f - useArc * 18.0f),
+                              glm::vec3(1.0f, 0.0f, 0.0f));
+
+  const glm::vec3 skinColor(0.84f, 0.72f, 0.62f);
+  const glm::vec3 sleeveColor(0.20f, 0.35f, 0.66f);
+  if (!toolItem) {
+    appendFirstPersonPrism(vertices,
+                           indices,
+                           handTransform,
+                           glm::vec3(0.0f, -0.12f, 0.0f),
+                           glm::vec3(0.095f, 0.31f, 0.095f),
+                           skinColor,
+                           kTileUiWhite);
+    appendFirstPersonPrism(vertices,
+                           indices,
+                           handTransform,
+                           glm::vec3(0.0f, -0.50f, 0.0f),
+                           glm::vec3(0.14f, 0.20f, 0.14f),
+                           sleeveColor,
+                           kTileUiWhite);
+    appendFirstPersonPrism(vertices,
+                           indices,
+                           handTransform,
+                           glm::vec3(0.0f, 0.16f, 0.0f),
+                           glm::vec3(0.082f, 0.105f, 0.105f),
+                           skinColor * 1.03f,
+                           kTileUiWhite);
+  }
+
+  glm::mat4 itemTransform = handTransform;
+  glm::vec3 itemHalfExtents(0.0f);
+  glm::vec3 itemColor(0.0f);
+  int itemTile = kTileUiWhite;
+
+  if (toolItem) {
+    itemTransform = glm::mat4(1.0f);
+    itemTransform = glm::translate(itemTransform,
+                                   glm::vec3(0.46f + bobSide * 0.55f + idleSide * 0.20f + swingArc * 0.03f,
+                                             -0.48f + bobLift * 0.35f + idleLift * 0.14f -
+                                               (1.0f - equip) * 0.42f - useArc * 0.05f,
+                                             -0.86f + bobDepth * 0.45f + swingArc * 0.04f + useArc * 0.03f));
+    itemTransform = glm::rotate(itemTransform,
+                                glm::radians(14.0f + swingArc * 10.0f),
+                                glm::vec3(0.0f, 1.0f, 0.0f));
+    itemTransform = glm::rotate(itemTransform,
+                                glm::radians(34.0f + swingArc * 14.0f),
+                                glm::vec3(0.0f, 0.0f, 1.0f));
+    itemTransform = glm::rotate(itemTransform,
+                                glm::radians(-58.0f - swingLift * 10.0f - useArc * 18.0f),
+                                glm::vec3(1.0f, 0.0f, 0.0f));
+  } else if (blockItem) {
+    itemTransform = glm::translate(itemTransform, glm::vec3(-0.17f, -0.02f, -0.05f));
+    itemTransform = glm::rotate(itemTransform, glm::radians(38.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    itemTransform = glm::rotate(itemTransform, glm::radians(14.0f + swingArc * 5.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    itemTransform = glm::rotate(itemTransform,
+                                glm::radians(-18.0f - useArc * 12.0f),
+                                glm::vec3(1.0f, 0.0f, 0.0f));
+    itemHalfExtents = glm::vec3(0.18f);
+  } else {
+    itemTransform = glm::translate(itemTransform, glm::vec3(-0.18f, 0.02f, -0.03f));
+    itemTransform = glm::rotate(itemTransform,
+                                glm::radians(68.0f + swingArc * 5.0f),
+                                glm::vec3(0.0f, 0.0f, 1.0f));
+    itemTransform = glm::rotate(itemTransform,
+                                glm::radians(-78.0f - useArc * 20.0f),
+                                glm::vec3(1.0f, 0.0f, 0.0f));
+    itemTransform = glm::rotate(itemTransform,
+                                glm::radians(20.0f + swingArc * 8.0f),
+                                glm::vec3(0.0f, 1.0f, 0.0f));
+
+    if (itemType == kTorch || itemType == kStick) {
+      itemHalfExtents = glm::vec3(0.05f, 0.30f, 0.04f);
+    } else if (itemType == kIronIngot) {
+      itemHalfExtents = glm::vec3(0.18f, 0.06f, 0.035f);
+    } else if (itemType == kDiamond) {
+      itemHalfExtents = glm::vec3(0.14f, 0.14f, 0.05f);
+    } else if (isToolItem(itemType)) {
+      itemHalfExtents = glm::vec3(0.10f, 0.28f, 0.035f);
+    } else if (itemType != kAir) {
+      itemHalfExtents = glm::vec3(0.12f, 0.18f, 0.045f);
+    }
+  }
+
+  if (itemType != kAir) {
+    itemColor = glm::vec3(1.0f);
+    itemTile = tileForBlock(itemType);
+  }
+
+  if (toolItem) {
+    appendFirstPersonPickaxe(vertices, indices, itemTransform, itemType);
+  } else {
+    appendFirstPersonPrism(vertices,
+                           indices,
+                           itemTransform,
+                           glm::vec3(0.0f),
+                           itemHalfExtents,
+                           itemColor,
+                           itemTile);
+  }
+
+  if (vertices.empty() || indices.empty()) {
+    if (firstPersonMeshUploaded) {
+      pendingWorldChunkUploads.erase(kFirstPersonMeshKey);
+      pendingWorldChunkRemovals.insert(kFirstPersonMeshKey);
+      firstPersonMeshUploaded = false;
+    }
+    return;
+  }
+
+  VulkanContext::WorldChunkMeshUpload upload;
+  upload.key = kFirstPersonMeshKey;
+  upload.vertices = std::move(vertices);
+  upload.indices = std::move(indices);
+  pendingWorldChunkRemovals.erase(kFirstPersonMeshKey);
+  pendingWorldChunkUploads[kFirstPersonMeshKey] = std::move(upload);
+  firstPersonMeshUploaded = true;
 }
 
 bool App::claimLootCache(const glm::ivec3& block) {

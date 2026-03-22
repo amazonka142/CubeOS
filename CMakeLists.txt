@@ -2,8 +2,10 @@ cmake_minimum_required(VERSION 3.20)
 # CMake 4.x dropped compatibility with <3.5. Keep deps like older GLM working.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
-set(CUBEOS_VERSION "0.2.3")
-set(CUBEOS_MACOS_APP_NAME "CubeOS v${CUBEOS_VERSION} Beta")
+set(CUBEOS_VERSION "0.3.0")
+set(CUBEOS_DISPLAY_VERSION "${CUBEOS_VERSION} Snapshot 1")
+set(CUBEOS_RELEASE_TAG "v0.3.0-snapshot.1")
+set(CUBEOS_MACOS_APP_NAME "CubeOS v${CUBEOS_DISPLAY_VERSION}")
 
 project(cubeos_voxel VERSION ${CUBEOS_VERSION} LANGUAGES C CXX)
 
@@ -249,7 +251,7 @@ if (APPLE)
   set(CPACK_PACKAGE_NAME "CubeOS")
   set(CPACK_PACKAGE_VENDOR "CubeOS")
   set(CPACK_PACKAGE_VERSION "${CUBEOS_VERSION}")
-  set(CPACK_PACKAGE_FILE_NAME "CubeOS-v${CUBEOS_VERSION}-Beta-macOS")
+  set(CPACK_PACKAGE_FILE_NAME "CubeOS-${CUBEOS_RELEASE_TAG}-macOS")
   set(CPACK_GENERATOR "DragNDrop")
   set(CPACK_DMG_VOLUME_NAME "${CUBEOS_MACOS_APP_NAME}")
   include(CPack)

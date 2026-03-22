@@ -63,6 +63,7 @@ void main() {
   float daylight = clamp(ubo.params.w, 0.0, 1.0);
   float weather = clamp(ubo.weatherData.x, 0.0, 1.0);
   float cloudCover = clamp(max(ubo.weatherData.y, weather), 0.0, 1.0);
+  bool firstPersonPass = ubo.weatherData.w > 0.5;
 
   if (vColor.g < -0.5 && vColor.r >= 0.0) {
     // Texture-free UI primitive path (text glyphs/markers).
@@ -162,36 +163,44 @@ void main() {
   }
 
   if (vUiPass < 0.5) {
-    float ambient = mix(0.24, 1.0, daylight);
-    ambient *= mix(1.0, 0.78, weather);
+    if (firstPersonPass) {
+      float ambient = mix(0.72, 1.02, daylight);
+      ambient *= mix(1.0, 0.90, weather);
+      outColor.rgb *= ambient;
+      vec3 highlightTint = looksLikeWater ? vec3(1.00, 1.05, 1.10) : vec3(1.04, 1.03, 1.01);
+      outColor.rgb = mix(outColor.rgb, outColor.rgb * highlightTint + vec3(0.015), 0.22);
+    } else {
+      float ambient = mix(0.24, 1.0, daylight);
+      ambient *= mix(1.0, 0.78, weather);
 
-    float torchLight = 0.0;
-    int torchCount = int(ubo.torchMeta.x + 0.5);
-    for (int i = 0; i < 16; ++i) {
-      if (i >= torchCount) {
-        break;
+      float torchLight = 0.0;
+      int torchCount = int(ubo.torchMeta.x + 0.5);
+      for (int i = 0; i < 16; ++i) {
+        if (i >= torchCount) {
+          break;
+        }
+        vec4 light = ubo.torchLights[i];
+        float range = max(light.w, 0.001);
+        float dist = distance(vWorldPos, light.xyz);
+        if (dist >= range) {
+          continue;
+        }
+        float falloff = 1.0 - (dist / range);
+        torchLight = max(torchLight, falloff * falloff);
       }
-      vec4 light = ubo.torchLights[i];
-      float range = max(light.w, 0.001);
-      float dist = distance(vWorldPos, light.xyz);
-      if (dist >= range) {
-        continue;
-      }
-      float falloff = 1.0 - (dist / range);
-      torchLight = max(torchLight, falloff * falloff);
-    }
 
-    if (looksLikeWater) {
-      ambient = mix(ambient, min(1.12, ambient + 0.10), 0.45);
-      torchLight *= 0.45;
+      if (looksLikeWater) {
+        ambient = mix(ambient, min(1.12, ambient + 0.10), 0.45);
+        torchLight *= 0.45;
+      }
+      vec3 baseLit = outColor.rgb * ambient;
+      vec3 torchTint = vec3(1.18, 0.94, 0.62);
+      baseLit += outColor.rgb * torchLight * 1.55 * torchTint;
+      outColor.rgb = baseLit;
     }
-    vec3 baseLit = outColor.rgb * ambient;
-    vec3 torchTint = vec3(1.18, 0.94, 0.62);
-    baseLit += outColor.rgb * torchLight * 1.55 * torchTint;
-    outColor.rgb = baseLit;
   }
 
-  if (ubo.cameraData.w <= 0.5 && vUiPass < 0.5) {
+  if (!firstPersonPass && ubo.cameraData.w <= 0.5 && vUiPass < 0.5) {
     float distToCamera = distance(vWorldPos, ubo.cameraData.xyz);
     float rainFog = (1.0 - exp(-max(0.0, distToCamera - 5.0) * 0.06)) * weather;
     float nightFog = (1.0 - exp(-max(0.0, distToCamera - 12.0) * 0.025)) * (1.0 - daylight) * 0.45;
@@ -201,7 +210,7 @@ void main() {
     outColor.rgb = mix(outColor.rgb, fogColor, fog);
   }
 
-  if (ubo.cameraData.w > 0.5 && vUiPass < 0.5) {
+  if (!firstPersonPass && ubo.cameraData.w > 0.5 && vUiPass < 0.5) {
     float distToCamera = distance(vWorldPos, ubo.cameraData.xyz);
     // Keep the underwater look blue, but preserve nearby readability.
     float fogStart = looksLikeWater ? 1.8 : 2.8;
@@ -214,5 +223,9 @@ void main() {
     if (!looksLikeWater) {
       outColor.a = 1.0;
     }
+  }
+
+  if (firstPersonPass && ubo.cameraData.w > 0.5 && vUiPass < 0.5) {
+    outColor.rgb = mix(outColor.rgb, vec3(0.10, 0.30, 0.50), 0.20);
   }
 }

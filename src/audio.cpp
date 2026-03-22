@@ -37,17 +37,17 @@ struct ClipConfig {
 };
 
 constexpr std::array<ClipConfig, cueIndex(AudioSystem::Cue::kCount)> kClipConfigs{{
-  {"chest_open.ogg", 0.72f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
-  {"craft_complete.ogg", 0.78f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"chest_open.wav", 0.72f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"craft_complete.wav", 0.78f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
   {"furnace_fire.wav", 0.22f, MA_SOUND_FLAG_NO_SPATIALIZATION | MA_SOUND_FLAG_STREAM, true},
-  {"block_break_dirt.ogg", 0.88f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
-  {"block_place_dirt.ogg", 0.78f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"block_break_dirt.wav", 0.88f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"block_place_dirt.wav", 0.78f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
   {"block_break_sand.wav", 0.98f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
   {"block_place_sand.wav", 0.84f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
-  {"block_break_wood.ogg", 0.90f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
-  {"block_place_wood.ogg", 0.82f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
-  {"block_break_stone.ogg", 0.92f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
-  {"block_place_stone.ogg", 0.80f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"block_break_wood.wav", 0.90f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"block_place_wood.wav", 0.82f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"block_break_stone.wav", 0.92f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"block_place_stone.wav", 0.80f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
   {"water_swim.wav", 0.84f, MA_SOUND_FLAG_NO_SPATIALIZATION, false}
 }};
 
