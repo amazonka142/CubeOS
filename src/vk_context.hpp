@@ -65,7 +65,7 @@ public:
   void setCameraMatrices(const glm::mat4& view, const glm::mat4& proj);
   void setFirstPersonMatrices(const glm::mat4& view, const glm::mat4& proj);
   void setCameraWorldState(const glm::vec3& eyePosition, const glm::vec3& forwardDirection, bool underwater);
-  void setEnvironmentState(float daylight, float weatherIntensity, float dayCycleTime);
+  void setEnvironmentState(float daylight, float weatherIntensity, float dayCycleTime, bool aprilFoolsMode);
   void setTorchLights(const std::vector<glm::vec4>& lights);
   RenderStats getLastRenderStats() const;
   const UiGlyphInfo* findUiGlyph(uint32_t codepoint) const;
@@ -246,6 +246,7 @@ private:
   float environmentDaylight = 1.0f;
   float environmentWeatherIntensity = 0.0f;
   float environmentDayCycleTime = 0.32f;
+  bool environmentAprilFoolsMode = false;
   std::array<glm::vec4, 16> environmentTorchLights{};
   uint32_t environmentTorchLightCount = 0;
   RenderStats lastRenderStats{};

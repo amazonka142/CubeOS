@@ -538,6 +538,9 @@ void populateUiFontAtlas(std::vector<uint8_t>& pixels,
 
   CTFontRef font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, kUiFontBaseSizePx, nullptr);
   if (!font) {
+    font = CTFontCreateWithName(CFSTR("Helvetica Neue"), kUiFontBaseSizePx, nullptr);
+  }
+  if (!font) {
     font = CTFontCreateWithName(CFSTR("Helvetica"), kUiFontBaseSizePx, nullptr);
   }
   if (!font) {
@@ -674,8 +677,10 @@ void populateUiFontAtlas(std::vector<uint8_t>& pixels,
             info.vMin = y0 / atlasHeight;
             info.uMax = x1 / atlasWidth;
             info.vMax = y1 / atlasHeight;
-            info.bearingX = static_cast<float>(minX);
-            info.bearingTop = static_cast<float>(minY);
+            info.bearingX = static_cast<float>(left + (minX - 1));
+            info.bearingTop = std::max(0.0f,
+                                       outAscent -
+                                         static_cast<float>(bbox.origin.y + bbox.size.height));
             info.width = static_cast<float>(glyphWidth);
             info.height = static_cast<float>(glyphHeight);
             info.advance = std::max(info.advance, static_cast<float>(glyphWidth + 1));
@@ -1237,7 +1242,10 @@ void VulkanContext::setCameraWorldState(const glm::vec3& eyePosition,
   cameraUnderwater = underwater;
 }
 
-void VulkanContext::setEnvironmentState(float daylight, float weatherIntensity, float dayCycleTime) {
+void VulkanContext::setEnvironmentState(float daylight,
+                                        float weatherIntensity,
+                                        float dayCycleTime,
+                                        bool aprilFoolsMode) {
   environmentDaylight = std::clamp(daylight, 0.0f, 1.0f);
   environmentWeatherIntensity = std::clamp(weatherIntensity, 0.0f, 1.0f);
   float wrappedDayCycle = dayCycleTime - std::floor(dayCycleTime);
@@ -1245,6 +1253,7 @@ void VulkanContext::setEnvironmentState(float daylight, float weatherIntensity, 
     wrappedDayCycle += 1.0f;
   }
   environmentDayCycleTime = wrappedDayCycle;
+  environmentAprilFoolsMode = aprilFoolsMode;
 }
 
 void VulkanContext::setTorchLights(const std::vector<glm::vec4>& lights) {
@@ -1262,6 +1271,9 @@ VulkanContext::RenderStats VulkanContext::getLastRenderStats() const {
 const VulkanContext::UiGlyphInfo* VulkanContext::findUiGlyph(uint32_t codepoint) const {
   auto it = uiGlyphs.find(codepoint);
   if (it == uiGlyphs.end()) {
+    return nullptr;
+  }
+  if (it->second.width <= 0.0f || it->second.height <= 0.0f) {
     return nullptr;
   }
   return &it->second;
@@ -2158,6 +2170,35 @@ void VulkanContext::createTextureImage() {
     }
   };
 
+  fillSolidTile(kTileSuspiciousGlass, 118, 230, 212);
+  for (int y = 0; y < kAtlasTileSize; ++y) {
+    for (int x = 0; x < kAtlasTileSize; ++x) {
+      uint32_t h = hash(x, y, 463);
+      int shimmer = static_cast<int>(h % 28u) - 10;
+      int r = 118 + shimmer / 2;
+      int g = 220 + shimmer;
+      int b = 198 + shimmer / 2;
+      if ((x + y) % 5 == 0) {
+        r = 194 + static_cast<int>((h >> 3) % 26u);
+        g = 255;
+        b = 224 + static_cast<int>((h >> 5) % 18u);
+      }
+      putPixel((kTileSuspiciousGlass % kAtlasCols) * kAtlasTileSize + x,
+               (kTileSuspiciousGlass / kAtlasCols) * kAtlasTileSize + y,
+               static_cast<uint8_t>(std::clamp(r, 0, 255)),
+               static_cast<uint8_t>(std::clamp(g, 0, 255)),
+               static_cast<uint8_t>(std::clamp(b, 0, 255)),
+               255);
+    }
+  }
+  drawRect(kTileSuspiciousGlass, 1, 1, 14, 1, 236, 255, 244);
+  drawRect(kTileSuspiciousGlass, 1, 14, 14, 1, 78, 160, 148);
+  drawRect(kTileSuspiciousGlass, 1, 1, 1, 14, 236, 255, 244);
+  drawRect(kTileSuspiciousGlass, 14, 1, 1, 14, 78, 160, 148);
+  drawRect(kTileSuspiciousGlass, 3, 3, 10, 2, 214, 255, 238);
+  drawRect(kTileSuspiciousGlass, 4, 8, 8, 2, 136, 244, 228);
+  drawRect(kTileSuspiciousGlass, 6, 12, 4, 1, 224, 180, 244);
+
   fillSolidTile(kTileWorkbench, 102, 74, 44);
   for (int y = 0; y < 6; ++y) {
     for (int x = 0; x < kAtlasTileSize; ++x) {
@@ -2254,6 +2295,34 @@ void VulkanContext::createTextureImage() {
   drawRect(kTileLootCache, 7, 2, 2, 13, 96, 62, 28);
   drawRect(kTileLootCache, 6, 6, 4, 5, 214, 180, 86);
   drawRect(kTileLootCache, 7, 7, 2, 3, 78, 56, 24);
+
+  fillSolidTile(kTileWool, 232, 232, 236);
+  for (int y = 1; y < kAtlasTileSize; y += 4) {
+    drawRect(kTileWool, 0, y, kAtlasTileSize, 1, 214, 214, 220);
+  }
+  drawRect(kTileWool, 2, 3, 12, 2, 244, 244, 248);
+  drawRect(kTileWool, 3, 8, 10, 2, 220, 220, 226);
+  drawRect(kTileWool, 2, 12, 12, 2, 206, 206, 214);
+
+  clearTileAlpha(kTileRawMutton);
+  drawRect(kTileRawMutton, 2, 4, 12, 8, 182, 62, 74);
+  drawRect(kTileRawMutton, 3, 5, 10, 6, 212, 92, 104);
+  drawRect(kTileRawMutton, 4, 6, 7, 4, 242, 186, 194);
+  drawRect(kTileRawMutton, 10, 6, 2, 4, 230, 154, 160);
+  drawRect(kTileRawMutton, 1, 6, 2, 3, 244, 238, 214);
+
+  clearTileAlpha(kTileCookedMutton);
+  drawRect(kTileCookedMutton, 2, 4, 12, 8, 114, 62, 28);
+  drawRect(kTileCookedMutton, 3, 5, 10, 6, 146, 84, 36);
+  drawRect(kTileCookedMutton, 4, 6, 8, 4, 198, 122, 54);
+  drawRect(kTileCookedMutton, 1, 6, 2, 3, 238, 224, 176);
+
+  fillSolidTile(kTileBed, 166, 36, 36);
+  drawRect(kTileBed, 1, 1, 14, 5, 230, 228, 222);
+  drawRect(kTileBed, 1, 6, 14, 8, 186, 42, 42);
+  drawRect(kTileBed, 2, 7, 12, 6, 218, 64, 64);
+  drawRect(kTileBed, 2, 14, 2, 2, 84, 54, 24);
+  drawRect(kTileBed, 12, 14, 2, 2, 84, 54, 24);
 
   // Prefer bundled CC0 texture assets when present, while keeping the
   // procedural atlas as a fallback for missing files or unsupported platforms.
@@ -2594,15 +2663,24 @@ void VulkanContext::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
   if (cycle < 0.0f) {
     cycle += 1.0f;
   }
-  glm::vec3 clearNight = glm::vec3(0.02f, 0.03f, 0.09f);
-  glm::vec3 clearDay = glm::vec3(0.52f, 0.72f, 0.97f);
-  glm::vec3 clearStorm = glm::vec3(0.18f, 0.22f, 0.30f);
+  glm::vec3 clearNight = environmentAprilFoolsMode
+    ? glm::vec3(0.14f, 0.06f, 0.10f)
+    : glm::vec3(0.02f, 0.03f, 0.09f);
+  glm::vec3 clearDay = environmentAprilFoolsMode
+    ? glm::vec3(0.66f, 1.00f, 0.80f)
+    : glm::vec3(0.52f, 0.72f, 0.97f);
+  glm::vec3 clearStorm = environmentAprilFoolsMode
+    ? glm::vec3(0.48f, 0.22f, 0.28f)
+    : glm::vec3(0.18f, 0.22f, 0.30f);
   glm::vec3 clearColor = glm::mix(clearNight, clearDay, daylight);
   float sunPhase = std::sin((cycle - 0.25f) * 6.28318530718f);
   float twilight = std::clamp(1.0f - std::abs(sunPhase), 0.0f, 1.0f);
   twilight = twilight * twilight * (3.0f - 2.0f * twilight);
   twilight *= (1.0f - weather * 0.6f);
-  clearColor = glm::mix(clearColor, glm::vec3(0.84f, 0.45f, 0.22f), twilight * 0.25f);
+  clearColor = glm::mix(clearColor,
+                        environmentAprilFoolsMode ? glm::vec3(0.94f, 0.26f, 0.62f)
+                                                  : glm::vec3(0.84f, 0.45f, 0.22f),
+                        twilight * 0.25f);
   clearColor = glm::mix(clearColor, clearStorm, weather * 0.72f);
 
   std::array<VkClearValue, 2> clearValues{};
@@ -2815,7 +2893,10 @@ void VulkanContext::updateUniformBuffer(uint32_t imageIndex) {
                                 std::clamp(0.22f + weather * 0.78f, 0.0f, 1.0f),
                                 dayCycle,
                                 firstPersonPass ? 1.0f : 0.0f);
-    ubo.torchMeta = glm::vec4(static_cast<float>(environmentTorchLightCount), 0.0f, 0.0f, 0.0f);
+    ubo.torchMeta = glm::vec4(static_cast<float>(environmentTorchLightCount),
+                              environmentAprilFoolsMode ? 1.0f : 0.0f,
+                              0.0f,
+                              0.0f);
     for (size_t i = 0; i < environmentTorchLights.size(); ++i) {
       ubo.torchLights[i] = environmentTorchLights[i];
     }

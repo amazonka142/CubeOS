@@ -13,7 +13,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD_WIN = REPO_ROOT / "build-win"
 RELEASE_ASSETS = REPO_ROOT / "release-assets"
-RELEASE_TAG = "v0.3.0-snapshot.1"
+RELEASE_TAG = "v0.3.0-snapshot.2"
 GAME_EXE_NAME = f"CubeOS-{RELEASE_TAG}.exe"
 FINAL_ASSET_NAME = f"CubeOS-{RELEASE_TAG}-win64.exe"
 FOOTER_MAGIC = b"CUBEOSSFX1"

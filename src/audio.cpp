@@ -48,7 +48,17 @@ constexpr std::array<ClipConfig, cueIndex(AudioSystem::Cue::kCount)> kClipConfig
   {"block_place_wood.wav", 0.82f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
   {"block_break_stone.wav", 0.92f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
   {"block_place_stone.wav", 0.80f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
-  {"water_swim.wav", 0.84f, MA_SOUND_FLAG_NO_SPATIALIZATION, false}
+  {"water_swim.wav", 0.84f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"player_hurt.mp3", 0.74f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"footstep_grass_01.mp3", 0.66f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"footstep_grass_02.mp3", 0.66f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"footstep_grass_03.mp3", 0.66f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"footstep_grass_04.mp3", 0.66f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"footstep_grass_05.mp3", 0.66f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"footstep_grass_06.mp3", 0.66f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"footstep_stone_01.mp3", 0.60f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"footstep_stone_02.mp3", 0.60f, MA_SOUND_FLAG_NO_SPATIALIZATION, false},
+  {"footstep_stone_03.mp3", 0.60f, MA_SOUND_FLAG_NO_SPATIALIZATION, false}
 }};
 
 std::string getExecutableDir() {

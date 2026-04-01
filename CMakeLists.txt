@@ -3,8 +3,8 @@ cmake_minimum_required(VERSION 3.20)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 set(CUBEOS_VERSION "0.3.0")
-set(CUBEOS_DISPLAY_VERSION "${CUBEOS_VERSION} Snapshot 1")
-set(CUBEOS_RELEASE_TAG "v0.3.0-snapshot.1")
+set(CUBEOS_DISPLAY_VERSION "${CUBEOS_VERSION} Snapshot 2")
+set(CUBEOS_RELEASE_TAG "v0.3.0-snapshot.2")
 set(CUBEOS_MACOS_APP_NAME "CubeOS v${CUBEOS_DISPLAY_VERSION}")
 
 project(cubeos_voxel VERSION ${CUBEOS_VERSION} LANGUAGES C CXX)
@@ -45,6 +45,8 @@ FetchContent_MakeAvailable(glm)
 find_package(Threads REQUIRED)
 find_path(CUBEOS_VULKAN_INCLUDE_DIR vulkan/vulkan.h
   HINTS
+    "$ENV{VULKAN_SDK}/Include"
+    "$ENV{VULKAN_SDK}/include"
     /usr/local/include
     /opt/homebrew/include
 )
@@ -120,6 +122,7 @@ target_include_directories(cubeos_voxel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/
 target_link_libraries(cubeos_voxel PRIVATE glfw volk::volk glm::glm Threads::Threads)
 target_compile_definitions(cubeos_voxel PRIVATE GLFW_INCLUDE_NONE)
 target_compile_definitions(cubeos_voxel PRIVATE GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
+target_compile_definitions(cubeos_voxel PRIVATE CUBEOS_RELEASE_TAG="${CUBEOS_RELEASE_TAG}")
 if (CUBEOS_BUILD_SHADERS)
   add_dependencies(cubeos_voxel shaders)
 endif()

@@ -18,6 +18,10 @@
 #include <thread>
 #include <utility>
 
+#ifndef CUBEOS_RELEASE_TAG
+#define CUBEOS_RELEASE_TAG "v0.3.0-snapshot.2"
+#endif
+
 namespace {
 
 constexpr float kSlotSize = 40.0f;
@@ -43,6 +47,7 @@ constexpr int kMaxRenderDistance = 14;
 constexpr uint64_t kDroppedItemsMeshKey = std::numeric_limits<uint64_t>::max() - 1ull;
 constexpr uint64_t kInteractionOverlayMeshKey = std::numeric_limits<uint64_t>::max() - 2ull;
 constexpr uint64_t kFirstPersonMeshKey = std::numeric_limits<uint64_t>::max() - 3ull;
+constexpr uint64_t kSheepMeshKey = std::numeric_limits<uint64_t>::max() - 4ull;
 constexpr int kMaxTorchLights = 16;
 constexpr float kTorchLightRange = 8.5f;
 constexpr float kTorchLightCandidateRange = 512.0f;
@@ -55,6 +60,7 @@ constexpr float kThrownItemForwardSpeed = 5.6f;
 constexpr float kThrownItemUpwardSpeed = 2.4f;
 constexpr float kThrownItemPickupDelay = 0.85f;
 constexpr float kDroppedItemMeshUpdateInterval = 1.0f / 30.0f;
+constexpr float kSheepMeshUpdateInterval = 1.0f / 24.0f;
 constexpr float kDayNightCycleDurationSec = 14.0f * 60.0f;
 constexpr float kWeatherMinDecisionSec = 38.0f;
 constexpr float kWeatherMaxDecisionSec = 110.0f;
@@ -82,6 +88,132 @@ constexpr float kFirstPersonEquipLowerSpeed = 10.5f;
 constexpr float kFirstPersonSwingDuration = 0.26f;
 constexpr float kFirstPersonUseDuration = 0.20f;
 constexpr float kFirstPersonProjectionFovDeg = 62.0f;
+constexpr char kSnapshotVersionLabel[] = CUBEOS_RELEASE_TAG;
+constexpr int kMaxPlayerHealth = 40;
+constexpr float kFlightToggleWindowSec = 0.28f;
+constexpr float kCreativeFlySpeed = 8.8f;
+constexpr float kCreativeFlyBoostSpeed = 12.0f;
+constexpr float kCreativeVerticalFlySpeed = 5.8f;
+constexpr float kCreativeVerticalFlyBoostSpeed = 8.4f;
+constexpr size_t kCommandBoxMaxChars = 96;
+constexpr float kSheepHalfWidth = 0.42f;
+constexpr float kSheepHalfLength = 0.62f;
+constexpr float kSheepHeight = 1.20f;
+constexpr float kSheepGravity = -16.0f;
+constexpr float kSheepMaxSpeed = 1.35f;
+constexpr float kSheepSpawnRadius = 42.0f;
+constexpr size_t kTargetSheepCount = 5;
+constexpr float kBedCollisionHeight = 0.5625f;
+constexpr std::array<uint8_t, 22> kCreativeCatalogItems = {{
+  kGrass, kDirt, kStone, kSand, kGravel, kWood, kLeaves, kWater, kCoalOre,
+  kIronOre, kGoldOre, kDiamondOre, kSeagrass, kCoral, kWorkbench, kFurnace,
+  kPlanks, kTorch, kWool, kRawMutton, kCookedMutton, kBed
+}};
+constexpr std::array<WorldPreset, 3> kCreateWorldPresetOptions = {{
+  WorldPreset::kMinecraftStyle,
+  WorldPreset::kClassicFlat,
+  WorldPreset::kAprilFools
+}};
+
+bool isCreativeWorldMode(const WorldGenSettings& settings) {
+  return settings.startInventoryMode != 0;
+}
+
+size_t createWorldPresetIndex(WorldPreset preset) {
+  for (size_t i = 0; i < kCreateWorldPresetOptions.size(); ++i) {
+    if (kCreateWorldPresetOptions[i] == preset) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+WorldPreset cycleCreateWorldPreset(WorldPreset preset, bool forward) {
+  size_t index = createWorldPresetIndex(preset);
+  if (forward) {
+    index = (index + 1) % kCreateWorldPresetOptions.size();
+  } else {
+    index = (index + kCreateWorldPresetOptions.size() - 1) % kCreateWorldPresetOptions.size();
+  }
+  return kCreateWorldPresetOptions[index];
+}
+
+std::string worldPresetDisplayName(WorldPreset preset, bool ru) {
+  switch (preset) {
+    case WorldPreset::kClassicFlat:
+      return ru ? "Классический плоский" : "Classic Flat";
+    case WorldPreset::kAprilFools:
+      return ru ? "Первоапрельский" : "April Fools";
+    case WorldPreset::kMinecraftStyle:
+    default:
+      return ru ? "Minecraft-стиль" : "Minecraft-style";
+  }
+}
+
+std::string worldPresetButtonLabel(WorldPreset preset, bool ru) {
+  switch (preset) {
+    case WorldPreset::kClassicFlat:
+      return ru ? "ПЛОСКИЙ" : "FLAT";
+    case WorldPreset::kAprilFools:
+      return "APRIL";
+    case WorldPreset::kMinecraftStyle:
+    default:
+      return "MC";
+  }
+}
+
+glm::vec3 worldPresetButtonColor(WorldPreset preset, bool selected) {
+  switch (preset) {
+    case WorldPreset::kClassicFlat:
+      return selected ? glm::vec3(0.40f, 0.34f, 0.22f) : glm::vec3(0.23f, 0.21f, 0.18f);
+    case WorldPreset::kAprilFools:
+      return selected ? glm::vec3(0.50f, 0.23f, 0.36f) : glm::vec3(0.24f, 0.17f, 0.20f);
+    case WorldPreset::kMinecraftStyle:
+    default:
+      return selected ? glm::vec3(0.30f, 0.36f, 0.45f) : glm::vec3(0.20f, 0.23f, 0.28f);
+  }
+}
+
+void populateCreativeHotbar(std::array<ItemStack, App::kHotbarSlotCount>& hotbar) {
+  for (ItemStack& slot : hotbar) {
+    slot.type = kAir;
+    slot.count = 0;
+  }
+
+  for (size_t i = 0; i < hotbar.size() && i < kCreativeCatalogItems.size(); ++i) {
+    hotbar[i].type = kCreativeCatalogItems[i];
+    hotbar[i].count = 64;
+  }
+}
+
+float collisionTopForBlock(uint8_t type, int blockY) {
+  if (isBedBlock(type)) {
+    return static_cast<float>(blockY) + kBedCollisionHeight;
+  }
+  return static_cast<float>(blockY + 1);
+}
+
+bool solidBlockIntersectsAabb(uint8_t type,
+                              int x,
+                              int y,
+                              int z,
+                              const glm::vec3& min,
+                              const glm::vec3& max) {
+  if (type == kAir || isWaterBlock(type) || isDecorationBlock(type)) {
+    return false;
+  }
+
+  float blockMinX = static_cast<float>(x);
+  float blockMinY = static_cast<float>(y);
+  float blockMinZ = static_cast<float>(z);
+  float blockMaxX = blockMinX + 1.0f;
+  float blockMaxY = collisionTopForBlock(type, y);
+  float blockMaxZ = blockMinZ + 1.0f;
+
+  return blockMaxX > min.x && blockMinX < max.x &&
+         blockMaxY > min.y && blockMinY < max.y &&
+         blockMaxZ > min.z && blockMinZ < max.z;
+}
 
 float clampUiScaleValue(float value) {
   float clamped = std::clamp(value, kMinUiScale, kMaxUiScale);
@@ -652,7 +784,10 @@ enum AchievementId : uint8_t {
   kAchievementFindCave = 9,
   kAchievementSmeltIron = 10,
   kAchievementCraftIronPickaxe = 11,
-  kAchievementGetDiamond = 12
+  kAchievementGetDiamond = 12,
+  kAchievementTouchSuspiciousGrass = 13,
+  kAchievementDrinkTheFloor = 14,
+  kAchievementStoneTree = 15
 };
 
 constexpr uint32_t achievementBit(AchievementId id) {
@@ -678,7 +813,7 @@ struct CraftMatch {
   int maxCrafts = 0;
 };
 
-const std::array<CraftRecipeDefinition, 8> kCraftRecipes = {{
+const std::array<CraftRecipeDefinition, 9> kCraftRecipes = {{
   {kPlanks, 4, kAchievementCraftPlanks, true, 1, 1, {kWood, kAir, kAir, kAir, kAir, kAir, kAir, kAir, kAir}},
   {kStick, 4, kAchievementCraftSticks, false, 1, 2, {kPlanks, kPlanks, kAir, kAir, kAir, kAir, kAir, kAir, kAir}},
   {kWorkbench, 1, kAchievementCraftWorkbench, false, 2, 2, {kPlanks, kPlanks, kPlanks, kPlanks, kAir, kAir, kAir, kAir, kAir}},
@@ -686,7 +821,8 @@ const std::array<CraftRecipeDefinition, 8> kCraftRecipes = {{
   {kTorch, 4, kAchievementCraftTorch, false, 1, 2, {kCoalOre, kStick, kAir, kAir, kAir, kAir, kAir, kAir, kAir}},
   {kWoodPickaxe, 1, kAchievementCraftWoodPickaxe, false, 3, 3, {kPlanks, kPlanks, kPlanks, kAir, kStick, kAir, kAir, kStick, kAir}},
   {kStonePickaxe, 1, kAchievementCraftStonePickaxe, false, 3, 3, {kStone, kStone, kStone, kAir, kStick, kAir, kAir, kStick, kAir}},
-  {kIronPickaxe, 1, kAchievementCraftIronPickaxe, false, 3, 3, {kIronIngot, kIronIngot, kIronIngot, kAir, kStick, kAir, kAir, kStick, kAir}}
+  {kIronPickaxe, 1, kAchievementCraftIronPickaxe, false, 3, 3, {kIronIngot, kIronIngot, kIronIngot, kAir, kStick, kAir, kAir, kStick, kAir}},
+  {kBed, 1, kAchievementCraftWorkbench, false, 3, 2, {kWool, kWool, kWool, kPlanks, kPlanks, kPlanks, kAir, kAir, kAir}}
 }};
 
 constexpr int craftingSlotIndex(int row, int col) {
@@ -836,6 +972,9 @@ bool furnaceResultForInput(uint8_t inputType, uint8_t& outType) {
   switch (inputType) {
     case kIronOre:
       outType = kIronIngot;
+      return true;
+    case kRawMutton:
+      outType = kCookedMutton;
       return true;
     default:
       outType = kAir;
@@ -1015,6 +1154,13 @@ bool breaksInstantly(uint8_t type) {
 }
 
 float breakDurationForBlock(uint8_t type, ToolTier toolTier, bool inWater) {
+  if (isBedBlock(type)) {
+    float duration = 0.42f;
+    if (inWater) {
+      duration *= 2.0f;
+    }
+    return duration;
+  }
   if (isTorchBlock(type)) {
     float duration = 0.16f;
     if (inWater) {
@@ -1029,6 +1175,9 @@ float breakDurationForBlock(uint8_t type, ToolTier toolTier, bool inWater) {
     case kSeagrass:
     case kCoral:
       duration = 0.18f;
+      break;
+    case kSuspiciousGlass:
+      duration = 0.34f;
       break;
     case kWood:
     case kWorkbench:
@@ -1122,6 +1271,12 @@ std::string achievementTitle(AchievementId id, bool russian) {
       return russian ? "ЖЕЛЕЗНАЯ КИРКА" : "IRON PICKAXE";
     case kAchievementGetDiamond:
       return russian ? "АЛМАЗЫ" : "DIAMONDS";
+    case kAchievementTouchSuspiciousGrass:
+      return russian ? "ПОТРОГАЙ ПОДОЗРИТЕЛЬНУЮ ТРАВУ" : "TOUCH SUSPICIOUS GRASS";
+    case kAchievementDrinkTheFloor:
+      return russian ? "ВЫПЕЙ ПОЛ" : "DRINK THE FLOOR";
+    case kAchievementStoneTree:
+      return russian ? "ПОЧЕМУ ДЕРЕВО ИЗ КАМНЯ?" : "WHY IS THE TREE MADE OF STONE?";
     default:
       return russian ? "ДОСТИЖЕНИЕ" : "ACHIEVEMENT";
   }
@@ -1155,6 +1310,12 @@ std::string achievementDescription(AchievementId id, bool russian) {
       return russian ? "СОБЕРИ ЖЕЛЕЗНУЮ КИРКУ" : "CRAFT AN IRON PICKAXE";
     case kAchievementGetDiamond:
       return russian ? "ДОБУДЬ ПЕРВЫЙ АЛМАЗ" : "MINE YOUR FIRST DIAMOND";
+    case kAchievementTouchSuspiciousGrass:
+      return russian ? "ПРОЙДИСЬ ПО АПРЕЛЬСКОЙ ТРАВЕ" : "STEP ON APRIL FOOLS GRASS";
+    case kAchievementDrinkTheFloor:
+      return russian ? "ОКУНИСЬ В ЖИДКУЮ ЗЕМЛЮ" : "SWIM IN THE LIQUID GROUND";
+    case kAchievementStoneTree:
+      return russian ? "НАЙДИ ДЕРЕВО С КАМЕННЫМ СТВОЛОМ" : "FIND A TREE WITH A STONE TRUNK";
     default:
       return russian ? "ИДИ ПО ЦЕПОЧКЕ КРАФТА" : "FOLLOW THE CRAFTING CHAIN";
   }
@@ -1188,6 +1349,12 @@ int achievementIconTile(AchievementId id) {
       return kTileIronPickaxe;
     case kAchievementGetDiamond:
       return kTileDiamond;
+    case kAchievementTouchSuspiciousGrass:
+      return kTileGrassTop;
+    case kAchievementDrinkTheFloor:
+      return kTileWater;
+    case kAchievementStoneTree:
+      return kTileStone;
     default:
       return kTileStone;
   }
@@ -1236,10 +1403,13 @@ constexpr std::array<AchievementTreeNodeView, App::kAchievementCount> kAchieveme
   {kAchievementFindCave, 7.7f, 2.0f, achievementBit(kAchievementGetStone)},
   {kAchievementSmeltIron, 9.0f, 1.0f, achievementBit(kAchievementCraftFurnace) | achievementBit(kAchievementFindCave)},
   {kAchievementCraftIronPickaxe, 10.3f, 2.0f, achievementBit(kAchievementSmeltIron)},
-  {kAchievementGetDiamond, 11.6f, 1.0f, achievementBit(kAchievementCraftIronPickaxe)}
+  {kAchievementGetDiamond, 11.6f, 1.0f, achievementBit(kAchievementCraftIronPickaxe)},
+  {kAchievementTouchSuspiciousGrass, 1.2f, 3.2f, achievementBit(kAchievementGetWood)},
+  {kAchievementDrinkTheFloor, 2.6f, 3.2f, achievementBit(kAchievementTouchSuspiciousGrass)},
+  {kAchievementStoneTree, 4.0f, 3.2f, achievementBit(kAchievementTouchSuspiciousGrass)}
 }};
 
-constexpr std::array<std::pair<int, int>, 15> kAchievementTreeEdges = {{
+constexpr std::array<std::pair<int, int>, 18> kAchievementTreeEdges = {{
   {0, 1},
   {1, 2},
   {1, 3},
@@ -1254,7 +1424,10 @@ constexpr std::array<std::pair<int, int>, 15> kAchievementTreeEdges = {{
   {7, 10},
   {9, 10},
   {10, 11},
-  {11, 12}
+  {11, 12},
+  {0, 13},
+  {13, 14},
+  {13, 15}
 }};
 
 AchievementTreeUiLayout makeAchievementTreeLayout(int uiWidth, int uiHeight) {
@@ -1275,8 +1448,14 @@ AchievementTreeUiLayout makeAchievementTreeLayout(int uiWidth, int uiHeight) {
   layout.viewportY = layout.frameY + 86.0f;
   layout.viewportW = layout.frameW - 56.0f;
   layout.viewportH = layout.frameH - 134.0f;
-  layout.graphW = 11.6f * layout.spacingX + kAchievementNodeSize;
-  layout.graphH = 2.0f * layout.spacingY + kAchievementNodeSize;
+  float maxNodeX = 0.0f;
+  float maxNodeY = 0.0f;
+  for (const AchievementTreeNodeView& node : kAchievementTreeNodes) {
+    maxNodeX = std::max(maxNodeX, node.x);
+    maxNodeY = std::max(maxNodeY, node.y);
+  }
+  layout.graphW = maxNodeX * layout.spacingX + kAchievementNodeSize;
+  layout.graphH = maxNodeY * layout.spacingY + kAchievementNodeSize;
   layout.contentW = layout.graphW + layout.contentPadX * 2.0f + 72.0f;
   layout.contentH = std::max(layout.viewportH + 1.0f, layout.graphH + layout.contentPadY * 2.0f + 28.0f);
   return layout;
@@ -1348,6 +1527,9 @@ uint8_t placedBlockTypeForItem(uint8_t itemType,
                                const glm::vec3& lookDir,
                                const glm::ivec3& placementNormal) {
   uint8_t facing = placementFacingFromLook(lookDir);
+  if (itemType == kBed) {
+    return bedBlockForFacing(facing, false);
+  }
   if (itemType == kWorkbench) {
     return workbenchBlockForFacing(facing);
   }
@@ -1423,12 +1605,30 @@ enum class BlockAudioMaterial : uint8_t {
   kStone = 3
 };
 
+enum class FootstepSurface : uint8_t {
+  kNone = 0,
+  kGrass = 1,
+  kStone = 2
+};
+
+constexpr int kGrassFootstepVariantCount = 6;
+constexpr int kStoneFootstepVariantCount = 3;
+
 BlockAudioMaterial audioMaterialForBlock(uint8_t type) {
-  if (isWorkbenchBlock(type) || type == kWood || type == kPlanks || type == kLootCache || isTorchBlock(type)) {
+  if (isBedBlock(type)) {
+    return BlockAudioMaterial::kWood;
+  }
+  if (isWorkbenchBlock(type) ||
+      type == kWood ||
+      type == kPlanks ||
+      type == kLootCache ||
+      type == kBed ||
+      isTorchBlock(type)) {
     return BlockAudioMaterial::kWood;
   }
   if (isFurnaceBlock(type) ||
       type == kStone ||
+      type == kSuspiciousGlass ||
       type == kCoalOre ||
       type == kIronOre ||
       type == kGoldOre ||
@@ -1439,6 +1639,96 @@ BlockAudioMaterial audioMaterialForBlock(uint8_t type) {
     return BlockAudioMaterial::kSand;
   }
   return BlockAudioMaterial::kDirt;
+}
+
+FootstepSurface footstepSurfaceForBlock(uint8_t type) {
+  if (type == kAir || isWaterBlock(type) || isDecorationBlock(type)) {
+    return FootstepSurface::kNone;
+  }
+
+  switch (audioMaterialForBlock(type)) {
+    case BlockAudioMaterial::kStone:
+    case BlockAudioMaterial::kWood:
+      return FootstepSurface::kStone;
+    case BlockAudioMaterial::kSand:
+    case BlockAudioMaterial::kDirt:
+    default:
+      return FootstepSurface::kGrass;
+  }
+}
+
+FootstepSurface footstepSurfaceUnderPlayer(const World& world, const glm::vec3& playerPos) {
+  constexpr std::array<glm::vec2, 5> kFootSamples{{
+    {0.0f, 0.0f},
+    {0.22f, 0.22f},
+    {-0.22f, 0.22f},
+    {0.22f, -0.22f},
+    {-0.22f, -0.22f}
+  }};
+
+  auto sampleSurface = [&](float offsetX, float offsetZ) {
+    int x = static_cast<int>(std::floor(playerPos.x + offsetX));
+    int y = static_cast<int>(std::floor(playerPos.y - 0.08f));
+    int z = static_cast<int>(std::floor(playerPos.z + offsetZ));
+    if (!world.inBounds(x, y, z)) {
+      return FootstepSurface::kNone;
+    }
+
+    uint8_t block = world.getBlock(x, y, z);
+    if ((block == kAir || isWaterBlock(block) || isDecorationBlock(block)) &&
+        world.inBounds(x, y - 1, z)) {
+      block = world.getBlock(x, y - 1, z);
+    }
+    return footstepSurfaceForBlock(block);
+  };
+
+  FootstepSurface centerSurface = sampleSurface(0.0f, 0.0f);
+  int grassHits = 0;
+  int stoneHits = 0;
+  for (const glm::vec2& sample : kFootSamples) {
+    FootstepSurface surface = sampleSurface(sample.x, sample.y);
+    if (surface == FootstepSurface::kGrass) {
+      ++grassHits;
+    } else if (surface == FootstepSurface::kStone) {
+      ++stoneHits;
+    }
+  }
+
+  if (grassHits == 0 && stoneHits == 0) {
+    return FootstepSurface::kNone;
+  }
+  if (grassHits == stoneHits) {
+    return centerSurface;
+  }
+  return stoneHits > grassHits ? FootstepSurface::kStone : FootstepSurface::kGrass;
+}
+
+uint32_t advanceFootstepRng(uint32_t& state) {
+  state = state * 1664525u + 1013904223u;
+  return state;
+}
+
+int chooseFootstepVariant(uint32_t& rngState, int variantCount, int previousVariant) {
+  if (variantCount <= 1) {
+    return 0;
+  }
+
+  uint32_t roll = advanceFootstepRng(rngState);
+  int variant = static_cast<int>(roll % static_cast<uint32_t>(variantCount));
+  if (variant == previousVariant) {
+    variant = (variant + 1 + static_cast<int>((roll / static_cast<uint32_t>(variantCount)) %
+                                              static_cast<uint32_t>(variantCount - 1))) % variantCount;
+  }
+  return variant;
+}
+
+AudioSystem::Cue footstepCueForVariant(FootstepSurface surface, int variant) {
+  if (surface == FootstepSurface::kGrass) {
+    int clamped = std::clamp(variant, 0, kGrassFootstepVariantCount - 1);
+    return static_cast<AudioSystem::Cue>(static_cast<int>(AudioSystem::Cue::kFootstepGrass1) + clamped);
+  }
+  int clamped = std::clamp(variant, 0, kStoneFootstepVariantCount - 1);
+  return static_cast<AudioSystem::Cue>(static_cast<int>(AudioSystem::Cue::kFootstepStone1) + clamped);
 }
 
 AudioSystem::Cue breakCueForBlock(uint8_t type) {
@@ -1504,6 +1794,9 @@ int tileForBlock(uint8_t type) {
   if (isTorchBlock(type)) {
     return kTileTorch;
   }
+  if (type == kBed || isBedBlock(type)) {
+    return kTileBed;
+  }
 
   switch (type) {
     case kGrass:
@@ -1530,6 +1823,8 @@ int tileForBlock(uint8_t type) {
       return kTileGoldOre;
     case kDiamondOre:
       return kTileDiamondOre;
+    case kSuspiciousGlass:
+      return kTileSuspiciousGlass;
     case kWorkbench:
     case kWorkbenchNorth:
     case kWorkbenchEast:
@@ -1544,6 +1839,12 @@ int tileForBlock(uint8_t type) {
       return kTileFurnaceFront;
     case kLootCache:
       return kTileLootCache;
+    case kWool:
+      return kTileWool;
+    case kRawMutton:
+      return kTileRawMutton;
+    case kCookedMutton:
+      return kTileCookedMutton;
     case kPlanks:
       return kTilePlanks;
     case kStick:
@@ -1572,6 +1873,9 @@ std::string displayNameForBlock(uint8_t type, bool russian) {
   if (isTorchBlock(type)) {
     return russian ? "ФАКЕЛ" : "TORCH";
   }
+  if (type == kBed || isBedBlock(type)) {
+    return russian ? "КРОВАТЬ" : "BED";
+  }
 
   switch (type) {
     case kAir:
@@ -1582,6 +1886,8 @@ std::string displayNameForBlock(uint8_t type, bool russian) {
       return russian ? "ЗЕМЛЯ" : "DIRT";
     case kStone:
       return russian ? "КАМЕНЬ" : "STONE";
+    case kSuspiciousGlass:
+      return russian ? "ПОДОЗРИТЕЛЬНОЕ СТЕКЛО" : "SUSPICIOUS GLASS";
     case kSand:
       return russian ? "ПЕСОК" : "SAND";
     case kGravel:
@@ -1590,6 +1896,12 @@ std::string displayNameForBlock(uint8_t type, bool russian) {
       return russian ? "ДЕРЕВО" : "WOOD";
     case kPlanks:
       return russian ? "ДОСКИ" : "PLANKS";
+    case kWool:
+      return russian ? "ШЕРСТЬ" : "WOOL";
+    case kRawMutton:
+      return russian ? "СЫРАЯ БАРАНИНА" : "RAW MUTTON";
+    case kCookedMutton:
+      return russian ? "ЖАРЕНАЯ БАРАНИНА" : "COOKED MUTTON";
     case kStick:
       return russian ? "ПАЛКИ" : "STICKS";
     case kWorkbench:
@@ -1635,6 +1947,66 @@ std::string displayNameForBlock(uint8_t type, bool russian) {
   }
 }
 
+std::string normalizeCommandToken(const std::string& value) {
+  std::string normalized;
+  normalized.reserve(value.size());
+  for (char c : value) {
+    unsigned char uc = static_cast<unsigned char>(c);
+    if (std::isalnum(uc)) {
+      normalized.push_back(static_cast<char>(std::tolower(uc)));
+    }
+  }
+  return normalized;
+}
+
+uint8_t itemTypeForCommandToken(const std::string& token) {
+  const std::string key = normalizeCommandToken(token);
+  if (key == "grass" || key == "grassblock") return kGrass;
+  if (key == "dirt") return kDirt;
+  if (key == "stone") return kStone;
+  if (key == "sand") return kSand;
+  if (key == "gravel") return kGravel;
+  if (key == "wood" || key == "log") return kWood;
+  if (key == "leaves" || key == "leaf") return kLeaves;
+  if (key == "water") return kWater;
+  if (key == "coalore" || key == "coal") return kCoalOre;
+  if (key == "ironore") return kIronOre;
+  if (key == "goldore") return kGoldOre;
+  if (key == "diamondore") return kDiamondOre;
+  if (key == "seagrass") return kSeagrass;
+  if (key == "coral") return kCoral;
+  if (key == "workbench" || key == "craftingtable") return kWorkbench;
+  if (key == "furnace") return kFurnace;
+  if (key == "planks") return kPlanks;
+  if (key == "wool") return kWool;
+  if (key == "rawmutton" || key == "mutton") return kRawMutton;
+  if (key == "cookedmutton" || key == "cookedmeat" || key == "roastmutton") return kCookedMutton;
+  if (key == "bed") return kBed;
+  if (key == "stick" || key == "sticks") return kStick;
+  if (key == "torch" || key == "torches") return kTorch;
+  if (key == "ironingot" || key == "iron") return kIronIngot;
+  if (key == "diamond") return kDiamond;
+  if (key == "woodpickaxe" || key == "woodpick") return kWoodPickaxe;
+  if (key == "stonepickaxe" || key == "stonepick") return kStonePickaxe;
+  if (key == "ironpickaxe" || key == "ironpick") return kIronPickaxe;
+  return kAir;
+}
+
+bool isEdibleItem(uint8_t type) {
+  return type == kRawMutton || type == kCookedMutton;
+}
+
+int foodHealAmount(uint8_t type) {
+  switch (type) {
+    case kRawMutton:
+      return 3;
+    case kCookedMutton:
+      return 8;
+    default:
+      return 0;
+  }
+}
+
 glm::vec2 uvForTile(int tile, float u, float v) {
   float tileSizeU = 1.0f / static_cast<float>(kAtlasCols);
   float tileSizeV = 1.0f / static_cast<float>(kAtlasRows);
@@ -1666,6 +2038,9 @@ glm::vec3 droppedItemColor(uint8_t type) {
   if (isTorchBlock(type)) {
     return {0.98f, 0.78f, 0.34f};
   }
+  if (type == kBed || isBedBlock(type)) {
+    return {0.86f, 0.24f, 0.22f};
+  }
 
   switch (type) {
     case kGrass:
@@ -1676,6 +2051,8 @@ glm::vec3 droppedItemColor(uint8_t type) {
       return {0.86f, 0.78f, 0.50f};
     case kGravel:
       return {0.46f, 0.44f, 0.42f};
+    case kSuspiciousGlass:
+      return {0.58f, 0.96f, 0.86f};
     case kWood:
       return {0.49f, 0.33f, 0.16f};
     case kLeaves:
@@ -1701,6 +2078,12 @@ glm::vec3 droppedItemColor(uint8_t type) {
     case kWorkbenchSouth:
     case kWorkbenchWest:
       return {0.62f, 0.42f, 0.18f};
+    case kWool:
+      return {0.94f, 0.94f, 0.96f};
+    case kRawMutton:
+      return {0.84f, 0.38f, 0.42f};
+    case kCookedMutton:
+      return {0.56f, 0.28f, 0.18f};
     case kFurnace:
     case kFurnaceNorth:
     case kFurnaceEast:
@@ -1789,8 +2172,15 @@ void appendDroppedItemCube(std::vector<Vertex>& vertices,
   appendDroppedItemQuad(vertices, indices, p000, p010, p110, p100, base * 0.76f, tile); // -Z
 }
 
+bool shouldRenderHeldItemAsSprite(uint8_t type) {
+  return isUnderwaterPlantBlock(type) ||
+         type == kWool ||
+         type == kRawMutton ||
+         type == kCookedMutton;
+}
+
 bool shouldRenderDroppedItemAsSprite(uint8_t type) {
-  return !isBlockType(type) || type == kTorch;
+  return !isBlockType(type) || type == kTorch || isUnderwaterPlantBlock(type);
 }
 
 void appendDroppedItemSprite(std::vector<Vertex>& vertices,
@@ -1809,12 +2199,24 @@ void appendDroppedItemSprite(std::vector<Vertex>& vertices,
   } else if (type == kDiamond) {
     halfWidth = 0.22f;
     halfHeight = 0.22f;
+  } else if (type == kSeagrass) {
+    halfWidth = 0.18f;
+    halfHeight = 0.28f;
+  } else if (type == kCoral) {
+    halfWidth = 0.20f;
+    halfHeight = 0.24f;
+  } else if (type == kWool) {
+    halfWidth = 0.24f;
+    halfHeight = 0.22f;
+  } else if (type == kRawMutton || type == kCookedMutton) {
+    halfWidth = 0.24f;
+    halfHeight = 0.18f;
   } else if (isToolItem(type)) {
     halfWidth = 0.28f;
     halfHeight = 0.28f;
   }
 
-  const glm::vec3 base = droppedItemColor(type);
+  const glm::vec3 base = isUnderwaterPlantBlock(type) ? glm::vec3(1.0f) : droppedItemColor(type);
   const int tile = tileForBlock(type);
   const float c = std::cos(spinY);
   const float sRot = std::sin(spinY);
@@ -1830,6 +2232,24 @@ void appendDroppedItemSprite(std::vector<Vertex>& vertices,
   glm::vec3 v2 = rot({halfWidth, halfHeight, 0.0f});
   glm::vec3 v3 = rot({-halfWidth, halfHeight, 0.0f});
   appendDroppedItemQuad(vertices, indices, v0, v1, v2, v3, base, tile);
+}
+
+void appendFirstPersonSprite(std::vector<Vertex>& vertices,
+                             std::vector<uint32_t>& indices,
+                             const glm::mat4& transform,
+                             float halfWidth,
+                             float halfHeight,
+                             const glm::vec3& color,
+                             int tile) {
+  auto transformLocal = [&](const glm::vec3& point) {
+    glm::vec4 result = transform * glm::vec4(point, 1.0f);
+    return glm::vec3(result);
+  };
+  glm::vec3 v0 = transformLocal({-halfWidth, -halfHeight, 0.0f});
+  glm::vec3 v1 = transformLocal({halfWidth, -halfHeight, 0.0f});
+  glm::vec3 v2 = transformLocal({halfWidth, halfHeight, 0.0f});
+  glm::vec3 v3 = transformLocal({-halfWidth, halfHeight, 0.0f});
+  appendDroppedItemQuad(vertices, indices, v0, v1, v2, v3, color, tile);
 }
 
 glm::vec3 transformPoint(const glm::mat4& transform, const glm::vec3& point) {
@@ -1927,6 +2347,115 @@ void appendFirstPersonPickaxe(std::vector<Vertex>& vertices,
                          glm::vec3(0.020f, 0.060f, 0.020f),
                          headColor * 0.96f,
                          kTileUiWhite);
+}
+
+float wrapDegrees(float degrees) {
+  while (degrees > 180.0f) {
+    degrees -= 360.0f;
+  }
+  while (degrees < -180.0f) {
+    degrees += 360.0f;
+  }
+  return degrees;
+}
+
+bool rayIntersectsAabb(const glm::vec3& origin,
+                       const glm::vec3& dir,
+                       const glm::vec3& minCorner,
+                       const glm::vec3& maxCorner,
+                       float maxDist,
+                       float& outDistance) {
+  float tMin = 0.0f;
+  float tMax = maxDist;
+
+  for (int axis = 0; axis < 3; ++axis) {
+    float axisDir = dir[axis];
+    if (std::abs(axisDir) < 0.0001f) {
+      if (origin[axis] < minCorner[axis] || origin[axis] > maxCorner[axis]) {
+        return false;
+      }
+      continue;
+    }
+
+    float invDir = 1.0f / axisDir;
+    float t0 = (minCorner[axis] - origin[axis]) * invDir;
+    float t1 = (maxCorner[axis] - origin[axis]) * invDir;
+    if (t0 > t1) {
+      std::swap(t0, t1);
+    }
+    tMin = std::max(tMin, t0);
+    tMax = std::min(tMax, t1);
+    if (tMax < tMin) {
+      return false;
+    }
+  }
+
+  outDistance = tMin;
+  return outDistance <= maxDist;
+}
+
+void appendSheepEntityMesh(std::vector<Vertex>& vertices,
+                           std::vector<uint32_t>& indices,
+                           const glm::vec3& pos,
+                           float yaw,
+                           float walkSpeed,
+                           float animPhase,
+                           float grazeTimer) {
+  glm::mat4 bodyTransform(1.0f);
+  bodyTransform = glm::translate(bodyTransform, pos);
+  bodyTransform = glm::rotate(bodyTransform, glm::radians(yaw), glm::vec3(0.0f, 1.0f, 0.0f));
+
+  float walkBlend = std::clamp(walkSpeed / kSheepMaxSpeed, 0.0f, 1.0f);
+  float legSwing = std::sin(animPhase) * 0.14f * walkBlend;
+  float bodyBob = std::abs(std::sin(animPhase)) * 0.015f * walkBlend;
+  float headNod = walkSpeed > 0.05f
+    ? std::sin(animPhase * 0.5f) * 0.02f
+    : -std::clamp(0.20f - grazeTimer, 0.0f, 0.20f) * 0.22f;
+
+  const glm::vec3 woolColor(0.94f, 0.94f, 0.97f);
+  const glm::vec3 faceColor(0.24f, 0.22f, 0.24f);
+  const glm::vec3 muzzleColor(0.88f, 0.72f, 0.76f);
+  const glm::vec3 hoofColor(0.16f, 0.14f, 0.14f);
+
+  appendFirstPersonPrism(vertices,
+                         indices,
+                         bodyTransform,
+                         glm::vec3(0.0f, 0.86f + bodyBob, 0.00f),
+                         glm::vec3(0.38f, 0.28f, 0.54f),
+                         woolColor,
+                         kTileUiWhite);
+
+  appendFirstPersonPrism(vertices,
+                         indices,
+                         bodyTransform,
+                         glm::vec3(0.0f, 0.84f + headNod, 0.72f),
+                         glm::vec3(0.18f, 0.18f, 0.18f),
+                         faceColor,
+                         kTileUiWhite);
+  appendFirstPersonPrism(vertices,
+                         indices,
+                         bodyTransform,
+                         glm::vec3(0.0f, 0.78f + headNod, 0.92f),
+                         glm::vec3(0.12f, 0.10f, 0.08f),
+                         muzzleColor,
+                         kTileUiWhite);
+
+  const std::array<glm::vec2, 4> legOffsets{{
+    {-0.22f, 0.28f},
+    {0.22f, 0.28f},
+    {-0.22f, -0.26f},
+    {0.22f, -0.26f}
+  }};
+  for (size_t i = 0; i < legOffsets.size(); ++i) {
+    float phase = (i % 2 == 0) ? legSwing : -legSwing;
+    appendFirstPersonPrism(vertices,
+                           indices,
+                           bodyTransform,
+                           glm::vec3(legOffsets[i].x, 0.34f + std::max(0.0f, phase), legOffsets[i].y),
+                           glm::vec3(0.07f, 0.34f, 0.07f),
+                           hoofColor,
+                           kTileUiWhite);
+  }
 }
 
 uint32_t mixLootHash(uint32_t value) {
@@ -2329,7 +2858,9 @@ void App::setScreenState(ScreenState state) {
   // Persist current world whenever leaving gameplay.
   bool leavingGameplay =
     (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused) &&
-    (state != ScreenState::kPlaying && state != ScreenState::kPaused);
+    (state != ScreenState::kPlaying &&
+     state != ScreenState::kPaused &&
+     state != ScreenState::kDeath);
   bool pauseToInGameSettings =
     screenState == ScreenState::kPaused &&
     state == ScreenState::kSettings &&
@@ -2347,6 +2878,8 @@ void App::setScreenState(ScreenState state) {
   if (leavingGameplay && !pauseToInGameSettings) {
     droppedItems.clear();
     syncDroppedItemMesh(true);
+    sheepEntities.clear();
+    syncSheepMesh(true);
   }
 
   if (state != ScreenState::kPlaying && state != ScreenState::kPaused && inventoryOpen) {
@@ -2354,6 +2887,15 @@ void App::setScreenState(ScreenState state) {
   }
   if (state != ScreenState::kPlaying && achievementTreeOpen) {
     setAchievementTreeOpen(false);
+  }
+  if (state != ScreenState::kPlaying) {
+    commandInputOpen = false;
+    commandInput.clear();
+    commandBackspaceDown = false;
+    commandEnterDown = false;
+    if (state == ScreenState::kDeath) {
+      flying = false;
+    }
   }
 
   if (state != ScreenState::kPlaying && breakingActive) {
@@ -2407,7 +2949,7 @@ void App::updateWindowTitle() {
       : std::string(label);
   };
 
-  std::string title = "CubeOS v0.3.0 Snapshot 1";
+  std::string title = "CubeOS v0.3.0 Snapshot 2";
   switch (screenState) {
     case ScreenState::kMainMenu:
       title += " | " + loc("Menu: ", "Меню: ") + mark(mainMenuSelection, 0, loc("Start", "Начать")) + "  "
@@ -2438,16 +2980,22 @@ void App::updateWindowTitle() {
             + mark(pauseMenuSelection, 1, loc("Settings", "Настройки")) + "  "
             + mark(pauseMenuSelection, 2, loc("Main Menu", "Меню"));
       break;
+    case ScreenState::kDeath:
+      title += " | " + loc("You Died", "Вы погибли") + " | "
+            + mark(deathMenuSelection, 0, loc("Respawn", "Респавн")) + "  "
+            + mark(deathMenuSelection, 1, loc("Main Menu", "Меню"));
+      break;
     case ScreenState::kLoadingWorld:
       title += " | " + loc("Loading World", "Загрузка мира");
       break;
     case ScreenState::kCreateWorld: {
-      std::string presetName = pendingWorldSettings.preset == WorldPreset::kClassicFlat
-        ? loc("Classic Flat", "Классический плоский")
-        : loc("Minecraft-style", "Minecraft-стиль");
-      std::string invMode = pendingWorldSettings.startInventoryMode == 0
-        ? loc("Empty", "Пусто")
-        : loc("Creative test", "Тест креатива");
+      std::string presetName = worldPresetDisplayName(pendingWorldSettings.preset, ru);
+      std::string modeText = pendingWorldSettings.startInventoryMode == 0
+        ? loc("Survival", "Выживание")
+        : loc("Creative", "Креатив");
+      std::string cheatsText = pendingWorldSettings.cheatsEnabled
+        ? loc("On", "Вкл")
+        : loc("Off", "Выкл");
       std::string seedText = pendingSeedText.empty() ? loc("random", "случайно") : pendingSeedText;
       std::string nameText = pendingWorldName.empty() ? loc("World", "Мир") : pendingWorldName;
       title += " | " + loc("Create World", "Создание мира") +
@@ -2456,11 +3004,13 @@ void App::updateWindowTitle() {
                " | " + loc("Preset", "Пресет") + ": " + presetName +
                " | " + loc("Cave", "Пещеры") + ": " + std::to_string(pendingWorldSettings.caveDensity).substr(0, 4) +
                " | " + loc("Ravine", "Овраги") + ": " + std::to_string(pendingWorldSettings.ravineFrequency).substr(0, 4) +
-               " | " + loc("Start", "Старт") + ": " + invMode;
+               " | " + loc("Mode", "Режим") + ": " + modeText +
+               " | " + loc("Cheats", "Читы") + ": " + cheatsText;
       break;
     }
     case ScreenState::kPlaying:
-      title += " | " + loc("In Game", "В игре");
+      title += " | " + loc("In Game", "В игре") +
+               " | " + (isCreativeMode() ? loc("Creative", "Креатив") : loc("Survival", "Выживание"));
       break;
   }
 
@@ -2477,6 +3027,256 @@ void App::refreshWorldSelectEntries() {
   int rowCount = static_cast<int>(worldSelectEntries.size()) + 2;
   worldSelectSelection = std::clamp(worldSelectSelection, 0, std::max(0, rowCount - 1));
   worldSelectScroll = std::max(0, std::min(worldSelectScroll, std::max(0, rowCount - 1)));
+}
+
+bool App::isCreativeMode() const {
+  return isCreativeWorldMode(world.getGenerationSettings());
+}
+
+bool App::isCreativeInventoryScreen() const {
+  return screenState == ScreenState::kPlaying &&
+         inventoryOpen &&
+         isCreativeMode() &&
+         !workbenchOpen &&
+         !furnaceOpen;
+}
+
+bool App::worldCheatsEnabled() const {
+  return world.getGenerationSettings().cheatsEnabled;
+}
+
+bool App::canFly() const {
+  return isCreativeMode() || (worldCheatsEnabled() && cheatFlightEnabled);
+}
+
+void App::damagePlayer(int amount) {
+  if (amount <= 0 || isCreativeMode() || screenState == ScreenState::kDeath) {
+    return;
+  }
+
+  int previousHealth = playerHealth;
+  playerHealth = std::clamp(playerHealth - amount, 0, kMaxPlayerHealth);
+  if (playerHealth == previousHealth) {
+    return;
+  }
+
+  float hurtGain = std::clamp(0.84f + static_cast<float>(amount) * 0.06f, 0.84f, 1.28f);
+  audio.playCue(AudioSystem::Cue::kPlayerHurt, hurtGain);
+  uiDirty = true;
+  if (playerHealth <= 0) {
+    handlePlayerDeath();
+  }
+}
+
+void App::dropPlayerInventoryOnDeath() {
+  glm::vec3 basePos = playerPos + glm::vec3(0.0f, 0.9f, 0.0f);
+  size_t dropIndex = 0;
+
+  auto dropStack = [&](ItemStack& stack) {
+    if (stack.type == kAir || stack.count == 0) {
+      return;
+    }
+
+    float seedNoise = std::sin(basePos.x * 12.9898f +
+                               basePos.y * 78.233f +
+                               basePos.z * 37.719f +
+                               static_cast<float>(stack.type) * 0.713f +
+                               static_cast<float>(stack.count) * 0.193f +
+                               static_cast<float>(dropIndex) * 17.371f);
+    float seed = fract01(seedNoise * 43758.5453f);
+    float angle = seed * 6.2831853f + static_cast<float>(dropIndex) * 0.41f;
+    float radialOffset = 0.05f + seed * 0.16f;
+    float lateralSpeed = 1.10f + seed * 0.75f;
+    glm::vec3 itemPos = basePos + glm::vec3(std::cos(angle) * radialOffset,
+                                            0.04f + seed * 0.12f,
+                                            std::sin(angle) * radialOffset);
+    glm::vec3 itemVelocity(std::cos(angle) * lateralSpeed,
+                           2.55f + seed * 0.85f,
+                           std::sin(angle) * lateralSpeed);
+    spawnDroppedItemWithPhysics(stack.type, itemPos, itemVelocity, 0.90f, stack.count);
+    stack.type = kAir;
+    stack.count = 0;
+    ++dropIndex;
+  };
+
+  auto dropSlots = [&](auto& slots) {
+    for (ItemStack& stack : slots) {
+      dropStack(stack);
+    }
+  };
+
+  dropSlots(hotbar);
+  dropSlots(inventory);
+  dropSlots(craftingSlots);
+  dropStack(cursorStack);
+
+  refreshSelectedBlock();
+  uiDirty = true;
+}
+
+void App::handlePlayerDeath() {
+  if (screenState == ScreenState::kDeath) {
+    return;
+  }
+
+  dropPlayerInventoryOnDeath();
+  inventoryOpen = false;
+  workbenchOpen = false;
+  furnaceOpen = false;
+  craftResultFlashTimer = 0.0f;
+  cursorStack.type = kAir;
+  cursorStack.count = 0;
+  footstepDistanceAccumulator = 0.0f;
+  playerHealth = 0;
+  playerVel = glm::vec3(0.0f);
+  onGround = false;
+  flying = false;
+  fallDistance = 0.0f;
+  flightToggleTimer = 0.0f;
+  jumpDown = false;
+  deathMenuSelection = 0;
+  commandInputOpen = false;
+  commandInput.clear();
+  commandBackspaceDown = false;
+  commandEnterDown = false;
+  setScreenState(ScreenState::kDeath);
+  if (!currentWorldPath.empty()) {
+    saveCurrentPlayerState();
+    saveWorldWithWarning(world, currentWorldPath, "player death");
+  }
+}
+
+void App::respawnPlayer() {
+  glm::vec3 target = respawnPos;
+  target.y = std::clamp(target.y, 2.0f, static_cast<float>(world.height() - 3));
+  if (!world.inBounds(static_cast<int>(std::floor(target.x)),
+                      static_cast<int>(std::floor(target.y)),
+                      static_cast<int>(std::floor(target.z)))) {
+    target = glm::vec3(8.0f, static_cast<float>(world.height() - 6), 8.0f);
+  }
+
+  playerPos = target;
+  while (collidesAt(playerPos) && playerPos.y < static_cast<float>(world.height() - 3)) {
+    playerPos.y += 0.35f;
+  }
+
+  playerVel = glm::vec3(0.0f);
+  onGround = false;
+  playerHealth = kMaxPlayerHealth;
+  flying = false;
+  fallDistance = 0.0f;
+  footstepDistanceAccumulator = 0.0f;
+  flightToggleTimer = 0.0f;
+  jumpDown = false;
+  commandInputOpen = false;
+  commandInput.clear();
+  commandBackspaceDown = false;
+  commandEnterDown = false;
+  setScreenState(ScreenState::kPlaying);
+  showToast(appliedSettings.language == 1 ? "РЕСПАВН" : "RESPAWNED", 1.6f);
+}
+
+void App::executeCommand(const std::string& rawInput) {
+  std::string input = trimAscii(rawInput);
+  if (input.empty()) {
+    return;
+  }
+  if (!input.empty() && input.front() == '/') {
+    input.erase(input.begin());
+  }
+  input = trimAscii(input);
+  if (input.empty()) {
+    return;
+  }
+
+  std::istringstream parser(input);
+  std::string command;
+  parser >> command;
+  command = normalizeCommandToken(command);
+
+  const bool ru = appliedSettings.language == 1;
+  if (command == "help") {
+    showToast(ru ? "КОМАНДЫ /ADD /FLY /HEAL /RESPAWN" : "COMMANDS /ADD /FLY /HEAL /RESPAWN", 3.0f);
+    return;
+  }
+
+  if (command == "fly") {
+    if (isCreativeMode()) {
+      flying = !flying;
+    } else {
+      cheatFlightEnabled = !cheatFlightEnabled;
+      flying = cheatFlightEnabled;
+    }
+    flightToggleTimer = 0.0f;
+    jumpDown = false;
+    uiDirty = true;
+    return;
+  }
+
+  if (command == "heal") {
+    playerHealth = kMaxPlayerHealth;
+    uiDirty = true;
+    showToast(ru ? "ЗДОРОВЬЕ ПОЛНОЕ" : "HEALTH RESTORED", 1.8f);
+    return;
+  }
+
+  if (command == "respawn") {
+    respawnPlayer();
+    return;
+  }
+
+  if (command == "add") {
+    std::string itemToken;
+    parser >> itemToken;
+    if (itemToken.empty()) {
+      showToast(ru ? "ИСПОЛЬЗУЙ /ADD STONE 64" : "USE /ADD STONE 64", 2.2f);
+      return;
+    }
+
+    uint8_t itemType = itemTypeForCommandToken(itemToken);
+    if (itemType == kAir) {
+      showToast(ru ? "НЕИЗВЕСТНЫЙ ПРЕДМЕТ" : "UNKNOWN ITEM", 2.0f);
+      return;
+    }
+
+    int count = isToolItem(itemType) ? 1 : 64;
+    std::string countToken;
+    parser >> countToken;
+    if (!countToken.empty()) {
+      try {
+        count = std::stoi(countToken);
+      } catch (...) {
+        showToast(ru ? "НЕКОРРЕКТНОЕ КОЛИЧЕСТВО" : "INVALID COUNT", 2.0f);
+        return;
+      }
+    }
+
+    count = std::clamp(count, 1, 999);
+    int remainingTotal = count;
+    while (remainingTotal > 0) {
+      uint16_t batch = static_cast<uint16_t>(std::min(remainingTotal, static_cast<int>(kMaxStack)));
+      uint16_t remaining = 0;
+      addToInventory(itemType, batch, &remaining);
+      remainingTotal -= static_cast<int>(batch - remaining);
+      if (remaining > 0) {
+        break;
+      }
+    }
+
+    int added = count - remainingTotal;
+    if (added <= 0) {
+      showToast(ru ? "ИНВЕНТАРЬ ПОЛОН" : "INVENTORY FULL", 2.0f);
+      return;
+    }
+
+    showToast((ru ? "ДОБАВЛЕНО " : "ADDED ") +
+                std::to_string(added) + " " +
+                displayNameForBlock(itemType, ru),
+              2.2f);
+    return;
+  }
+
+  showToast(ru ? "НЕИЗВЕСТНАЯ КОМАНДА" : "UNKNOWN COMMAND", 2.0f);
 }
 
 void App::saveCurrentPlayerState() const {
@@ -2512,14 +3312,20 @@ void App::saveCurrentPlayerState() const {
     out << "\n";
   };
 
-  out << "CUBEOS_PLAYER_V3\n";
+  out << "CUBEOS_PLAYER_V6\n";
   out << playerPos.x << " "
       << playerPos.y << " "
       << playerPos.z << " "
+      << respawnPos.x << " "
+      << respawnPos.y << " "
+      << respawnPos.z << " "
       << yaw << " "
       << pitch << " "
       << selectedSlot << " "
-      << achievementMask << "\n";
+      << achievementMask << " "
+      << playerHealth << " "
+      << (cheatFlightEnabled ? 1 : 0) << " "
+      << (flying ? 1 : 0) << "\n";
   writeStacks(hotbar);
   writeStacks(inventory);
   std::vector<SavedFurnace> savedFurnaces;
@@ -2561,6 +3367,40 @@ void App::saveCurrentPlayerState() const {
         << furnace.burnTime << " "
         << furnace.burnDuration << " "
         << furnace.smeltProgress << "\n";
+  }
+
+  std::vector<SavedDroppedItem> savedDroppedItems;
+  savedDroppedItems.reserve(droppedItems.size());
+  for (const DroppedItemEntity& item : droppedItems) {
+    if (item.type == kAir || item.count == 0) {
+      continue;
+    }
+
+    SavedDroppedItem saved{};
+    saved.type = item.type;
+    saved.count = item.count;
+    saved.pos = item.pos;
+    saved.vel = item.vel;
+    saved.age = item.age;
+    saved.pickupDelay = item.pickupDelay;
+    saved.spinPhase = item.spinPhase;
+    saved.onGround = item.onGround;
+    savedDroppedItems.push_back(saved);
+  }
+  out << savedDroppedItems.size() << "\n";
+  for (const SavedDroppedItem& item : savedDroppedItems) {
+    out << static_cast<int>(item.type) << " "
+        << item.count << " "
+        << item.pos.x << " "
+        << item.pos.y << " "
+        << item.pos.z << " "
+        << item.vel.x << " "
+        << item.vel.y << " "
+        << item.vel.z << " "
+        << item.age << " "
+        << item.pickupDelay << " "
+        << item.spinPhase << " "
+        << (item.onGround ? 1 : 0) << "\n";
   }
   if (!out.good()) {
     std::cerr << "Warning: failed to flush player-state data: " << statePath << "\n";
@@ -2636,6 +3476,95 @@ bool App::loadPlayerStateForWorld(const std::string& worldPath, PlayerSaveData& 
     return true;
   };
 
+  auto loadDroppedItemSection = [&](size_t droppedItemCount) -> bool {
+    loaded.droppedItems.clear();
+    loaded.droppedItems.reserve(droppedItemCount);
+    for (size_t i = 0; i < droppedItemCount; ++i) {
+      SavedDroppedItem item{};
+      int rawType = 0;
+      int onGroundValue = 0;
+      if (!(in >> rawType
+              >> item.count
+              >> item.pos.x
+              >> item.pos.y
+              >> item.pos.z
+              >> item.vel.x
+              >> item.vel.y
+              >> item.vel.z
+              >> item.age
+              >> item.pickupDelay
+              >> item.spinPhase
+              >> onGroundValue)) {
+        return false;
+      }
+      item.type = static_cast<uint8_t>(std::clamp(rawType, 0, 255));
+      if (item.count == 0) {
+        item.type = kAir;
+      }
+      item.age = std::max(0.0f, item.age);
+      item.pickupDelay = std::max(0.0f, item.pickupDelay);
+      item.onGround = onGroundValue != 0;
+      loaded.droppedItems.push_back(item);
+    }
+    return true;
+  };
+
+  auto loadPlayerStateModern = [&](bool scaleLegacyHealth,
+                                   bool allowZeroHealth,
+                                   bool hasDroppedItems) -> bool {
+    size_t furnaceCount = 0;
+    size_t droppedItemCount = 0;
+    int cheatFlightValue = 0;
+    int flyingValue = 0;
+    if (!(in >> loaded.pos.x
+            >> loaded.pos.y
+            >> loaded.pos.z
+            >> loaded.respawnPos.x
+            >> loaded.respawnPos.y
+            >> loaded.respawnPos.z
+            >> loaded.yaw
+            >> loaded.pitch
+            >> loaded.selectedSlot
+            >> loaded.achievementMask
+            >> loaded.health
+            >> cheatFlightValue
+            >> flyingValue)) {
+      return false;
+    }
+    if (!readStacks(loaded.hotbar) || !readStacks(loaded.inventory)) {
+      return false;
+    }
+    if (!(in >> furnaceCount) || !loadFurnaceSection(furnaceCount)) {
+      return false;
+    }
+    if (hasDroppedItems) {
+      if (!(in >> droppedItemCount) || !loadDroppedItemSection(droppedItemCount)) {
+        return false;
+      }
+    }
+    loaded.selectedSlot = std::clamp(loaded.selectedSlot, 0, static_cast<int>(hotbar.size()) - 1);
+    if (scaleLegacyHealth) {
+      loaded.health *= 2;
+    }
+    loaded.health = std::clamp(loaded.health, allowZeroHealth ? 0 : 1, kMaxPlayerHealth);
+    loaded.cheatFlightEnabled = cheatFlightValue != 0;
+    loaded.flying = flyingValue != 0;
+    outState = loaded;
+    return true;
+  };
+
+  if (firstToken == "CUBEOS_PLAYER_V6") {
+    return loadPlayerStateModern(false, true, true);
+  }
+
+  if (firstToken == "CUBEOS_PLAYER_V5") {
+    return loadPlayerStateModern(false, false, false);
+  }
+
+  if (firstToken == "CUBEOS_PLAYER_V4") {
+    return loadPlayerStateModern(true, false, false);
+  }
+
   if (firstToken == "CUBEOS_PLAYER_V3") {
     size_t furnaceCount = 0;
     if (!(in >> loaded.pos.x
@@ -2654,6 +3583,8 @@ bool App::loadPlayerStateForWorld(const std::string& worldPath, PlayerSaveData& 
       return false;
     }
     loaded.selectedSlot = std::clamp(loaded.selectedSlot, 0, static_cast<int>(hotbar.size()) - 1);
+    loaded.respawnPos = loaded.pos;
+    loaded.health = kMaxPlayerHealth;
     outState = loaded;
     return true;
   }
@@ -2672,6 +3603,8 @@ bool App::loadPlayerStateForWorld(const std::string& worldPath, PlayerSaveData& 
       return false;
     }
     loaded.selectedSlot = std::clamp(loaded.selectedSlot, 0, static_cast<int>(hotbar.size()) - 1);
+    loaded.respawnPos = loaded.pos;
+    loaded.health = kMaxPlayerHealth;
     outState = loaded;
     return true;
   }
@@ -2691,8 +3624,10 @@ bool App::loadPlayerStateForWorld(const std::string& worldPath, PlayerSaveData& 
   }
 
   loaded.pos = glm::vec3(x, y, z);
+  loaded.respawnPos = loaded.pos;
   loaded.yaw = loadedYaw;
   loaded.pitch = loadedPitch;
+  loaded.health = kMaxPlayerHealth;
   outState = loaded;
   return true;
 }
@@ -2779,14 +3714,8 @@ void App::loadWorldFromSelection(int entryIndex) {
     storageEmpty = storageEmpty && (slot.count == 0 || slot.type == kAir);
   }
 
-  if (( !hasPendingPlayerResume || storageEmpty) && pendingWorldSettings.startInventoryMode != 0) {
-    std::array<uint8_t, App::kHotbarSlotCount> creativeBlocks = {
-      kGrass, kDirt, kStone, kSand, kWater, kWood, kLeaves, kCoalOre, kGoldOre
-    };
-    for (size_t i = 0; i < hotbar.size() && i < creativeBlocks.size(); ++i) {
-      hotbar[i].type = creativeBlocks[i];
-      hotbar[i].count = 64;
-    }
+  if ((!hasPendingPlayerResume || storageEmpty) && isCreativeWorldMode(pendingWorldSettings)) {
+    populateCreativeHotbar(hotbar);
   }
 
   renderLoadingFrame(0.24f, ru ? "Подготовка спавна" : "Preparing spawn");
@@ -2801,6 +3730,8 @@ void App::beginCreateWorldFlow() {
   pendingWorldSettings.generateStructures = true;
   pendingWorldSettings.caveDensity = std::clamp(pendingWorldSettings.caveDensity, 0.25f, 2.5f);
   pendingWorldSettings.ravineFrequency = std::clamp(pendingWorldSettings.ravineFrequency, 0.25f, 2.5f);
+  pendingWorldSettings.startInventoryMode = 0;
+  pendingWorldSettings.cheatsEnabled = false;
   pendingSeedText.clear();
   hasPendingPlayerResume = false;
   pendingPlayerState = {};
@@ -2884,14 +3815,8 @@ void App::createWorldFromMenu() {
   achievementPopupQueue.clear();
   achievementPopupTimer = 0.0f;
 
-  if (settings.startInventoryMode != 0) {
-    std::array<uint8_t, App::kHotbarSlotCount> creativeBlocks = {
-      kGrass, kDirt, kStone, kSand, kWater, kWood, kLeaves, kCoalOre, kGoldOre
-    };
-    for (size_t i = 0; i < hotbar.size() && i < creativeBlocks.size(); ++i) {
-      hotbar[i].type = creativeBlocks[i];
-      hotbar[i].count = 64;
-    }
+  if (isCreativeWorldMode(settings)) {
+    populateCreativeHotbar(hotbar);
   }
 
   renderLoadingFrame(0.25f, ru ? "Подготовка спавна" : "Preparing spawn");
@@ -2913,6 +3838,15 @@ void App::setupGameplaySession() {
   playerPos = sessionAnchor;
   playerVel = glm::vec3(0.0f);
   onGround = false;
+  playerHealth = kMaxPlayerHealth;
+  cheatFlightEnabled = false;
+  flying = false;
+  fallDistance = 0.0f;
+  footstepDistanceAccumulator = 0.0f;
+  lastGrassFootstepVariant = -1;
+  lastStoneFootstepVariant = -1;
+  flightToggleTimer = 0.0f;
+  jumpDown = false;
   inventoryOpen = false;
   workbenchOpen = false;
   furnaceOpen = false;
@@ -2922,6 +3856,10 @@ void App::setupGameplaySession() {
   droppedItems.clear();
   droppedItemMeshUploaded = false;
   droppedItemMeshTimer = 0.0f;
+  sheepEntities.clear();
+  sheepMeshUploaded = false;
+  sheepMeshTimer = 0.0f;
+  sheepSpawnTimer = 0.0f;
   cachedTorchLights.clear();
   torchLightRefreshTimer = 0.0f;
   torchLightsCacheValid = false;
@@ -3483,7 +4421,9 @@ void App::setupGameplaySession() {
   };
 
   playerPos = findSurfaceSpawn();
+  respawnPos = playerPos;
   if (hasPendingPlayerResume) {
+    bool resumeAfterDeath = pendingPlayerState.health <= 0;
     glm::vec3 resumePos = pendingPlayerState.pos;
     int rx = static_cast<int>(std::floor(resumePos.x));
     int ry = static_cast<int>(std::floor(resumePos.y));
@@ -3508,10 +4448,54 @@ void App::setupGameplaySession() {
     bool resumeInBounds = world.inBounds(rx, ry, rz) &&
                           world.inBounds(rx, ry + 1, rz);
     bool resumeSafe = hasNearbySupport(rx, ry, rz);
-    if (resumeInBounds && !collidesAt(resumePos) && resumeSafe) {
+    if (!resumeAfterDeath && resumeInBounds && !collidesAt(resumePos) && resumeSafe) {
       playerPos = resumePos;
       yaw = pendingPlayerState.yaw;
       pitch = std::clamp(pendingPlayerState.pitch, -89.0f, 89.0f);
+    }
+    if (world.inBounds(static_cast<int>(std::floor(pendingPlayerState.respawnPos.x)),
+                       static_cast<int>(std::floor(pendingPlayerState.respawnPos.y)),
+                       static_cast<int>(std::floor(pendingPlayerState.respawnPos.z)))) {
+      respawnPos = pendingPlayerState.respawnPos;
+    }
+    if (resumeAfterDeath) {
+      playerPos = respawnPos;
+      yaw = pendingPlayerState.yaw;
+      pitch = std::clamp(pendingPlayerState.pitch, -89.0f, 89.0f);
+      playerHealth = kMaxPlayerHealth;
+    } else {
+      playerHealth = std::clamp(pendingPlayerState.health, 1, kMaxPlayerHealth);
+    }
+    cheatFlightEnabled = pendingPlayerState.cheatFlightEnabled && pendingWorldSettings.cheatsEnabled;
+    flying = !resumeAfterDeath &&
+             pendingPlayerState.flying &&
+             (isCreativeWorldMode(pendingWorldSettings) || cheatFlightEnabled);
+    droppedItems.clear();
+    droppedItems.reserve(std::min<size_t>(pendingPlayerState.droppedItems.size(), 384));
+    for (const SavedDroppedItem& saved : pendingPlayerState.droppedItems) {
+      if (saved.type == kAir || saved.count == 0 || isWaterBlock(saved.type)) {
+        continue;
+      }
+      int itemX = static_cast<int>(std::floor(saved.pos.x));
+      int itemY = static_cast<int>(std::floor(saved.pos.y));
+      int itemZ = static_cast<int>(std::floor(saved.pos.z));
+      if (!world.inBounds(itemX, itemY, itemZ)) {
+        continue;
+      }
+
+      DroppedItemEntity item;
+      item.type = saved.type;
+      item.count = saved.count;
+      item.pos = saved.pos;
+      item.vel = saved.vel;
+      item.age = std::clamp(saved.age, 0.0f, 180.0f);
+      item.pickupDelay = std::max(0.0f, saved.pickupDelay);
+      item.spinPhase = saved.spinPhase;
+      item.onGround = saved.onGround;
+      droppedItems.push_back(item);
+      if (droppedItems.size() >= 384) {
+        break;
+      }
     }
     hasPendingPlayerResume = false;
     pendingPlayerState = {};
@@ -3521,6 +4505,9 @@ void App::setupGameplaySession() {
   }
   playerVel = glm::vec3(0.0f);
   onGround = false;
+  fallDistance = 0.0f;
+  flightToggleTimer = 0.0f;
+  jumpDown = false;
 
   int cx = static_cast<int>(std::floor(playerPos.x / static_cast<float>(kChunkSize)));
   int cz = static_cast<int>(std::floor(playerPos.z / static_cast<float>(kChunkSize)));
@@ -3557,6 +4544,9 @@ void App::setupGameplaySession() {
   uiDirty = false;
   refreshSelectedBlock();
   refreshAchievementsProgress();
+  syncDroppedItemMesh(true);
+  populateSheepForSession();
+  syncSheepMesh(true);
 
   renderLoadingFrame(1.0f, ruUi ? "Готово" : "Done");
   setScreenState(ScreenState::kPlaying);
@@ -3632,10 +4622,7 @@ void App::processMenuInput(float deltaTime) {
   }
 
   auto togglePreset = [&]() {
-    pendingWorldSettings.preset =
-      (pendingWorldSettings.preset == WorldPreset::kMinecraftStyle)
-      ? WorldPreset::kClassicFlat
-      : WorldPreset::kMinecraftStyle;
+    pendingWorldSettings.preset = cycleCreateWorldPreset(pendingWorldSettings.preset, true);
     updateWindowTitle();
     uiDirty = true;
   };
@@ -3645,8 +4632,9 @@ void App::processMenuInput(float deltaTime) {
     bool changed = false;
     switch (createWorldSelection) {
       case 2:
-        togglePreset();
-        return;
+        pendingWorldSettings.preset = cycleCreateWorldPreset(pendingWorldSettings.preset, increase);
+        changed = true;
+        break;
       case 3: {
         float oldValue = pendingWorldSettings.caveDensity;
         float delta = increase ? kStep : -kStep;
@@ -3667,6 +4655,10 @@ void App::processMenuInput(float deltaTime) {
         changed = true;
         break;
       }
+      case 6:
+        pendingWorldSettings.cheatsEnabled = !pendingWorldSettings.cheatsEnabled;
+        changed = true;
+        break;
       default:
         break;
     }
@@ -3904,6 +4896,38 @@ void App::processMenuInput(float deltaTime) {
     }
     if (escPressed && !menuEscDown) {
       setScreenState(ScreenState::kPlaying);
+    }
+  } else if (screenState == ScreenState::kDeath) {
+    int hoveredRow = fixedMenuRowAtMouse(2);
+    if (hoveredRow >= 0 && hoveredRow != deathMenuSelection) {
+      deathMenuSelection = hoveredRow;
+      updateWindowTitle();
+      uiDirty = true;
+    }
+    if (upPressed && !menuUpDown) {
+      deathMenuSelection = std::max(0, deathMenuSelection - 1);
+      updateWindowTitle();
+      uiDirty = true;
+    }
+    if (downPressed && !menuDownDown) {
+      deathMenuSelection = std::min(1, deathMenuSelection + 1);
+      updateWindowTitle();
+      uiDirty = true;
+    }
+    auto activateDeathRow = [&]() {
+      if (deathMenuSelection == 0) {
+        respawnPlayer();
+      } else {
+        respawnPlayer();
+        setScreenState(ScreenState::kMainMenu);
+      }
+    };
+    if (enterPressed && !menuEnterDown) {
+      activateDeathRow();
+    }
+    if (mouseLeftClicked && hoveredRow >= 0) {
+      deathMenuSelection = hoveredRow;
+      activateDeathRow();
     }
   } else if (screenState == ScreenState::kWorldSelect) {
     int rowCount = static_cast<int>(worldSelectEntries.size()) + 2;
@@ -4263,7 +5287,7 @@ void App::processMenuInput(float deltaTime) {
       setScreenState(settingsReturnState);
     }
   } else if (screenState == ScreenState::kCreateWorld) {
-    constexpr int kCreateFieldCount = 8;
+    constexpr int kCreateFieldCount = 9;
     float t = static_cast<float>(glfwGetTime());
     float intro = menuIntro * menuIntro * (3.0f - 2.0f * menuIntro);
     float panelWidth = std::min(uiW * 0.72f, 640.0f);
@@ -4321,15 +5345,30 @@ void App::processMenuInput(float deltaTime) {
     auto setCreatePreset = [&](WorldPreset preset) {
       if (pendingWorldSettings.preset != preset) {
         pendingWorldSettings.preset = preset;
+        if (preset == WorldPreset::kAprilFools) {
+          pendingWorldSettings.caveDensity = 1.75f;
+          pendingWorldSettings.ravineFrequency = 1.60f;
+        } else {
+          pendingWorldSettings.caveDensity = 1.0f;
+          pendingWorldSettings.ravineFrequency = 1.0f;
+        }
         updateWindowTitle();
         uiDirty = true;
       }
     };
 
-    auto setCreateInventoryMode = [&](uint8_t mode) {
+    auto setCreateGameMode = [&](uint8_t mode) {
       mode = static_cast<uint8_t>(std::clamp<int>(mode, 0, 1));
       if (pendingWorldSettings.startInventoryMode != mode) {
         pendingWorldSettings.startInventoryMode = mode;
+        updateWindowTitle();
+        uiDirty = true;
+      }
+    };
+
+    auto setCreateCheatsEnabled = [&](bool enabled) {
+      if (pendingWorldSettings.cheatsEnabled != enabled) {
+        pendingWorldSettings.cheatsEnabled = enabled;
         updateWindowTitle();
         uiDirty = true;
       }
@@ -4348,15 +5387,17 @@ void App::processMenuInput(float deltaTime) {
       return -1;
     };
 
-    auto presetButtonRect = [&](bool leftButton) -> glm::vec4 {
-      float optionW = 120.0f;
+    auto presetButtonRect = [&](size_t optionIndex) -> glm::vec4 {
+      constexpr float kPresetOptionGap = 8.0f;
+      float optionW = 82.0f;
       float optionH = rowH - 12.0f;
       float optionY = createRowRect(2).y + 6.0f;
-      float leftOptionX = rowX + rowW - optionW * 2.0f - 18.0f;
-      float rightOptionX = rowX + rowW - optionW - 10.0f;
-      return leftButton
-        ? glm::vec4{leftOptionX, optionY, optionW, optionH}
-        : glm::vec4{rightOptionX, optionY, optionW, optionH};
+      float totalPresetWidth =
+        optionW * static_cast<float>(kCreateWorldPresetOptions.size()) +
+        kPresetOptionGap * static_cast<float>(kCreateWorldPresetOptions.size() - 1);
+      float firstOptionX = rowX + rowW - totalPresetWidth - 10.0f;
+      float optionX = firstOptionX + static_cast<float>(optionIndex) * (optionW + kPresetOptionGap);
+      return {optionX, optionY, optionW, optionH};
     };
 
     auto createSliderRect = [&](int rowIndex) -> glm::vec4 {
@@ -4372,11 +5413,19 @@ void App::processMenuInput(float deltaTime) {
       return {sliderRect.x, createRowRect(rowIndex).y + 8.0f, sliderRect.z, rowH - 16.0f};
     };
 
-    auto createInventoryToggleRect = [&]() -> glm::vec4 {
-      float toggleW = 90.0f;
+    auto createModeToggleRect = [&]() -> glm::vec4 {
+      float toggleW = 108.0f;
       float toggleH = rowH - 12.0f;
       float toggleX = rowX + rowW - toggleW - 16.0f;
       float toggleY = createRowRect(5).y + 6.0f;
+      return {toggleX, toggleY, toggleW, toggleH};
+    };
+
+    auto createCheatsToggleRect = [&]() -> glm::vec4 {
+      float toggleW = 108.0f;
+      float toggleH = rowH - 12.0f;
+      float toggleX = rowX + rowW - toggleW - 16.0f;
+      float toggleY = createRowRect(6).y + 6.0f;
       return {toggleX, toggleY, toggleW, toggleH};
     };
 
@@ -4390,11 +5439,16 @@ void App::processMenuInput(float deltaTime) {
         setCreateSelection(hoveredCreateRow);
 
         if (hoveredCreateRow == 2 && mouseLeftClicked) {
-          if (pointInRect(menuMouseFb.x, menuMouseFb.y, presetButtonRect(true))) {
-            setCreatePreset(WorldPreset::kMinecraftStyle);
-          } else if (pointInRect(menuMouseFb.x, menuMouseFb.y, presetButtonRect(false))) {
-            setCreatePreset(WorldPreset::kClassicFlat);
-          } else {
+          bool clickedPresetButton = false;
+          for (size_t i = 0; i < kCreateWorldPresetOptions.size(); ++i) {
+            if (!pointInRect(menuMouseFb.x, menuMouseFb.y, presetButtonRect(i))) {
+              continue;
+            }
+            setCreatePreset(kCreateWorldPresetOptions[i]);
+            clickedPresetButton = true;
+            break;
+          }
+          if (!clickedPresetButton) {
             togglePreset();
           }
         } else if ((hoveredCreateRow == 3 || hoveredCreateRow == 4) &&
@@ -4409,14 +5463,20 @@ void App::processMenuInput(float deltaTime) {
             adjustCreateSetting(menuMouseFb.x >= sliderRect.x + sliderRect.z * 0.5f);
           }
         } else if (hoveredCreateRow == 5 && mouseLeftClicked) {
-          if (pointInRect(menuMouseFb.x, menuMouseFb.y, createInventoryToggleRect())) {
-            setCreateInventoryMode(pendingWorldSettings.startInventoryMode == 0 ? 1 : 0);
+          if (pointInRect(menuMouseFb.x, menuMouseFb.y, createModeToggleRect())) {
+            setCreateGameMode(pendingWorldSettings.startInventoryMode == 0 ? 1 : 0);
           } else {
             adjustCreateSetting(true);
           }
         } else if (hoveredCreateRow == 6 && mouseLeftClicked) {
-          createWorldFromMenu();
+          if (pointInRect(menuMouseFb.x, menuMouseFb.y, createCheatsToggleRect())) {
+            setCreateCheatsEnabled(!pendingWorldSettings.cheatsEnabled);
+          } else {
+            adjustCreateSetting(true);
+          }
         } else if (hoveredCreateRow == 7 && mouseLeftClicked) {
+          createWorldFromMenu();
+        } else if (hoveredCreateRow == 8 && mouseLeftClicked) {
           refreshWorldSelectEntries();
           setScreenState(ScreenState::kWorldSelect);
         }
@@ -4447,11 +5507,11 @@ void App::processMenuInput(float deltaTime) {
       uiDirty = true;
     }
     if (enterPressed && !menuEnterDown) {
-      if (createWorldSelection >= 2 && createWorldSelection <= 5) {
+      if (createWorldSelection >= 2 && createWorldSelection <= 6) {
         adjustCreateSetting(true);
-      } else if (createWorldSelection == 6) {
-        createWorldFromMenu();
       } else if (createWorldSelection == 7) {
+        createWorldFromMenu();
+      } else if (createWorldSelection == 8) {
         refreshWorldSelectEntries();
         setScreenState(ScreenState::kWorldSelect);
       }
@@ -4472,6 +5532,34 @@ void App::processMenuInput(float deltaTime) {
 }
 
 void App::onCharInput(unsigned int codepoint) {
+  if (screenState == ScreenState::kPlaying) {
+    if (inventoryOpen || achievementTreeOpen) {
+      return;
+    }
+
+    if (!commandInputOpen) {
+      if (codepoint == '/') {
+        if (!worldCheatsEnabled()) {
+          showToast(appliedSettings.language == 1 ? "ЧИТЫ ВЫКЛЮЧЕНЫ" : "CHEATS DISABLED", 1.8f);
+          return;
+        }
+        commandInputOpen = true;
+        commandInput = "/";
+        commandBackspaceDown = false;
+        commandEnterDown = false;
+        refreshCursorMode();
+        uiDirty = true;
+      }
+      return;
+    }
+
+    if (codepoint >= 32 && codepoint <= 126 && commandInput.size() < kCommandBoxMaxChars) {
+      commandInput.push_back(static_cast<char>(codepoint));
+      uiDirty = true;
+    }
+    return;
+  }
+
   if (screenState != ScreenState::kCreateWorld) {
     return;
   }
@@ -4697,6 +5785,7 @@ void App::initVulkan() {
   startupSettings.caveDensity = 1.0f;
   startupSettings.ravineFrequency = 1.0f;
   startupSettings.startInventoryMode = 0;
+  startupSettings.cheatsEnabled = false;
 
   world.setGenerationSettings(startupSettings);
   world.setSeed(1337);
@@ -4726,7 +5815,10 @@ void App::initVulkan() {
   pendingWorldChunkRemovals.clear();
   lastWorldChunkUploadTime = glfwGetTime();
   dayLightFactor = computeDaylightFactor();
-  vk.setEnvironmentState(dayLightFactor, weatherIntensity, dayCycleTime);
+  vk.setEnvironmentState(dayLightFactor,
+                         weatherIntensity,
+                         dayCycleTime,
+                         isAprilFoolsPreset(world.getGenerationSettings()));
 }
 
 void App::mainLoop() {
@@ -4812,6 +5904,9 @@ void App::mainLoop() {
     if (debugProfilerOverlay && (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused)) {
       uiDirty = true;
     }
+    if (commandInputOpen && screenState == ScreenState::kPlaying) {
+      uiDirty = true;
+    }
 
     if (screenState != ScreenState::kPlaying) {
       menuUiTickAccumulator += static_cast<double>(deltaTime);
@@ -4829,7 +5924,7 @@ void App::mainLoop() {
       menuUiTickAccumulator = 0.0;
     }
     double playerStart = glfwGetTime();
-    if (screenState == ScreenState::kPlaying && !inventoryOpen && !achievementTreeOpen) {
+    if (screenState == ScreenState::kPlaying && !inventoryOpen && !achievementTreeOpen && !commandInputOpen) {
       updatePlayer(deltaTime);
     }
     recordProfilerMetric(profiler.player,
@@ -4885,9 +5980,11 @@ void App::mainLoop() {
     if (screenState == ScreenState::kPlaying) {
       updateFurnaces(deltaTime);
       updateDroppedItems(deltaTime);
+      updateSheep(deltaTime);
     }
     syncAudioState();
     syncDroppedItemMesh(false);
+    syncSheepMesh(false);
     updateFirstPersonState(deltaTime);
     syncFirstPersonMesh();
     updateInteractionOverlayMesh();
@@ -4998,7 +6095,10 @@ void App::mainLoop() {
     firstPersonProj[1][1] *= -1.0f;
 
     double torchStart = glfwGetTime();
-    vk.setEnvironmentState(dayLightFactor, weatherIntensity, dayCycleTime);
+    vk.setEnvironmentState(dayLightFactor,
+                           weatherIntensity,
+                           dayCycleTime,
+                           isAprilFoolsPreset(world.getGenerationSettings()));
     if (worldScreenActive) {
       int quality = std::clamp(appliedSettings.graphicsQuality, 0, 2);
       size_t maxLights = static_cast<size_t>(maxTorchLightsForQuality(quality));
@@ -5072,9 +6172,9 @@ void App::mainLoop() {
 float App::computeDaylightFactor() const {
   float cycle = dayCycleTime - std::floor(dayCycleTime);
   float sun = std::sin((cycle - 0.25f) * kTau);
-  float daylight = std::clamp(sun * 0.53f + 0.47f, 0.0f, 1.0f);
+  float daylight = std::clamp((sun + 0.30f) / 0.56f, 0.0f, 1.0f);
   daylight = daylight * daylight * (3.0f - 2.0f * daylight);
-  return std::max(0.08f, daylight);
+  return glm::mix(0.05f, 1.0f, daylight);
 }
 
 void App::resetEnvironmentForSession() {
@@ -5224,7 +6324,12 @@ void App::processInput(float deltaTime) {
     sprinting = false;
     escDown = false;
     tabDown = false;
+    jumpDown = false;
     achievementToggleDown = false;
+    commandInputOpen = false;
+    commandInput.clear();
+    commandBackspaceDown = false;
+    commandEnterDown = false;
 
     bool allowDebugOverlayKeys = screenState == ScreenState::kPaused;
     if (allowDebugOverlayKeys) {
@@ -5276,6 +6381,64 @@ void App::processInput(float deltaTime) {
     }
     mouseLeftDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     mouseRightDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+    return;
+  }
+
+  flightToggleTimer = std::max(0.0f, flightToggleTimer - deltaTime);
+
+  bool leftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+  bool rightPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+  bool dropPressed = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
+  bool spacePressed = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
+
+  if (commandInputOpen) {
+    bool escPressed = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+    if (escPressed && !escDown) {
+      commandInputOpen = false;
+      commandInput.clear();
+      refreshCursorMode();
+      uiDirty = true;
+      escDown = true;
+    } else if (!escPressed) {
+      escDown = false;
+    }
+
+    bool backspacePressed = glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
+    if (backspacePressed && !commandBackspaceDown && !commandInput.empty()) {
+      if (commandInput.size() <= 1) {
+        commandInput = "/";
+      } else {
+        commandInput.pop_back();
+      }
+      uiDirty = true;
+    }
+    commandBackspaceDown = backspacePressed;
+
+    bool enterPressed = glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS ||
+                        glfwGetKey(window, GLFW_KEY_KP_ENTER) == GLFW_PRESS;
+    if (enterPressed && !commandEnterDown) {
+      std::string submitted = commandInput;
+      commandInputOpen = false;
+      commandInput.clear();
+      refreshCursorMode();
+      executeCommand(submitted);
+      uiDirty = true;
+    }
+    commandEnterDown = enterPressed;
+
+    mouseLeftDown = leftPressed;
+    mouseRightDown = rightPressed;
+    dropOneDown = dropPressed;
+    jumpDown = spacePressed;
+    jumpDown = spacePressed;
+    crouching = false;
+    sprinting = false;
+    if (breakingActive) {
+      breakingActive = false;
+      breakingProgress = 0.0f;
+      breakingStage = 0;
+      world.clearBreakOverlay();
+    }
     return;
   }
 
@@ -5380,10 +6543,6 @@ void App::processInput(float deltaTime) {
     showSelectedItemToast();
   }
 
-  bool leftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-  bool rightPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
-  bool dropPressed = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
-
   if (inventoryOpen) {
     crouching = false;
     sprinting = false;
@@ -5409,6 +6568,7 @@ void App::processInput(float deltaTime) {
     mouseLeftDown = leftPressed;
     mouseRightDown = rightPressed;
     dropOneDown = dropPressed;
+    jumpDown = spacePressed;
 
     if (breakingActive) {
       breakingActive = false;
@@ -5533,14 +6693,28 @@ void App::processInput(float deltaTime) {
     wishDir = glm::normalize(wishDir);
   }
 
-  bool inWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
+  if (canFly() && spacePressed && !jumpDown) {
+    if (flightToggleTimer > 0.0f) {
+      flying = !flying;
+      flightToggleTimer = 0.0f;
+      playerVel.y = 0.0f;
+      onGround = false;
+    } else {
+      flightToggleTimer = kFlightToggleWindowSec;
+    }
+  }
+  jumpDown = spacePressed;
+
+  bool inWater = !flying && intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
   bool shiftPressed = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
                       glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
   bool sprintPressed = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
                        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
-  crouching = !inWater && shiftPressed;
+  crouching = !flying && !inWater && shiftPressed;
   sprinting = !inWater && !crouching && sprintPressed && glm::length(wishDir) > 0.001f;
-  const float moveSpeed = inWater ? 3.2f : (crouching ? 2.6f : (sprinting ? 8.2f : 6.0f));
+  const float moveSpeed = flying
+    ? (sprinting ? kCreativeFlyBoostSpeed : kCreativeFlySpeed)
+    : (inWater ? 3.2f : (crouching ? 2.6f : (sprinting ? 8.2f : 6.0f)));
   playerVel.x = wishDir.x * moveSpeed;
   playerVel.z = wishDir.z * moveSpeed;
 
@@ -5564,19 +6738,31 @@ void App::processInput(float deltaTime) {
         glm::vec3(0.0f, kThrownItemUpwardSpeed, 0.0f);
       spawnDroppedItemWithPhysics(stack.type, dropSource, dropVelocity, kThrownItemPickupDelay);
       triggerFirstPersonUseAnimation(0.55f);
-      stack.count = static_cast<uint16_t>(stack.count - 1);
-      if (stack.count == 0) {
-        stack.type = kAir;
+      if (!isCreativeMode()) {
+        stack.count = static_cast<uint16_t>(stack.count - 1);
+        if (stack.count == 0) {
+          stack.type = kAir;
+        }
+        refreshSelectedBlock();
       }
-      refreshSelectedBlock();
       uiDirty = true;
     }
   }
   dropOneDown = dropPressed;
 
-  if (inWater) {
+  if (flying) {
     float verticalIntent = 0.0f;
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+    if (spacePressed) {
+      verticalIntent += 1.0f;
+    }
+    if (shiftPressed) {
+      verticalIntent -= 1.0f;
+    }
+    playerVel.y = verticalIntent * (sprinting ? kCreativeVerticalFlyBoostSpeed : kCreativeVerticalFlySpeed);
+    onGround = false;
+  } else if (inWater) {
+    float verticalIntent = 0.0f;
+    if (spacePressed) {
       verticalIntent += 1.0f;
     }
     if (shiftPressed) {
@@ -5589,14 +6775,40 @@ void App::processInput(float deltaTime) {
       playerVel.y = -0.9f;
     }
     onGround = false;
-  } else if (onGround && glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+  } else if (onGround && spacePressed) {
     playerVel.y = 6.5f;
     onGround = false;
   }
 
   ToolTier equippedTool = toolTierForItem(selectedBlock);
 
-  if (leftPressed) {
+  bool sheepAttackHandled = false;
+  if (leftPressed && !mouseLeftDown) {
+    glm::vec3 origin = playerPos + glm::vec3(0.0f, cameraEyeHeight(), 0.0f);
+    glm::vec3 breakDir = cameraFront();
+    SheepHit sheepHit = raycastSheep(origin, breakDir, kBreakMaxDistance);
+    if (sheepHit.hit) {
+      RaycastHit blockHit = raycast(origin, breakDir, kBreakMaxDistance);
+      float blockDist = std::numeric_limits<float>::infinity();
+      if (blockHit.hit) {
+        glm::vec3 blockCenter = glm::vec3(blockHit.block) + glm::vec3(0.5f);
+        blockDist = glm::length(blockCenter - origin);
+      }
+      if (!blockHit.hit || sheepHit.distance <= blockDist + 0.08f) {
+        if (!firstPersonSwingActive || firstPersonSwingProgress >= 0.72f) {
+          triggerFirstPersonSwing(1.0f);
+        }
+        damageSheep(sheepHit.index, isCreativeMode() ? 99 : 3, breakDir);
+        sheepAttackHandled = true;
+        breakingActive = false;
+        breakingProgress = 0.0f;
+        breakingStage = 0;
+        world.clearBreakOverlay();
+      }
+    }
+  }
+
+  if (leftPressed && !sheepAttackHandled) {
     glm::vec3 origin = playerPos + glm::vec3(0.0f, cameraEyeHeight(), 0.0f);
     glm::vec3 breakDir = cameraFront();
     RaycastHit hit = raycast(origin, breakDir, kBreakMaxDistance);
@@ -5627,9 +6839,16 @@ void App::processInput(float deltaTime) {
         return kAir;
       };
 
-      auto completeBreakTarget = [&](const glm::ivec3& blockPos) {
+      auto completeBreakTarget = [&](const glm::ivec3& blockPos, bool spawnDrops) {
         uint8_t removed = world.getBlock(blockPos.x, blockPos.y, blockPos.z);
         if (removed != kAir && !isWaterBlock(removed)) {
+          if (isBedBlock(removed)) {
+            glm::ivec3 otherPos = blockPos + bedOtherPartOffset(removed);
+            uint8_t otherType = world.getBlock(otherPos.x, otherPos.y, otherPos.z);
+            if (isBedBlock(otherType)) {
+              world.setBlock(otherPos.x, otherPos.y, otherPos.z, kAir);
+            }
+          }
           uint8_t replacement = replacementBlockAfterBreak(blockPos, removed);
           world.setBlock(blockPos.x, blockPos.y, blockPos.z, replacement);
           audio.playCue(breakCueForBlock(removed), breakGainForBlock(removed));
@@ -5646,10 +6865,10 @@ void App::processInput(float deltaTime) {
             }
           }
           waterSimBoostTimer = std::max(waterSimBoostTimer, 2.0f);
-          if (shouldDropBrokenBlock(removed, equippedTool)) {
+          if (spawnDrops && shouldDropBrokenBlock(removed, equippedTool)) {
             spawnDroppedItem(droppedItemForBlock(removed), blockPos);
           }
-          if (removed == kLeaves && shouldDropStickFromLeaves(blockPos, world.getSeed())) {
+          if (spawnDrops && removed == kLeaves && shouldDropStickFromLeaves(blockPos, world.getSeed())) {
             spawnDroppedItem(kStick, blockPos);
           }
         }
@@ -5663,8 +6882,12 @@ void App::processInput(float deltaTime) {
         if (!firstPersonSwingActive || firstPersonSwingProgress >= 0.72f) {
           triggerFirstPersonSwing(1.0f);
         }
+        if (isCreativeMode()) {
+          completeBreakTarget(blockPos, false);
+          return;
+        }
         if (breaksInstantly(blockType)) {
-          completeBreakTarget(blockPos);
+          completeBreakTarget(blockPos, true);
           return;
         }
         float breakDuration = breakDurationForBlock(blockType, equippedTool, inWater);
@@ -5688,7 +6911,7 @@ void App::processInput(float deltaTime) {
         }
 
         if (breakingProgress >= breakDuration) {
-          completeBreakTarget(blockPos);
+          completeBreakTarget(blockPos, true);
         }
       };
 
@@ -5763,6 +6986,26 @@ void App::processInput(float deltaTime) {
   }
 
   if (rightPressed && !mouseRightDown) {
+    ItemStack& heldStack = hotbar[static_cast<size_t>(selectedSlot)];
+    if (heldStack.count > 0 &&
+        heldStack.type != kAir &&
+        isEdibleItem(heldStack.type) &&
+        playerHealth < kMaxPlayerHealth) {
+      playerHealth = std::min(kMaxPlayerHealth, playerHealth + foodHealAmount(heldStack.type));
+      triggerFirstPersonUseAnimation(0.80f);
+      if (!isCreativeMode()) {
+        heldStack.count = static_cast<uint16_t>(heldStack.count - 1);
+        if (heldStack.count == 0) {
+          heldStack.type = kAir;
+        }
+        refreshSelectedBlock();
+      }
+      uiDirty = true;
+      mouseLeftDown = leftPressed;
+      mouseRightDown = rightPressed;
+      return;
+    }
+
     glm::vec3 origin = playerPos + glm::vec3(0.0f, cameraEyeHeight(), 0.0f);
     glm::vec3 placeDir = cameraFront();
     RaycastHit hit = raycast(origin, placeDir, kBreakMaxDistance);
@@ -5796,6 +7039,19 @@ void App::processInput(float deltaTime) {
         returnCraftingItemsToInventory();
         triggerFirstPersonUseAnimation(0.70f);
         setInventoryOpen(true);
+        mouseLeftDown = leftPressed;
+        mouseRightDown = rightPressed;
+        return;
+      }
+      if ((hitType == kBed || isBedBlock(hitType)) && !crouching) {
+        glm::ivec3 respawnBlock = hit.block;
+        if (isBedHeadBlock(hitType)) {
+          respawnBlock += bedOtherPartOffset(hitType);
+        }
+        respawnPos = glm::vec3(static_cast<float>(respawnBlock.x) + 0.5f,
+                               static_cast<float>(respawnBlock.y) + 0.62f,
+                               static_cast<float>(respawnBlock.z) + 0.5f);
+        triggerFirstPersonUseAnimation(0.55f);
         mouseLeftDown = leftPressed;
         mouseRightDown = rightPressed;
         return;
@@ -5845,6 +7101,52 @@ void App::processInput(float deltaTime) {
       ItemStack& stack = hotbar[static_cast<size_t>(selectedSlot)];
       glm::vec3 adjustedPlayerPos = playerPos;
       uint8_t placedType = placedBlockTypeForItem(stack.type, placeDir, placementNormal);
+      if (stack.count > 0 && stack.type == kBed) {
+        glm::ivec3 headPos = target + bedFacingVector(placedType);
+        uint8_t headPlacedType = bedBlockForFacing(bedFacingIndex(placedType), true);
+        bool headInBounds = world.inBounds(headPos.x, headPos.y, headPos.z);
+        uint8_t headTargetType = headInBounds ? world.getBlock(headPos.x, headPos.y, headPos.z) : kAir;
+        bool headReplaceable = headTargetType == kAir ||
+                               isWaterBlock(headTargetType) ||
+                               isDecorationBlock(headTargetType);
+        glm::vec3 headAdjustedPlayerPos = playerPos;
+        auto hasSolidSupport = [&](const glm::ivec3& block) {
+          uint8_t ground = world.getBlock(block.x, block.y - 1, block.z);
+          return ground != kAir && !isWaterBlock(ground) && !isDecorationBlock(ground);
+        };
+
+        if (world.inBounds(target.x, target.y, target.z) &&
+            headInBounds &&
+            targetReplaceable &&
+            headReplaceable &&
+            canPlaceBlockAt(target.x, target.y, target.z, placedType, &adjustedPlayerPos) &&
+            canPlaceBlockAt(headPos.x, headPos.y, headPos.z, headPlacedType, &headAdjustedPlayerPos) &&
+            hasSolidSupport(target) &&
+            hasSolidSupport(headPos)) {
+          world.setBlock(target.x, target.y, target.z, placedType);
+          world.setBlock(headPos.x, headPos.y, headPos.z, headPlacedType);
+          audio.playCue(placeCueForBlock(kBed), placeGainForBlock(kBed));
+          triggerFirstPersonUseAnimation(0.82f);
+          waterSimBoostTimer = std::max(waterSimBoostTimer, 2.0f);
+          float liftY = std::max(adjustedPlayerPos.y, headAdjustedPlayerPos.y);
+          if (liftY > playerPos.y + 0.0001f) {
+            playerPos.y = liftY;
+            playerVel.y = std::max(0.0f, playerVel.y);
+            onGround = true;
+          }
+          if (!isCreativeMode()) {
+            stack.count -= 1;
+            if (stack.count == 0) {
+              stack.type = kAir;
+            }
+            refreshSelectedBlock();
+          }
+          uiDirty = true;
+        }
+        mouseLeftDown = leftPressed;
+        mouseRightDown = rightPressed;
+        return;
+      }
       if (world.inBounds(target.x, target.y, target.z) &&
           placedType != kAir &&
           targetReplaceable &&
@@ -5864,11 +7166,13 @@ void App::processInput(float deltaTime) {
             playerVel.y = std::max(0.0f, playerVel.y);
             onGround = true;
           }
-          stack.count -= 1;
-          if (stack.count == 0) {
-            stack.type = kAir;
+          if (!isCreativeMode()) {
+            stack.count -= 1;
+            if (stack.count == 0) {
+              stack.type = kAir;
+            }
+            refreshSelectedBlock();
           }
-          refreshSelectedBlock();
           uiDirty = true;
         }
       }
@@ -5885,8 +7189,11 @@ void App::updatePlayer(float deltaTime) {
   waterSwimSoundTimer = std::max(0.0f, waterSwimSoundTimer - deltaTime);
 
   glm::vec3 startPos = playerPos;
-  bool inWater = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
-  if (inWater) {
+  bool wasOnGround = onGround;
+  bool inWater = !flying && intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
+  if (flying) {
+    playerVel.y = std::clamp(playerVel.y, -kCreativeVerticalFlyBoostSpeed, kCreativeVerticalFlyBoostSpeed);
+  } else if (inWater) {
     const float waterGravity = -5.0f;
     playerVel.y += waterGravity * deltaTime;
     playerVel.y = std::clamp(playerVel.y, -2.7f, 4.0f);
@@ -5966,12 +7273,18 @@ void App::updatePlayer(float deltaTime) {
   }
 
   playerPos = pos;
-  bool inWaterAfterMove = intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
+  bool inWaterAfterMove = !flying && intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.2f, 0.0f));
+  glm::vec3 frameDelta = playerPos - startPos;
+  float horizontalMove = glm::length(glm::vec2(frameDelta.x, frameDelta.z));
+  if (flying || inWaterAfterMove) {
+    fallDistance = 0.0f;
+  } else if (playerPos.y < startPos.y) {
+    fallDistance += startPos.y - playerPos.y;
+  }
+
   if (inWaterAfterMove) {
     onGround = false;
 
-    glm::vec3 frameDelta = playerPos - startPos;
-    float horizontalMove = glm::length(glm::vec2(frameDelta.x, frameDelta.z));
     float verticalMove = std::abs(frameDelta.y);
     bool enteredWater = !wasPlayerInWater;
     bool activeSwim = horizontalMove > 0.05f || verticalMove > 0.04f;
@@ -5986,6 +7299,54 @@ void App::updatePlayer(float deltaTime) {
     waterSwimSoundTimer = 0.0f;
   }
   wasPlayerInWater = inWaterAfterMove;
+
+  if (!inWaterAfterMove && onGround && !flying && horizontalMove > 0.015f) {
+    FootstepSurface footstepSurface = footstepSurfaceUnderPlayer(world, playerPos);
+    if (footstepSurface != FootstepSurface::kNone) {
+      footstepDistanceAccumulator += horizontalMove;
+      float stepDistance = sprinting ? 1.28f : (crouching ? 2.05f : 1.62f);
+      while (footstepDistanceAccumulator >= stepDistance) {
+        footstepDistanceAccumulator -= stepDistance;
+        if (footstepSurface == FootstepSurface::kGrass) {
+          int variant = chooseFootstepVariant(footstepRngState,
+                                              kGrassFootstepVariantCount,
+                                              lastGrassFootstepVariant);
+          lastGrassFootstepVariant = variant;
+          float gain = std::clamp((sprinting ? 1.02f : (crouching ? 0.78f : 0.92f)) +
+                                  horizontalMove * 0.85f,
+                                  0.72f,
+                                  1.16f);
+          audio.playCue(footstepCueForVariant(footstepSurface, variant), gain);
+        } else {
+          int variant = chooseFootstepVariant(footstepRngState,
+                                              kStoneFootstepVariantCount,
+                                              lastStoneFootstepVariant);
+          lastStoneFootstepVariant = variant;
+          float gain = std::clamp((sprinting ? 0.98f : (crouching ? 0.76f : 0.88f)) +
+                                  horizontalMove * 0.82f,
+                                  0.70f,
+                                  1.10f);
+          audio.playCue(footstepCueForVariant(footstepSurface, variant), gain);
+        }
+      }
+    } else {
+      footstepDistanceAccumulator = 0.0f;
+    }
+  } else {
+    footstepDistanceAccumulator = 0.0f;
+  }
+
+  bool landedThisFrame = !wasOnGround && onGround && !inWaterAfterMove && !flying;
+  if (landedThisFrame && !isCreativeMode()) {
+    int fallDamage = std::max(0, static_cast<int>(std::floor(fallDistance - 3.0f)));
+    if (fallDamage > 0) {
+      damagePlayer(fallDamage);
+    }
+    fallDistance = 0.0f;
+  } else if (onGround) {
+    fallDistance = 0.0f;
+  }
+
   refreshAchievementsProgress();
 }
 
@@ -6241,6 +7602,51 @@ void App::rebuildUiMesh() {
     uiIndices.push_back(start + 3);
   };
 
+  auto addPointUvQuad = [&](const glm::vec2& p0,
+                            const glm::vec2& p1,
+                            const glm::vec2& p2,
+                            const glm::vec2& p3,
+                            const glm::vec3& color,
+                            const glm::vec2& uv0,
+                            const glm::vec2& uv1,
+                            const glm::vec2& uv2,
+                            const glm::vec2& uv3) {
+    glm::vec2 ndc0 = toNdc(p0.x, p0.y);
+    glm::vec2 ndc1 = toNdc(p1.x, p1.y);
+    glm::vec2 ndc2 = toNdc(p2.x, p2.y);
+    glm::vec2 ndc3 = toNdc(p3.x, p3.y);
+
+    uint32_t start = static_cast<uint32_t>(uiVertices.size());
+    uiVertices.push_back({{ndc0.x, ndc0.y, 0.0f}, color, uv0});
+    uiVertices.push_back({{ndc1.x, ndc1.y, 0.0f}, color, uv1});
+    uiVertices.push_back({{ndc2.x, ndc2.y, 0.0f}, color, uv2});
+    uiVertices.push_back({{ndc3.x, ndc3.y, 0.0f}, color, uv3});
+
+    uiIndices.push_back(start + 0);
+    uiIndices.push_back(start + 1);
+    uiIndices.push_back(start + 2);
+    uiIndices.push_back(start + 0);
+    uiIndices.push_back(start + 2);
+    uiIndices.push_back(start + 3);
+  };
+
+  auto addPointTileQuad = [&](const glm::vec2& p0,
+                              const glm::vec2& p1,
+                              const glm::vec2& p2,
+                              const glm::vec2& p3,
+                              const glm::vec3& color,
+                              int tile) {
+    addPointUvQuad(p0,
+                   p1,
+                   p2,
+                   p3,
+                   color,
+                   uvForTile(tile, 0.0f, 0.0f),
+                   uvForTile(tile, 1.0f, 0.0f),
+                   uvForTile(tile, 1.0f, 1.0f),
+                   uvForTile(tile, 0.0f, 1.0f));
+  };
+
   const int backgroundTile = tileForBlock(kStone);
 
   auto findTextGlyph = [&](uint32_t codepoint) -> const VulkanContext::UiGlyphInfo* {
@@ -6410,6 +7816,80 @@ void App::rebuildUiMesh() {
     }
   };
 
+  auto drawTopLeftInfo = [&]() {
+    const float versionPixel = 2.2f;
+    const float textX = 4.0f;
+    const float textY = 4.0f;
+    drawText(kSnapshotVersionLabel,
+             textX,
+             textY,
+             versionPixel,
+             glm::vec3(0.82f, 0.88f, 0.96f),
+             false);
+  };
+
+  auto drawHealthBar = [&]() {
+    if (screenState != ScreenState::kPlaying || isCreativeMode()) {
+      return;
+    }
+
+    constexpr uint8_t kHeartRows[5] = {
+      0b01010,
+      0b11111,
+      0b11111,
+      0b01110,
+      0b00100
+    };
+    constexpr int kHeartsPerRow = 10;
+    constexpr int kHeartCount = kMaxPlayerHealth / 2;
+
+    auto drawHeart = [&](float x, float y, float pixel, int fillUnits) {
+      for (int row = 0; row < 5; ++row) {
+        for (int col = 0; col < 5; ++col) {
+          int bit = 4 - col;
+          if ((kHeartRows[row] & (1u << bit)) == 0) {
+            continue;
+          }
+
+          addSolidQuad(x + static_cast<float>(col) * pixel,
+                       y + static_cast<float>(row) * pixel,
+                       pixel,
+                       pixel,
+                       glm::vec3(0.22f, 0.08f, 0.10f));
+
+          bool filled = fillUnits >= 2 || (fillUnits == 1 && col <= 2);
+          if (filled) {
+            addSolidQuad(x + static_cast<float>(col) * pixel,
+                         y + static_cast<float>(row) * pixel,
+                         pixel,
+                         pixel,
+                         glm::vec3(0.92f, 0.18f, 0.24f));
+          }
+        }
+      }
+    };
+
+    const float pixel = 2.0f;
+    const float heartWidth = pixel * 5.0f;
+    const float heartHeight = pixel * 5.0f;
+    const float gap = 2.0f;
+    const float rowGap = 4.0f;
+    const float baseX = startX;
+    const float bottomRowY = startY - heartHeight - 10.0f;
+    for (int heart = 0; heart < kHeartCount; ++heart) {
+      int row = heart / kHeartsPerRow;
+      int col = heart % kHeartsPerRow;
+      int fillUnits = std::clamp(playerHealth - heart * 2, 0, 2);
+      drawHeart(baseX + static_cast<float>(col) * (heartWidth + gap),
+                bottomRowY - static_cast<float>(row) * (heartHeight + rowGap),
+                pixel,
+                fillUnits);
+    }
+  };
+
+  drawTopLeftInfo();
+  drawHealthBar();
+
   if (screenState != ScreenState::kPlaying) {
     const bool ruUi = appliedSettings.language == 1;
     float t = static_cast<float>(glfwGetTime());
@@ -6434,8 +7914,6 @@ void App::rebuildUiMesh() {
             40.0f,
             glm::vec3(0.16f, 0.19f, 0.24f),
             backgroundTile);
-    drawText("CubeOS v0.3.0 Snapshot 1", panelX + panelWidth * 0.5f, panelY + 18.0f, 3.0f,
-             glm::vec3(0.91f, 0.94f, 0.98f), true);
 
     auto drawMenuRow = [&](int index,
                            int selectedIndex,
@@ -6522,6 +8000,42 @@ void App::rebuildUiMesh() {
                     kMenuButtonHeight,
                     rowColor);
         drawText(pauseLabels[i],
+                 bx + kMenuButtonWidth * 0.5f,
+                 by + static_cast<float>(i) * (kMenuButtonHeight + kMenuButtonGap) + 12.0f,
+                 3.1f,
+                 glm::vec3(0.94f, 0.95f, 0.98f),
+                 true);
+      }
+    } else if (screenState == ScreenState::kDeath) {
+      drawText(ruUi ? "ВЫ ПОГИБЛИ" : "YOU DIED",
+               panelX + panelWidth * 0.5f,
+               panelY + 56.0f,
+               3.0f,
+               glm::vec3(0.96f, 0.40f, 0.40f),
+               true);
+      drawText((ruUi ? "ЗДОРОВЬЕ 0/" : "HEALTH 0/") + std::to_string(kMaxPlayerHealth),
+               panelX + panelWidth * 0.5f,
+               panelY + 82.0f,
+               1.9f,
+               glm::vec3(0.90f, 0.84f, 0.84f),
+               true);
+      float totalH = kMenuButtonHeight * 2.0f + kMenuButtonGap;
+      float bx = panelX + (panelWidth - kMenuButtonWidth) * 0.5f;
+      float by = panelY + 116.0f + (panelHeight - 168.0f - totalH) * 0.5f;
+      const char* deathLabels[2] = {
+        ruUi ? "РЕСПАВН" : "RESPAWN",
+        ruUi ? "В МЕНЮ" : "MAIN MENU"
+      };
+      for (int i = 0; i < 2; ++i) {
+        glm::vec3 rowColor = i == 0 ? glm::vec3(0.20f, 0.36f, 0.22f) : glm::vec3(0.32f, 0.22f, 0.22f);
+        drawMenuRow(i,
+                    deathMenuSelection,
+                    bx,
+                    by + static_cast<float>(i) * (kMenuButtonHeight + kMenuButtonGap),
+                    kMenuButtonWidth,
+                    kMenuButtonHeight,
+                    rowColor);
+        drawText(deathLabels[i],
                  bx + kMenuButtonWidth * 0.5f,
                  by + static_cast<float>(i) * (kMenuButtonHeight + kMenuButtonGap) + 12.0f,
                  3.1f,
@@ -7062,7 +8576,7 @@ void App::rebuildUiMesh() {
                3.0f,
                glm::vec3(0.90f),
                true);
-      constexpr int kRowCount = 8;
+      constexpr int kRowCount = 9;
       float rowW = panelWidth - 120.0f;
       float rowX = panelX + (panelWidth - rowW) * 0.5f;
       float rowH = 36.0f;
@@ -7072,9 +8586,9 @@ void App::rebuildUiMesh() {
 
       for (int i = 0; i < kRowCount; ++i) {
         glm::vec3 rowColor = glm::vec3(0.20f, 0.23f, 0.29f);
-        if (i == 6) {
+        if (i == 7) {
           rowColor = glm::vec3(0.20f, 0.36f, 0.22f);
-        } else if (i == 7) {
+        } else if (i == 8) {
           rowColor = glm::vec3(0.36f, 0.22f, 0.22f);
         }
         drawMenuRow(i,
@@ -7087,24 +8601,25 @@ void App::rebuildUiMesh() {
       }
 
       float presetY = rowY + 2.0f * (rowH + rowGap);
-      float optionW = 120.0f;
+      constexpr float kPresetOptionGap = 8.0f;
+      float optionW = 82.0f;
       float optionH = rowH - 12.0f;
       float optionY = presetY + 6.0f;
-      float leftOptionX = rowX + rowW - optionW * 2.0f - 18.0f;
-      float rightOptionX = rowX + rowW - optionW - 10.0f;
-      bool minecraftPreset = pendingWorldSettings.preset == WorldPreset::kMinecraftStyle;
-      addQuad(leftOptionX,
-              optionY,
-              optionW,
-              optionH,
-              minecraftPreset ? glm::vec3(0.30f, 0.36f, 0.45f) : glm::vec3(0.20f, 0.23f, 0.28f),
-              backgroundTile);
-      addQuad(rightOptionX,
-              optionY,
-              optionW,
-              optionH,
-              minecraftPreset ? glm::vec3(0.20f, 0.23f, 0.28f) : glm::vec3(0.40f, 0.34f, 0.22f),
-              backgroundTile);
+      float totalPresetWidth =
+        optionW * static_cast<float>(kCreateWorldPresetOptions.size()) +
+        kPresetOptionGap * static_cast<float>(kCreateWorldPresetOptions.size() - 1);
+      float firstOptionX = rowX + rowW - totalPresetWidth - 10.0f;
+      for (size_t i = 0; i < kCreateWorldPresetOptions.size(); ++i) {
+        WorldPreset preset = kCreateWorldPresetOptions[i];
+        bool selected = pendingWorldSettings.preset == preset;
+        float optionX = firstOptionX + static_cast<float>(i) * (optionW + kPresetOptionGap);
+        addQuad(optionX,
+                optionY,
+                optionW,
+                optionH,
+                worldPresetButtonColor(preset, selected),
+                backgroundTile);
+      }
 
       auto drawSlider = [&](float y, float value) {
         float t = (value - 0.25f) / (2.5f - 0.25f);
@@ -7125,7 +8640,7 @@ void App::rebuildUiMesh() {
       drawSlider(rowY + 3.0f * (rowH + rowGap), pendingWorldSettings.caveDensity);
       drawSlider(rowY + 4.0f * (rowH + rowGap), pendingWorldSettings.ravineFrequency);
 
-      float toggleW = 90.0f;
+      float toggleW = 108.0f;
       float toggleH = rowH - 12.0f;
       float toggleX = rowX + rowW - toggleW - 16.0f;
       float modeY = rowY + 5.0f * (rowH + rowGap) + 6.0f;
@@ -7137,12 +8652,19 @@ void App::rebuildUiMesh() {
                 ? glm::vec3(0.24f, 0.40f, 0.24f)
                 : glm::vec3(0.40f, 0.28f, 0.22f),
               backgroundTile);
+      float cheatsY = rowY + 6.0f * (rowH + rowGap) + 6.0f;
+      addQuad(toggleX,
+              cheatsY,
+              toggleW,
+              toggleH,
+              pendingWorldSettings.cheatsEnabled
+                ? glm::vec3(0.24f, 0.40f, 0.24f)
+                : glm::vec3(0.36f, 0.24f, 0.24f),
+              backgroundTile);
 
       std::string nameText = pendingWorldName.empty() ? (ruUi ? "МИР" : "WORLD") : pendingWorldName;
       std::string seedText = pendingSeedText.empty() ? (ruUi ? "СЛУЧАЙНО" : "RANDOM") : pendingSeedText;
-      std::string presetText = pendingWorldSettings.preset == WorldPreset::kClassicFlat
-        ? (ruUi ? "КЛАССИЧЕСКИЙ ПЛОСКИЙ" : "CLASSIC FLAT")
-        : (ruUi ? "MINECRAFT СТИЛЬ" : "MINECRAFT STYLE");
+      std::string presetText = worldPresetDisplayName(pendingWorldSettings.preset, ruUi);
       std::ostringstream caveText;
       caveText.setf(std::ios::fixed);
       caveText.precision(2);
@@ -7151,23 +8673,27 @@ void App::rebuildUiMesh() {
       ravineText.setf(std::ios::fixed);
       ravineText.precision(2);
       ravineText << pendingWorldSettings.ravineFrequency;
-      std::string invText = pendingWorldSettings.startInventoryMode == 0
-        ? (ruUi ? "ПУСТО" : "EMPTY")
-        : (ruUi ? "ТЕСТ КРЕАТИВА" : "CREATIVE TEST");
+      std::string modeText = pendingWorldSettings.startInventoryMode == 0
+        ? (ruUi ? "ВЫЖИВАНИЕ" : "SURVIVAL")
+        : (ruUi ? "КРЕАТИВ" : "CREATIVE");
+      std::string cheatsText = pendingWorldSettings.cheatsEnabled
+        ? (ruUi ? "ВКЛ" : "ON")
+        : (ruUi ? "ВЫКЛ" : "OFF");
 
-      std::array<std::string, 8> labels = {
+      std::array<std::string, 9> labels = {
         (ruUi ? "ИМЯ МИРА " : "WORLD NAME ") + nameText,
         (ruUi ? "СИД " : "SEED ") + seedText,
         (ruUi ? "ПРЕСЕТ " : "PRESET ") + presetText,
         (ruUi ? "ПЛОТНОСТЬ ПЕЩЕР " : "CAVE DENSITY ") + caveText.str(),
         (ruUi ? "ЧАСТОТА ОВРАГОВ " : "RAVINE FREQ ") + ravineText.str(),
-        (ruUi ? "СТАРТ ИНВЕНТАРЬ " : "START INVENTORY ") + invText,
+        (ruUi ? "РЕЖИМ " : "GAME MODE ") + modeText,
+        (ruUi ? "ЧИТЫ " : "CHEATS ") + cheatsText,
         ruUi ? "СОЗДАТЬ МИР" : "CREATE WORLD",
         ruUi ? "ОТМЕНА" : "CANCEL"
       };
 
       for (int i = 0; i < kRowCount; ++i) {
-        float px = (i >= 6) ? 2.9f : 2.45f;
+        float px = (i >= 7) ? 2.9f : 2.45f;
         drawText(labels[static_cast<size_t>(i)],
                  rowX + 14.0f,
                  rowY + static_cast<float>(i) * (rowH + rowGap) + 11.0f,
@@ -7175,6 +8701,30 @@ void App::rebuildUiMesh() {
                  glm::vec3(0.94f, 0.95f, 0.98f),
                  false);
       }
+
+      drawText(modeText,
+               toggleX + toggleW * 0.5f,
+               modeY + 9.0f,
+               1.55f,
+               glm::vec3(0.96f, 0.97f, 0.99f),
+               true);
+      for (size_t i = 0; i < kCreateWorldPresetOptions.size(); ++i) {
+        WorldPreset preset = kCreateWorldPresetOptions[i];
+        float optionX = firstOptionX + static_cast<float>(i) * (optionW + kPresetOptionGap);
+        float textScale = preset == WorldPreset::kAprilFools ? 1.10f : 1.30f;
+        drawText(worldPresetButtonLabel(preset, ruUi),
+                 optionX + optionW * 0.5f,
+                 optionY + 9.0f,
+                 textScale,
+                 glm::vec3(0.96f, 0.97f, 0.99f),
+                 true);
+      }
+      drawText(cheatsText,
+               toggleX + toggleW * 0.5f,
+               cheatsY + 9.0f,
+               1.55f,
+               glm::vec3(0.96f, 0.97f, 0.99f),
+               true);
     }
 
     return;
@@ -7226,6 +8776,118 @@ void App::rebuildUiMesh() {
     }
   };
 
+  auto shouldRenderBlockIcon3d = [&](uint8_t type) {
+    return isBlockType(type) &&
+           !isWaterBlock(type) &&
+           !isDecorationBlock(type) &&
+           type != kBed;
+  };
+
+  auto blockIconTiles = [&](uint8_t type) {
+    std::array<int, 3> tiles{tileForBlock(type), tileForBlock(type), tileForBlock(type)};
+    switch (type) {
+      case kGrass:
+        tiles = {kTileGrassTop, kTileGrassSide, kTileGrassSide};
+        break;
+      case kWood:
+        tiles = {kTileWoodTop, kTileWood, kTileWood};
+        break;
+      case kFurnace:
+      case kFurnaceNorth:
+      case kFurnaceEast:
+      case kFurnaceSouth:
+      case kFurnaceWest:
+        tiles = {kTileFurnace, kTileFurnaceFront, kTileFurnace};
+        break;
+      default:
+        break;
+    }
+    return tiles;
+  };
+
+  auto drawBlockIcon3d = [&](uint8_t type, float x, float y) {
+    std::array<int, 3> tiles = blockIconTiles(type);
+    float innerX = x + 4.0f;
+    float innerY = y + 4.0f;
+    float innerW = kSlotSize - 8.0f;
+    float innerH = kSlotSize - 8.0f;
+
+    float frontW = innerW * 0.58f;
+    float frontH = innerH * 0.58f;
+    float depthX = innerW * 0.24f;
+    float depthY = innerH * 0.18f;
+    float frontX = innerX + 2.0f;
+    float frontY = innerY + depthY + 1.5f;
+
+    glm::vec2 front0(frontX, frontY);
+    glm::vec2 front1(frontX + frontW, frontY);
+    glm::vec2 front2(frontX + frontW, frontY + frontH);
+    glm::vec2 front3(frontX, frontY + frontH);
+
+    glm::vec2 top0(front0.x + depthX, front0.y - depthY);
+    glm::vec2 top1(front1.x + depthX, front1.y - depthY);
+    glm::vec2 right1(front1.x + depthX, front1.y - depthY);
+    glm::vec2 right2(front2.x + depthX, front2.y - depthY);
+
+    addPointTileQuad(top0,
+                     top1,
+                     front1,
+                     front0,
+                     glm::vec3(1.10f, 1.10f, 1.10f),
+                     tiles[0]);
+    addPointTileQuad(front0,
+                     front1,
+                     front2,
+                     front3,
+                     glm::vec3(1.0f),
+                     tiles[1]);
+    addPointTileQuad(front1,
+                     right1,
+                     right2,
+                     front2,
+                     glm::vec3(0.76f, 0.76f, 0.76f),
+                     tiles[2]);
+  };
+
+  auto drawToolIcon = [&](uint8_t type, float x, float y) {
+    int tile = tileForBlock(type);
+    float innerX = x + 3.0f;
+    float innerY = y + 3.0f;
+    float innerW = kSlotSize - 6.0f;
+    float innerH = kSlotSize - 6.0f;
+    float angle = glm::radians(-38.0f);
+    float halfW = innerW * 0.44f;
+    float halfH = innerH * 0.44f;
+    glm::vec2 center(innerX + innerW * 0.54f, innerY + innerH * 0.54f);
+
+    auto orientedRect = [&](glm::vec2 localCenter) {
+      glm::vec2 right(std::cos(angle) * halfW, std::sin(angle) * halfW);
+      glm::vec2 down(-std::sin(angle) * halfH, std::cos(angle) * halfH);
+      return std::array<glm::vec2, 4>{{
+        localCenter - right - down,
+        localCenter + right - down,
+        localCenter + right + down,
+        localCenter - right + down
+      }};
+    };
+
+    auto shadow = orientedRect(center + glm::vec2(1.6f, 1.6f));
+    addPointTileQuad(shadow[0],
+                     shadow[1],
+                     shadow[2],
+                     shadow[3],
+                     glm::vec3(0.18f, 0.18f, 0.20f),
+                     tile);
+
+    auto icon = orientedRect(center);
+    addPointTileQuad(icon[0],
+                     icon[1],
+                     icon[2],
+                     icon[3],
+                     glm::vec3(1.0f),
+                     tile);
+  };
+
   auto drawStack = [&](const ItemStack& stack,
                        float x,
                        float y,
@@ -7237,13 +8899,19 @@ void App::rebuildUiMesh() {
     if (countTile < 0) {
       countTile = backgroundTile;
     }
-    int tile = tileForBlock(stack.type);
-    addQuad(x + kIconPadding,
-            y + kIconPadding,
-            kSlotSize - kIconPadding * 2.0f,
-            kSlotSize - kIconPadding * 2.0f,
-            glm::vec3(1.0f),
-            tile);
+    if (shouldRenderBlockIcon3d(stack.type)) {
+      drawBlockIcon3d(stack.type, x, y);
+    } else if (isToolItem(stack.type)) {
+      drawToolIcon(stack.type, x, y);
+    } else {
+      int tile = tileForBlock(stack.type);
+      addQuad(x + kIconPadding,
+              y + kIconPadding,
+              kSlotSize - kIconPadding * 2.0f,
+              kSlotSize - kIconPadding * 2.0f,
+              glm::vec3(1.0f),
+              tile);
+    }
     drawNumber(static_cast<int>(stack.count),
                x + kSlotSize - 4.0f,
                y + kSlotSize - 4.0f,
@@ -7270,6 +8938,7 @@ void App::rebuildUiMesh() {
             gridHeight + kPanelPadding * 2.0f,
             glm::vec3(0.15f, 0.15f, 0.18f),
             backgroundTile);
+    bool creativeInventoryScreen = isCreativeInventoryScreen();
     if (furnaceOpen) {
       FurnaceUiLayout furnaceLayout = makeFurnaceUiLayout(uiLayoutWidth(), uiLayoutHeight());
       FurnaceState furnaceState{};
@@ -7422,6 +9091,62 @@ void App::rebuildUiMesh() {
                    furnaceLayout.flameW - 6.0f,
                    flameFillH,
                    glm::vec3(0.98f, 0.56f, 0.16f));
+    } else if (creativeInventoryScreen) {
+      CraftUiLayout creativeLayout = makeCraftUiLayout(uiLayoutWidth(), uiLayoutHeight(), 2);
+      addQuad(creativeLayout.panelX,
+              creativeLayout.panelY,
+              creativeLayout.panelWidth,
+              creativeLayout.panelHeight,
+              glm::vec3(0.13f, 0.14f, 0.17f),
+              backgroundTile);
+
+      drawText(appliedSettings.language == 1 ? "КРЕАТИВ" : "CREATIVE",
+               creativeLayout.inputX,
+               creativeLayout.panelY + 4.0f,
+               2.1f,
+               glm::vec3(0.92f, 0.94f, 0.98f),
+               false);
+      drawText(appliedSettings.language == 1 ? "ВСЕ БЛОКИ В СПИСКЕ" : "ALL BLOCKS IN THE GRID",
+               creativeLayout.infoX,
+               creativeLayout.panelY + 4.0f,
+               1.8f,
+               glm::vec3(0.76f, 0.84f, 0.93f),
+               false);
+      drawText(appliedSettings.language == 1 ? "ЛКМ КОПИЯ СТАКА" : "LMB COPY STACK",
+               creativeLayout.infoX,
+               creativeLayout.infoY + 16.0f,
+               1.55f,
+               glm::vec3(0.64f, 0.88f, 0.66f),
+               false);
+      drawText(appliedSettings.language == 1 ? "ПКМ ОДИН ПРЕДМЕТ" : "RMB COPY ONE",
+               creativeLayout.infoX,
+               creativeLayout.infoY + 34.0f,
+               1.55f,
+               glm::vec3(0.64f, 0.88f, 0.66f),
+               false);
+      drawText(appliedSettings.language == 1 ? "ДВОЙНОЙ ПРОБЕЛ ДЛЯ ПОЛЕТА" : "DOUBLE SPACE TO FLY",
+               creativeLayout.infoX,
+               creativeLayout.infoY + 52.0f,
+               1.55f,
+               glm::vec3(0.86f, 0.84f, 0.66f),
+               false);
+
+      float sampleX = creativeLayout.inputX;
+      float sampleY = creativeLayout.inputY + 6.0f;
+      for (size_t i = 0; i < 6 && i < kCreativeCatalogItems.size(); ++i) {
+        addQuad(sampleX + static_cast<float>(i) * 26.0f,
+                sampleY,
+                22.0f,
+                22.0f,
+                glm::vec3(0.22f, 0.22f, 0.26f),
+                backgroundTile);
+        addQuad(sampleX + 3.0f + static_cast<float>(i) * 26.0f,
+                sampleY + 3.0f,
+                16.0f,
+                16.0f,
+                glm::vec3(1.0f),
+                tileForBlock(kCreativeCatalogItems[i]));
+      }
     } else {
       int craftGridSize = activeCraftGridSize();
       CraftUiLayout craftLayout = makeCraftUiLayout(uiLayoutWidth(), uiLayoutHeight(), craftGridSize);
@@ -7694,7 +9419,11 @@ void App::rebuildUiMesh() {
 
         addQuad(x, y, kSlotSize, kSlotSize, glm::vec3(0.25f, 0.25f, 0.28f), backgroundTile);
 
-        if (idx < inventory.size()) {
+        if (creativeInventoryScreen) {
+          if (idx < kCreativeCatalogItems.size()) {
+            drawStack(ItemStack{kCreativeCatalogItems[idx], 1}, x, y);
+          }
+        } else if (idx < inventory.size()) {
           drawStack(inventory[idx], x, y);
         }
 
@@ -7738,6 +9467,25 @@ void App::rebuildUiMesh() {
              true);
   }
 
+  if (commandInputOpen) {
+    std::string visibleCommand = commandInput.empty() ? "/" : commandInput;
+    if ((static_cast<int>(glfwGetTime() * 2.0) & 1) == 0) {
+      visibleCommand += "_";
+    }
+    float textPixel = 2.0f;
+    float boxW = std::max(220.0f, measureTextWidth(visibleCommand, textPixel) + 22.0f);
+    float boxH = textPixel * static_cast<float>(kGlyphHeight) + 14.0f;
+    float boxX = 18.0f;
+    float boxY = startY - boxH - 18.0f;
+    addQuad(boxX, boxY, boxW, boxH, glm::vec3(0.12f, 0.13f, 0.17f), backgroundTile);
+    drawText(visibleCommand,
+             boxX + 8.0f,
+             boxY + 7.0f,
+             textPixel,
+             glm::vec3(0.92f, 0.94f, 0.98f),
+             false);
+  }
+
   if (achievementPopupVisible) {
     AchievementId popupId = static_cast<AchievementId>(std::clamp<int>(activeAchievementPopupId, 0, static_cast<int>(App::kAchievementCount) - 1));
     bool ru = appliedSettings.language == 1;
@@ -7771,17 +9519,6 @@ void App::rebuildUiMesh() {
     float cx = cursorFbX - kSlotSize * 0.5f;
     float cy = cursorFbY - kSlotSize * 0.5f;
     drawStack(cursorStack, cx, cy);
-  }
-
-  if (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused) {
-    bool ru = appliedSettings.language == 1;
-    std::string fpsText = (ru ? "КАДРЫ " : "FPS ") + std::to_string(std::max(0, fpsDisplayValue));
-    float fpsPixel = 2.2f;
-    float fpsTextWidth = measureTextWidth(fpsText, fpsPixel);
-    float fpsBoxWidth = fpsTextWidth + 16.0f;
-    float fpsBoxHeight = fpsPixel * static_cast<float>(kGlyphHeight) + 10.0f;
-    addQuad(14.0f, 12.0f, fpsBoxWidth, fpsBoxHeight, glm::vec3(0.06f, 0.08f, 0.12f), backgroundTile);
-    drawText(fpsText, 22.0f, 17.0f, fpsPixel, glm::vec3(0.92f, 0.95f, 0.99f), false);
   }
 
   if (debugWorldgenOverlay && (screenState == ScreenState::kPlaying || screenState == ScreenState::kPaused)) {
@@ -7831,6 +9568,8 @@ void App::rebuildUiMesh() {
           return ruDebug ? "ПУСТЫНЯ" : "DESERT";
         case 5:
           return ruDebug ? "ГОРЫ" : "MOUNTAINS";
+        case 6:
+          return ruDebug ? "КРАХ" : "CRASH";
         default:
           return ruDebug ? "НЕИЗВЕСТНО" : "UNKNOWN";
       }
@@ -7841,6 +9580,9 @@ void App::rebuildUiMesh() {
                                        int aquiferY,
                                        const BiomeClimateSample& climate) -> uint8_t {
       uint8_t visibleBiome = climateBiome;
+      if (climateBiome == 6) {
+        return 6;
+      }
       bool nearWaterline = surfaceY <= aquiferY + 2;
       bool sandySurface = surfaceBlock == kSand;
       bool gravelSurface = surfaceBlock == kGravel;
@@ -7910,6 +9652,7 @@ void App::rebuildUiMesh() {
 
     std::vector<std::string> lines;
     lines.push_back("WORLDGEN DEBUG");
+    lines.push_back((ruDebug ? "КАДРЫ " : "FPS ") + std::to_string(std::max(0, fpsDisplayValue)));
     lines.push_back("XYZ " +
                     toFixed(playerPos.x, 1) + " " +
                     toFixed(playerPos.y, 1) + " " +
@@ -8358,7 +10101,7 @@ void App::rebuildUiMesh() {
     }
   }
 
-  if (!inventoryOpen && !achievementTreeOpen) {
+  if (!inventoryOpen && !achievementTreeOpen && !commandInputOpen) {
     const float centerX = uiW * 0.5f;
     const float centerY = uiH * 0.5f;
     const float crossArm = 5.0f;
@@ -8434,6 +10177,95 @@ bool App::unlockAchievement(uint8_t id) {
 }
 
 void App::refreshAchievementsProgress() {
+  bool aprilMode = isAprilFoolsPreset(world.getGenerationSettings());
+  auto blockUnderPlayerMatches = [&](uint8_t target) -> bool {
+    constexpr std::array<glm::vec2, 5> kFootSamples{{
+      {0.0f, 0.0f},
+      {0.22f, 0.22f},
+      {-0.22f, 0.22f},
+      {0.22f, -0.22f},
+      {-0.22f, -0.22f}
+    }};
+
+    for (const glm::vec2& offset : kFootSamples) {
+      int x = static_cast<int>(std::floor(playerPos.x + offset.x));
+      int y = static_cast<int>(std::floor(playerPos.y - 0.08f));
+      int z = static_cast<int>(std::floor(playerPos.z + offset.y));
+      if (!world.inBounds(x, y, z)) {
+        continue;
+      }
+
+      uint8_t block = world.getBlock(x, y, z);
+      if ((block == kAir || isWaterBlock(block) || isDecorationBlock(block)) &&
+          world.inBounds(x, y - 1, z)) {
+        block = world.getBlock(x, y - 1, z);
+      }
+      if (block == target) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+  auto isStoneTreeTrunkBlock = [&](int x, int y, int z) -> bool {
+    if (!world.inBounds(x, y, z) || world.getBlock(x, y, z) != kStone) {
+      return false;
+    }
+
+    bool verticalStone = (world.inBounds(x, y - 1, z) && world.getBlock(x, y - 1, z) == kStone) ||
+                         (world.inBounds(x, y + 1, z) && world.getBlock(x, y + 1, z) == kStone);
+    if (!verticalStone) {
+      return false;
+    }
+
+    int exposedFaces = 0;
+    constexpr std::array<glm::ivec3, 6> kNeighborOffsets{{
+      {1, 0, 0},
+      {-1, 0, 0},
+      {0, 1, 0},
+      {0, -1, 0},
+      {0, 0, 1},
+      {0, 0, -1}
+    }};
+    for (const glm::ivec3& offset : kNeighborOffsets) {
+      int nx = x + offset.x;
+      int ny = y + offset.y;
+      int nz = z + offset.z;
+      if (!world.inBounds(nx, ny, nz)) {
+        continue;
+      }
+      uint8_t neighbor = world.getBlock(nx, ny, nz);
+      if (neighbor == kAir || isWaterBlock(neighbor) || isDecorationBlock(neighbor)) {
+        ++exposedFaces;
+      }
+    }
+    if (exposedFaces == 0) {
+      return false;
+    }
+
+    for (int oy = 1; oy <= 4; ++oy) {
+      for (int oz = -2; oz <= 2; ++oz) {
+        for (int ox = -2; ox <= 2; ++ox) {
+          if (std::abs(ox) + std::abs(oz) > 3) {
+            continue;
+          }
+          int nx = x + ox;
+          int ny = y + oy;
+          int nz = z + oz;
+          if (!world.inBounds(nx, ny, nz)) {
+            continue;
+          }
+          uint8_t neighbor = world.getBlock(nx, ny, nz);
+          if (neighbor == kLeaves || neighbor == kWood) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  };
+
   if (countStoredItem(kWood) > 0) {
     unlockAchievement(static_cast<uint8_t>(kAchievementGetWood));
   }
@@ -8473,6 +10305,31 @@ void App::refreshAchievementsProgress() {
   if (countStoredItem(kDiamond) > 0) {
     unlockAchievement(static_cast<uint8_t>(kAchievementGetDiamond));
   }
+  if (aprilMode && blockUnderPlayerMatches(kGrass)) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementTouchSuspiciousGrass));
+  }
+  if (aprilMode && intersectsWaterAt(playerPos + glm::vec3(0.0f, 0.20f, 0.0f))) {
+    unlockAchievement(static_cast<uint8_t>(kAchievementDrinkTheFloor));
+  }
+  if (aprilMode) {
+    int originX = static_cast<int>(std::floor(playerPos.x));
+    int originY = static_cast<int>(std::floor(playerPos.y));
+    int originZ = static_cast<int>(std::floor(playerPos.z));
+    bool foundStoneTree = false;
+    for (int oy = -1; oy <= 2 && !foundStoneTree; ++oy) {
+      for (int oz = -2; oz <= 2 && !foundStoneTree; ++oz) {
+        for (int ox = -2; ox <= 2; ++ox) {
+          if (isStoneTreeTrunkBlock(originX + ox, originY + oy, originZ + oz)) {
+            foundStoneTree = true;
+            break;
+          }
+        }
+      }
+    }
+    if (foundStoneTree) {
+      unlockAchievement(static_cast<uint8_t>(kAchievementStoneTree));
+    }
+  }
 }
 
 void App::renderLoadingFrame(float progress, const std::string& message) {
@@ -8501,7 +10358,10 @@ void App::renderLoadingFrame(float progress, const std::string& message) {
                                     0.1f,
                                     200.0f);
   proj[1][1] *= -1.0f;
-  vk.setEnvironmentState(dayLightFactor, weatherIntensity, dayCycleTime);
+  vk.setEnvironmentState(dayLightFactor,
+                         weatherIntensity,
+                         dayCycleTime,
+                         isAprilFoolsPreset(world.getGenerationSettings()));
   vk.setCameraWorldState(eye, front, false);
   vk.setCameraMatrices(view, proj);
   vk.drawFrame();
@@ -8803,7 +10663,7 @@ bool App::droppedItemCollidesAt(const glm::vec3& pos) const {
           return true;
         }
         uint8_t block = world.getBlock(x, y, z);
-        if (block != kAir && !isWaterBlock(block) && !isDecorationBlock(block)) {
+        if (solidBlockIntersectsAabb(block, x, y, z, min, max)) {
           return true;
         }
       }
@@ -8811,6 +10671,65 @@ bool App::droppedItemCollidesAt(const glm::vec3& pos) const {
   }
 
   return false;
+}
+
+bool App::droppedItemIntersectsWater(const glm::vec3& pos, float* outSurfaceY) const {
+  glm::vec3 min = {pos.x - kDroppedItemHalfSize,
+                   pos.y - kDroppedItemHalfHeight,
+                   pos.z - kDroppedItemHalfSize};
+  glm::vec3 max = {pos.x + kDroppedItemHalfSize,
+                   pos.y + kDroppedItemHalfHeight,
+                   pos.z + kDroppedItemHalfSize};
+
+  int minX = static_cast<int>(std::floor(min.x));
+  int maxX = static_cast<int>(std::floor(max.x));
+  int minY = static_cast<int>(std::floor(min.y));
+  int maxY = static_cast<int>(std::floor(max.y));
+  int minZ = static_cast<int>(std::floor(min.z));
+  int maxZ = static_cast<int>(std::floor(max.z));
+
+  auto chunkReadyAt = [&](int worldX, int worldZ) {
+    int cx = static_cast<int>(std::floor(static_cast<float>(worldX) / static_cast<float>(kChunkSize)));
+    int cz = static_cast<int>(std::floor(static_cast<float>(worldZ) / static_cast<float>(kChunkSize)));
+    return world.getChunkGenerationStatus(cx, cz) >= ChunkGenStatus::kNoise;
+  };
+
+  bool foundWater = false;
+  float surfaceY = std::numeric_limits<float>::lowest();
+  for (int y = minY; y <= maxY; ++y) {
+    for (int z = minZ; z <= maxZ; ++z) {
+      for (int x = minX; x <= maxX; ++x) {
+        if (!world.inBounds(x, y, z) || !chunkReadyAt(x, z)) {
+          continue;
+        }
+
+        uint8_t block = world.getBlock(x, y, z);
+        if (!isWaterVolumeBlock(block)) {
+          continue;
+        }
+
+        float waterTop = static_cast<float>(y) + 1.0f;
+        if (isWaterBlock(block)) {
+          uint8_t level = waterLevelFromBlock(block);
+          if (level != 255) {
+            waterTop -= static_cast<float>(level) / 8.0f;
+          }
+        }
+
+        if (max.y <= static_cast<float>(y) || min.y >= waterTop) {
+          continue;
+        }
+
+        foundWater = true;
+        surfaceY = std::max(surfaceY, waterTop);
+      }
+    }
+  }
+
+  if (foundWater && outSurfaceY) {
+    *outSurfaceY = surfaceY;
+  }
+  return foundWater;
 }
 
 void App::updateDroppedItems(float deltaTime) {
@@ -8830,14 +10749,20 @@ void App::updateDroppedItems(float deltaTime) {
     item.age += deltaTime;
     item.pickupDelay = std::max(0.0f, item.pickupDelay - deltaTime);
 
-    int bx = static_cast<int>(std::floor(item.pos.x));
-    int by = static_cast<int>(std::floor(item.pos.y));
-    int bz = static_cast<int>(std::floor(item.pos.z));
-    bool inWater = isWaterBlock(world.getBlock(bx, by, bz));
-
-    float gravity = inWater ? (kDroppedItemGravity * 0.32f) : kDroppedItemGravity;
-    item.vel.y += gravity * deltaTime;
-    item.vel.y = std::max(item.vel.y, inWater ? -2.4f : -11.5f);
+    float waterSurfaceY = 0.0f;
+    bool inWater = droppedItemIntersectsWater(item.pos, &waterSurfaceY);
+    if (inWater) {
+      // Pull the item gently toward the top of the water column instead of letting it sink.
+      float targetFloatY = waterSurfaceY - kDroppedItemHalfHeight + 0.025f;
+      float buoyancy = std::clamp((targetFloatY - item.pos.y) * 30.0f, -4.0f, 14.0f);
+      item.vel.y += (-2.4f + buoyancy) * deltaTime;
+      float verticalDamping = std::clamp(1.0f - deltaTime * 4.5f, 0.0f, 1.0f);
+      item.vel.y *= verticalDamping;
+      item.vel.y = std::clamp(item.vel.y, -1.8f, 2.4f);
+    } else {
+      item.vel.y += kDroppedItemGravity * deltaTime;
+      item.vel.y = std::max(item.vel.y, -11.5f);
+    }
 
     glm::vec3 next = item.pos;
     next.x += item.vel.x * deltaTime;
@@ -8872,7 +10797,7 @@ void App::updateDroppedItems(float deltaTime) {
       }
     }
 
-    float drag = item.onGround ? 0.24f : 0.05f;
+    float drag = inWater ? 0.18f : (item.onGround ? 0.24f : 0.05f);
     float dragFactor = std::clamp(1.0f - drag * deltaTime * 8.0f, 0.0f, 1.0f);
     item.vel.x *= dragFactor;
     item.vel.z *= dragFactor;
@@ -8967,8 +10892,454 @@ void App::syncDroppedItemMesh(bool force) {
   droppedItemMeshTimer = 0.0f;
 }
 
+void App::populateSheepForSession() {
+  sheepEntities.clear();
+  sheepMeshUploaded = false;
+  sheepMeshTimer = kSheepMeshUpdateInterval;
+  sheepSpawnTimer = 18.0f;
+  sheepRngState = static_cast<uint32_t>(world.getSeed()) ^ 0x51A9B4C3u;
+  if (sheepRngState == 0u) {
+    sheepRngState = 0x4F1BBCDCu;
+  }
+
+  auto trySpawnOne = [&](const glm::vec3& anchor, float maxRadius) -> bool {
+    for (int attempt = 0; attempt < 180; ++attempt) {
+      float angle = nextUnitRandom(sheepRngState) * kTau;
+      float radius = (0.22f + 0.78f * nextUnitRandom(sheepRngState)) * maxRadius;
+      int x = static_cast<int>(std::floor(anchor.x + std::cos(angle) * radius));
+      int z = static_cast<int>(std::floor(anchor.z + std::sin(angle) * radius));
+      if (!world.inBounds(x, 2, z)) {
+        continue;
+      }
+
+      int spawnY = -1;
+      for (int y = world.height() - 3; y >= 2; --y) {
+        uint8_t ground = world.getBlock(x, y, z);
+        uint8_t feet = world.getBlock(x, y + 1, z);
+        uint8_t head = world.getBlock(x, y + 2, z);
+        if (ground != kGrass && ground != kDirt) {
+          continue;
+        }
+        if (feet != kAir || head != kAir) {
+          continue;
+        }
+        spawnY = y;
+        break;
+      }
+      if (spawnY < 0) {
+        continue;
+      }
+
+      glm::vec3 spawnPos(static_cast<float>(x) + 0.5f,
+                         static_cast<float>(spawnY) + 1.0f,
+                         static_cast<float>(z) + 0.5f);
+      glm::vec2 toPlayer(spawnPos.x - playerPos.x, spawnPos.z - playerPos.z);
+      if (glm::dot(toPlayer, toPlayer) < 49.0f) {
+        continue;
+      }
+      if (sheepCollidesAt(spawnPos) || sheepIntersectsWater(spawnPos)) {
+        continue;
+      }
+
+      bool overlapsOtherSheep = false;
+      for (const SheepEntity& sheep : sheepEntities) {
+        glm::vec2 delta(spawnPos.x - sheep.pos.x, spawnPos.z - sheep.pos.z);
+        if (glm::dot(delta, delta) < 12.25f) {
+          overlapsOtherSheep = true;
+          break;
+        }
+      }
+      if (overlapsOtherSheep) {
+        continue;
+      }
+
+      SheepEntity sheep;
+      sheep.pos = spawnPos;
+      sheep.yaw = nextUnitRandom(sheepRngState) * 360.0f;
+      sheep.targetYaw = sheep.yaw;
+      sheep.decisionTimer = 0.4f + nextUnitRandom(sheepRngState) * 1.4f;
+      sheep.walkSpeed = 0.0f;
+      sheep.grazeTimer = 0.6f + nextUnitRandom(sheepRngState) * 1.4f;
+      sheep.animPhase = nextUnitRandom(sheepRngState) * kTau;
+      sheep.health = 6;
+      sheep.onGround = false;
+      sheepEntities.push_back(sheep);
+      return true;
+    }
+    return false;
+  };
+
+  while (sheepEntities.size() < kTargetSheepCount) {
+    if (!trySpawnOne(playerPos, kSheepSpawnRadius)) {
+      break;
+    }
+  }
+}
+
+void App::updateSheep(float deltaTime) {
+  if (deltaTime <= 0.0f) {
+    return;
+  }
+
+  sheepMeshTimer += deltaTime;
+  sheepSpawnTimer = std::max(0.0f, sheepSpawnTimer - deltaTime);
+  if (sheepEntities.size() < kTargetSheepCount && sheepSpawnTimer <= 0.0f) {
+    sheepSpawnTimer = 18.0f;
+    bool spawned = false;
+    for (int attempt = 0; attempt < 140 && !spawned; ++attempt) {
+      float angle = nextUnitRandom(sheepRngState) * kTau;
+      float radius = (0.18f + 0.82f * nextUnitRandom(sheepRngState)) * kSheepSpawnRadius;
+      int x = static_cast<int>(std::floor(playerPos.x + std::cos(angle) * radius));
+      int z = static_cast<int>(std::floor(playerPos.z + std::sin(angle) * radius));
+      if (!world.inBounds(x, 2, z)) {
+        continue;
+      }
+
+      int spawnY = -1;
+      for (int y = world.height() - 3; y >= 2; --y) {
+        uint8_t ground = world.getBlock(x, y, z);
+        if (ground != kGrass && ground != kDirt) {
+          continue;
+        }
+        if (world.getBlock(x, y + 1, z) != kAir || world.getBlock(x, y + 2, z) != kAir) {
+          continue;
+        }
+        spawnY = y;
+        break;
+      }
+      if (spawnY < 0) {
+        continue;
+      }
+
+      glm::vec3 spawnPos(static_cast<float>(x) + 0.5f,
+                         static_cast<float>(spawnY) + 1.0f,
+                         static_cast<float>(z) + 0.5f);
+      glm::vec2 toPlayer(spawnPos.x - playerPos.x, spawnPos.z - playerPos.z);
+      if (glm::dot(toPlayer, toPlayer) < 49.0f ||
+          sheepCollidesAt(spawnPos) ||
+          sheepIntersectsWater(spawnPos)) {
+        continue;
+      }
+
+      bool overlapsOtherSheep = false;
+      for (const SheepEntity& sheep : sheepEntities) {
+        glm::vec2 delta(spawnPos.x - sheep.pos.x, spawnPos.z - sheep.pos.z);
+        if (glm::dot(delta, delta) < 12.25f) {
+          overlapsOtherSheep = true;
+          break;
+        }
+      }
+      if (overlapsOtherSheep) {
+        continue;
+      }
+
+      SheepEntity sheep;
+      sheep.pos = spawnPos;
+      sheep.yaw = nextUnitRandom(sheepRngState) * 360.0f;
+      sheep.targetYaw = sheep.yaw;
+      sheep.decisionTimer = 0.4f + nextUnitRandom(sheepRngState) * 1.4f;
+      sheep.walkSpeed = 0.0f;
+      sheep.grazeTimer = 0.7f + nextUnitRandom(sheepRngState) * 1.1f;
+      sheep.animPhase = nextUnitRandom(sheepRngState) * kTau;
+      sheep.health = 6;
+      sheep.onGround = false;
+      sheepEntities.push_back(sheep);
+      sheepMeshTimer = kSheepMeshUpdateInterval;
+      spawned = true;
+    }
+    if (!spawned) {
+      sheepSpawnTimer = 8.0f;
+    }
+  }
+
+  for (size_t i = 0; i < sheepEntities.size();) {
+    SheepEntity& sheep = sheepEntities[i];
+    sheep.decisionTimer -= deltaTime;
+    if (sheep.grazeTimer > 0.0f) {
+      sheep.grazeTimer = std::max(0.0f, sheep.grazeTimer - deltaTime);
+    }
+
+    if (sheep.decisionTimer <= 0.0f) {
+      sheep.decisionTimer = 1.4f + nextUnitRandom(sheepRngState) * 3.4f;
+      if (nextUnitRandom(sheepRngState) < 0.34f) {
+        sheep.walkSpeed = 0.0f;
+        sheep.grazeTimer = 0.9f + nextUnitRandom(sheepRngState) * 1.8f;
+      } else {
+        sheep.walkSpeed = 0.45f + nextUnitRandom(sheepRngState) * 0.85f;
+        sheep.targetYaw = sheep.yaw + (nextUnitRandom(sheepRngState) * 160.0f - 80.0f);
+        sheep.grazeTimer = 0.0f;
+      }
+    }
+
+    float turnDelta = wrapDegrees(sheep.targetYaw - sheep.yaw);
+    float turnStep = 180.0f * deltaTime;
+    sheep.yaw += std::clamp(turnDelta, -turnStep, turnStep);
+
+    glm::vec3 moveDir(std::cos(glm::radians(sheep.yaw)), 0.0f, std::sin(glm::radians(sheep.yaw)));
+    if (sheep.walkSpeed > 0.05f) {
+      sheep.vel.x = moveDir.x * sheep.walkSpeed;
+      sheep.vel.z = moveDir.z * sheep.walkSpeed;
+    } else {
+      float groundDamp = std::clamp(1.0f - deltaTime * 8.0f, 0.0f, 1.0f);
+      sheep.vel.x *= groundDamp;
+      sheep.vel.z *= groundDamp;
+    }
+
+    bool inWater = sheepIntersectsWater(sheep.pos + glm::vec3(0.0f, 0.1f, 0.0f));
+    if (inWater) {
+      sheep.walkSpeed = kSheepMaxSpeed;
+      sheep.targetYaw += 130.0f + nextUnitRandom(sheepRngState) * 90.0f;
+      sheep.vel.y = std::max(sheep.vel.y, 3.2f);
+    } else {
+      sheep.vel.y += kSheepGravity * deltaTime;
+      sheep.vel.y = std::max(sheep.vel.y, -11.0f);
+    }
+
+    glm::vec3 next = sheep.pos;
+    next.x += sheep.vel.x * deltaTime;
+    if (sheepCollidesAt(next)) {
+      next.x = sheep.pos.x;
+      sheep.vel.x = 0.0f;
+      sheep.targetYaw += 100.0f + nextUnitRandom(sheepRngState) * 80.0f;
+      sheep.walkSpeed = 0.70f + nextUnitRandom(sheepRngState) * 0.35f;
+      sheep.decisionTimer = 0.5f + nextUnitRandom(sheepRngState) * 0.8f;
+    }
+
+    next.y += sheep.vel.y * deltaTime;
+    if (sheepCollidesAt(next)) {
+      if (sheep.vel.y < 0.0f) {
+        sheep.onGround = true;
+      }
+      next.y = sheep.pos.y;
+      sheep.vel.y = 0.0f;
+    } else {
+      sheep.onGround = false;
+    }
+
+    next.z += sheep.vel.z * deltaTime;
+    if (sheepCollidesAt(next)) {
+      next.z = sheep.pos.z;
+      sheep.vel.z = 0.0f;
+      sheep.targetYaw += 100.0f + nextUnitRandom(sheepRngState) * 80.0f;
+      sheep.walkSpeed = 0.70f + nextUnitRandom(sheepRngState) * 0.35f;
+      sheep.decisionTimer = 0.5f + nextUnitRandom(sheepRngState) * 0.8f;
+    }
+
+    sheep.pos = next;
+    sheep.animPhase += deltaTime * (3.4f + sheep.walkSpeed * 4.0f);
+
+    if (sheep.pos.y < -4.0f) {
+      sheepEntities[i] = sheepEntities.back();
+      sheepEntities.pop_back();
+      sheepMeshTimer = kSheepMeshUpdateInterval;
+      continue;
+    }
+    ++i;
+  }
+}
+
+void App::syncSheepMesh(bool force) {
+  if (force) {
+    sheepMeshTimer = kSheepMeshUpdateInterval;
+  }
+
+  if (sheepEntities.empty()) {
+    if (sheepMeshUploaded) {
+      pendingWorldChunkUploads.erase(kSheepMeshKey);
+      pendingWorldChunkRemovals.insert(kSheepMeshKey);
+      sheepMeshUploaded = false;
+    }
+    return;
+  }
+
+  if (!force && sheepMeshTimer < kSheepMeshUpdateInterval) {
+    return;
+  }
+
+  std::vector<Vertex> vertices;
+  std::vector<uint32_t> indices;
+  vertices.reserve(sheepEntities.size() * 168);
+  indices.reserve(sheepEntities.size() * 252);
+
+  for (const SheepEntity& sheep : sheepEntities) {
+    appendSheepEntityMesh(vertices,
+                          indices,
+                          sheep.pos,
+                          sheep.yaw,
+                          sheep.walkSpeed,
+                          sheep.animPhase,
+                          sheep.grazeTimer);
+  }
+
+  if (vertices.empty() || indices.empty()) {
+    if (sheepMeshUploaded) {
+      pendingWorldChunkUploads.erase(kSheepMeshKey);
+      pendingWorldChunkRemovals.insert(kSheepMeshKey);
+      sheepMeshUploaded = false;
+    }
+    sheepMeshTimer = 0.0f;
+    return;
+  }
+
+  VulkanContext::WorldChunkMeshUpload upload;
+  upload.key = kSheepMeshKey;
+  upload.vertices = std::move(vertices);
+  upload.indices = std::move(indices);
+  pendingWorldChunkRemovals.erase(kSheepMeshKey);
+  pendingWorldChunkUploads[kSheepMeshKey] = std::move(upload);
+  sheepMeshUploaded = true;
+  sheepMeshTimer = 0.0f;
+}
+
+bool App::sheepCollidesAt(const glm::vec3& pos) const {
+  glm::vec3 min = {pos.x - kSheepHalfWidth, pos.y, pos.z - kSheepHalfLength};
+  glm::vec3 max = {pos.x + kSheepHalfWidth, pos.y + kSheepHeight, pos.z + kSheepHalfLength};
+
+  int minX = static_cast<int>(std::floor(min.x));
+  int maxX = static_cast<int>(std::floor(max.x));
+  int minY = static_cast<int>(std::floor(min.y));
+  int maxY = static_cast<int>(std::floor(max.y));
+  int minZ = static_cast<int>(std::floor(min.z));
+  int maxZ = static_cast<int>(std::floor(max.z));
+
+  auto chunkReadyAt = [&](int worldX, int worldZ) {
+    int cx = static_cast<int>(std::floor(static_cast<float>(worldX) / static_cast<float>(kChunkSize)));
+    int cz = static_cast<int>(std::floor(static_cast<float>(worldZ) / static_cast<float>(kChunkSize)));
+    return world.getChunkGenerationStatus(cx, cz) >= ChunkGenStatus::kNoise;
+  };
+
+  for (int y = minY; y <= maxY; ++y) {
+    for (int z = minZ; z <= maxZ; ++z) {
+      for (int x = minX; x <= maxX; ++x) {
+        if (!world.inBounds(x, y, z) || !chunkReadyAt(x, z)) {
+          return true;
+        }
+        uint8_t block = world.getBlock(x, y, z);
+        if (solidBlockIntersectsAabb(block, x, y, z, min, max)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+bool App::sheepIntersectsWater(const glm::vec3& pos) const {
+  glm::vec3 min = {pos.x - kSheepHalfWidth, pos.y, pos.z - kSheepHalfLength};
+  glm::vec3 max = {pos.x + kSheepHalfWidth, pos.y + kSheepHeight * 0.75f, pos.z + kSheepHalfLength};
+
+  int minX = static_cast<int>(std::floor(min.x));
+  int maxX = static_cast<int>(std::floor(max.x));
+  int minY = static_cast<int>(std::floor(min.y));
+  int maxY = static_cast<int>(std::floor(max.y));
+  int minZ = static_cast<int>(std::floor(min.z));
+  int maxZ = static_cast<int>(std::floor(max.z));
+
+  for (int y = minY; y <= maxY; ++y) {
+    for (int z = minZ; z <= maxZ; ++z) {
+      for (int x = minX; x <= maxX; ++x) {
+        if (!world.inBounds(x, y, z)) {
+          continue;
+        }
+        if (isWaterVolumeBlock(world.getBlock(x, y, z))) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+App::SheepHit App::raycastSheep(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const {
+  SheepHit result;
+  glm::vec3 rayDir = glm::normalize(dir);
+  float closestDist = maxDist;
+
+  for (size_t i = 0; i < sheepEntities.size(); ++i) {
+    const SheepEntity& sheep = sheepEntities[i];
+    glm::vec3 minCorner(sheep.pos.x - kSheepHalfWidth,
+                        sheep.pos.y,
+                        sheep.pos.z - kSheepHalfLength);
+    glm::vec3 maxCorner(sheep.pos.x + kSheepHalfWidth,
+                        sheep.pos.y + kSheepHeight,
+                        sheep.pos.z + kSheepHalfLength);
+    float hitDistance = 0.0f;
+    if (!rayIntersectsAabb(origin, rayDir, minCorner, maxCorner, maxDist, hitDistance)) {
+      continue;
+    }
+    if (hitDistance > closestDist) {
+      continue;
+    }
+    closestDist = hitDistance;
+    result.hit = true;
+    result.index = i;
+    result.distance = hitDistance;
+    result.point = origin + rayDir * hitDistance;
+  }
+
+  return result;
+}
+
+void App::damageSheep(size_t sheepIndex, int amount, const glm::vec3& hitDir) {
+  if (sheepIndex >= sheepEntities.size() || amount <= 0) {
+    return;
+  }
+
+  SheepEntity& sheep = sheepEntities[sheepIndex];
+  sheep.health -= amount;
+  glm::vec3 knockback(hitDir.x, 0.0f, hitDir.z);
+  if (glm::dot(knockback, knockback) < 0.0001f) {
+    knockback = glm::vec3(1.0f, 0.0f, 0.0f);
+  } else {
+    knockback = glm::normalize(knockback);
+  }
+  sheep.vel.x = knockback.x * 2.8f;
+  sheep.vel.z = knockback.z * 2.8f;
+  sheep.vel.y = std::max(sheep.vel.y, 2.8f);
+  sheep.walkSpeed = kSheepMaxSpeed;
+  sheep.targetYaw = glm::degrees(std::atan2(knockback.z, knockback.x));
+  sheep.decisionTimer = 1.2f + nextUnitRandom(sheepRngState) * 1.8f;
+  sheep.grazeTimer = 0.0f;
+
+  if (sheep.health > 0) {
+    sheepMeshTimer = kSheepMeshUpdateInterval;
+    return;
+  }
+
+  int rawCount = 1 + (nextUnitRandom(sheepRngState) > 0.45f ? 1 : 0);
+  int woolCount = 1 + static_cast<int>(nextUnitRandom(sheepRngState) * 3.0f);
+  glm::vec3 dropOrigin = sheep.pos + glm::vec3(0.0f, 0.38f, 0.0f);
+
+  for (int i = 0; i < rawCount; ++i) {
+    float angle = nextUnitRandom(sheepRngState) * kTau;
+    float speed = 0.55f + nextUnitRandom(sheepRngState) * 0.45f;
+    spawnDroppedItemWithPhysics(kRawMutton,
+                                dropOrigin,
+                                glm::vec3(std::cos(angle) * speed,
+                                          2.6f + nextUnitRandom(sheepRngState) * 0.5f,
+                                          std::sin(angle) * speed),
+                                0.45f);
+  }
+  for (int i = 0; i < woolCount; ++i) {
+    float angle = nextUnitRandom(sheepRngState) * kTau;
+    float speed = 0.45f + nextUnitRandom(sheepRngState) * 0.35f;
+    spawnDroppedItemWithPhysics(kWool,
+                                dropOrigin,
+                                glm::vec3(std::cos(angle) * speed,
+                                          2.4f + nextUnitRandom(sheepRngState) * 0.4f,
+                                          std::sin(angle) * speed),
+                                0.45f);
+  }
+
+  sheepEntities[sheepIndex] = sheepEntities.back();
+  sheepEntities.pop_back();
+  sheepMeshTimer = kSheepMeshUpdateInterval;
+}
+
 void App::triggerFirstPersonSwing(float strength) {
-  if (screenState != ScreenState::kPlaying || inventoryOpen || achievementTreeOpen) {
+  if (screenState != ScreenState::kPlaying || inventoryOpen || achievementTreeOpen || commandInputOpen) {
     return;
   }
   firstPersonSwingActive = true;
@@ -8977,7 +11348,7 @@ void App::triggerFirstPersonSwing(float strength) {
 }
 
 void App::triggerFirstPersonUseAnimation(float strength) {
-  if (screenState != ScreenState::kPlaying || inventoryOpen || achievementTreeOpen) {
+  if (screenState != ScreenState::kPlaying || inventoryOpen || achievementTreeOpen || commandInputOpen) {
     return;
   }
   firstPersonUseActive = true;
@@ -8986,7 +11357,10 @@ void App::triggerFirstPersonUseAnimation(float strength) {
 }
 
 void App::updateFirstPersonState(float deltaTime) {
-  bool renderActive = screenState == ScreenState::kPlaying && !inventoryOpen && !achievementTreeOpen;
+  bool renderActive = screenState == ScreenState::kPlaying &&
+                      !inventoryOpen &&
+                      !achievementTreeOpen &&
+                      !commandInputOpen;
   if (!renderActive) {
     firstPersonVisibleItem = selectedBlock;
     firstPersonEquipProgress = 0.0f;
@@ -9052,7 +11426,10 @@ void App::updateFirstPersonState(float deltaTime) {
 }
 
 void App::syncFirstPersonMesh() {
-  bool renderActive = screenState == ScreenState::kPlaying && !inventoryOpen && !achievementTreeOpen;
+  bool renderActive = screenState == ScreenState::kPlaying &&
+                      !inventoryOpen &&
+                      !achievementTreeOpen &&
+                      !commandInputOpen;
   if (!renderActive || firstPersonEquipProgress <= 0.001f) {
     if (firstPersonMeshUploaded) {
       pendingWorldChunkUploads.erase(kFirstPersonMeshKey);
@@ -9080,8 +11457,10 @@ void App::syncFirstPersonMesh() {
   float idleLift = std::cos(firstPersonIdleTime * 1.10f) * 0.010f;
   uint8_t itemType = firstPersonVisibleItem;
   bool toolItem = itemType != kAir && isToolItem(itemType);
+  bool flatSpriteItem = itemType != kAir && shouldRenderHeldItemAsSprite(itemType);
   bool blockItem = itemType != kAir &&
                    isPlaceableItem(itemType) &&
+                   !flatSpriteItem &&
                    !shouldRenderDroppedItemAsSprite(itemType);
 
   glm::mat4 handTransform(1.0f);
@@ -9125,6 +11504,8 @@ void App::syncFirstPersonMesh() {
   glm::vec3 itemHalfExtents(0.0f);
   glm::vec3 itemColor(0.0f);
   int itemTile = kTileUiWhite;
+  float itemSpriteHalfWidth = 0.0f;
+  float itemSpriteHalfHeight = 0.0f;
 
   if (toolItem) {
     itemTransform = glm::mat4(1.0f);
@@ -9144,7 +11525,7 @@ void App::syncFirstPersonMesh() {
                                 glm::vec3(1.0f, 0.0f, 0.0f));
   } else if (blockItem) {
     itemTransform = glm::translate(itemTransform, glm::vec3(-0.17f, -0.02f, -0.05f));
-    itemTransform = glm::rotate(itemTransform, glm::radians(38.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    itemTransform = glm::rotate(itemTransform, glm::radians(-38.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     itemTransform = glm::rotate(itemTransform, glm::radians(14.0f + swingArc * 5.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     itemTransform = glm::rotate(itemTransform,
                                 glm::radians(-18.0f - useArc * 12.0f),
@@ -9168,6 +11549,18 @@ void App::syncFirstPersonMesh() {
       itemHalfExtents = glm::vec3(0.18f, 0.06f, 0.035f);
     } else if (itemType == kDiamond) {
       itemHalfExtents = glm::vec3(0.14f, 0.14f, 0.05f);
+    } else if (itemType == kSeagrass) {
+      itemSpriteHalfWidth = 0.16f;
+      itemSpriteHalfHeight = 0.28f;
+    } else if (itemType == kCoral) {
+      itemSpriteHalfWidth = 0.18f;
+      itemSpriteHalfHeight = 0.24f;
+    } else if (itemType == kWool) {
+      itemSpriteHalfWidth = 0.22f;
+      itemSpriteHalfHeight = 0.20f;
+    } else if (itemType == kRawMutton || itemType == kCookedMutton) {
+      itemSpriteHalfWidth = 0.24f;
+      itemSpriteHalfHeight = 0.18f;
     } else if (isToolItem(itemType)) {
       itemHalfExtents = glm::vec3(0.10f, 0.28f, 0.035f);
     } else if (itemType != kAir) {
@@ -9182,6 +11575,14 @@ void App::syncFirstPersonMesh() {
 
   if (toolItem) {
     appendFirstPersonPickaxe(vertices, indices, itemTransform, itemType);
+  } else if (flatSpriteItem) {
+    appendFirstPersonSprite(vertices,
+                            indices,
+                            itemTransform,
+                            itemSpriteHalfWidth,
+                            itemSpriteHalfHeight,
+                            glm::vec3(1.0f),
+                            itemTile);
   } else {
     appendFirstPersonPrism(vertices,
                            indices,
@@ -9297,6 +11698,7 @@ void App::updateInteractionOverlayMesh() {
   bool active = screenState == ScreenState::kPlaying &&
                 !inventoryOpen &&
                 !achievementTreeOpen &&
+                !commandInputOpen &&
                 appliedSettings.blockGuides;
   if (!active) {
     if (interactionOverlayUploaded || interactionOutlineActive || interactionPreviewActive) {
@@ -9463,7 +11865,8 @@ void App::refreshCursorMode() {
   }
   bool lockCursor = screenState == ScreenState::kPlaying &&
                     !inventoryOpen &&
-                    !achievementTreeOpen;
+                    !achievementTreeOpen &&
+                    !commandInputOpen;
   glfwSetInputMode(window, GLFW_CURSOR, lockCursor ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
 }
 
@@ -9473,6 +11876,12 @@ void App::setAchievementTreeOpen(bool open) {
   }
   if (open && inventoryOpen) {
     setInventoryOpen(false);
+  }
+  if (open && commandInputOpen) {
+    commandInputOpen = false;
+    commandInput.clear();
+    commandBackspaceDown = false;
+    commandEnterDown = false;
   }
   achievementTreeOpen = open;
   if (achievementTreeOpen && window) {
@@ -9506,6 +11915,10 @@ void App::setInventoryOpen(bool open) {
   inventoryOpen = open;
   if (inventoryOpen) {
     achievementTreeOpen = false;
+    commandInputOpen = false;
+    commandInput.clear();
+    commandBackspaceDown = false;
+    commandEnterDown = false;
   }
   refreshCursorMode();
   if (inventoryOpen && window) {
@@ -9988,6 +12401,21 @@ bool App::handleInventoryClick(double xpos, double ypos, bool rightClick) {
     return false;
   }
 
+  if (onInventory && isCreativeInventoryScreen()) {
+    size_t catalogIndex = static_cast<size_t>(index);
+    if (catalogIndex >= kCreativeCatalogItems.size()) {
+      return false;
+    }
+    uint8_t catalogType = kCreativeCatalogItems[catalogIndex];
+    if (catalogType == kAir) {
+      return false;
+    }
+    cursorStack.type = catalogType;
+    cursorStack.count = rightClick ? 1 : static_cast<uint16_t>(isToolItem(catalogType) ? 1 : kMaxStack);
+    uiDirty = true;
+    return true;
+  }
+
   bool selectionChanged = false;
   if (onHotbar && selectedSlot != index) {
     selectedSlot = index;
@@ -10048,7 +12476,7 @@ bool App::collidesAt(const glm::vec3& pos) const {
           return true;
         }
         uint8_t block = world.getBlock(x, y, z);
-        if (block != kAir && !isWaterBlock(block) && !isDecorationBlock(block)) {
+        if (solidBlockIntersectsAabb(block, x, y, z, min, max)) {
           return true;
         }
       }
@@ -10093,7 +12521,7 @@ bool App::collidesAtWithPlacedBlock(const glm::vec3& pos,
         }
         bool placedBlock = x == blockX && y == blockY && z == blockZ;
         uint8_t block = placedBlock ? placedType : world.getBlock(x, y, z);
-        if (block != kAir && !isWaterBlock(block) && !isDecorationBlock(block)) {
+        if (solidBlockIntersectsAabb(block, x, y, z, min, max)) {
           return true;
         }
       }
@@ -10133,15 +12561,13 @@ bool App::intersectsWaterAt(const glm::vec3& pos) const {
   return false;
 }
 
-bool App::blockIntersectsPlayer(int x, int y, int z) const {
+bool App::blockIntersectsPlayer(int x, int y, int z, uint8_t placedType) const {
   const float halfWidth = 0.3f;
   const float height = 1.8f;
   glm::vec3 min = {playerPos.x - halfWidth, playerPos.y, playerPos.z - halfWidth};
   glm::vec3 max = {playerPos.x + halfWidth, playerPos.y + height, playerPos.z + halfWidth};
 
-  return x + 1.0f > min.x && x < max.x &&
-         y + 1.0f > min.y && y < max.y &&
-         z + 1.0f > min.z && z < max.z;
+  return solidBlockIntersectsAabb(placedType, x, y, z, min, max);
 }
 
 bool App::canPlaceBlockAt(int x, int y, int z, uint8_t placedType, glm::vec3* outAdjustedPlayerPos) const {
@@ -10152,14 +12578,14 @@ bool App::canPlaceBlockAt(int x, int y, int z, uint8_t placedType, glm::vec3* ou
     }
     return true;
   }
-  if (!blockIntersectsPlayer(x, y, z)) {
+  if (!blockIntersectsPlayer(x, y, z, placedType)) {
     if (outAdjustedPlayerPos) {
       *outAdjustedPlayerPos = adjustedPos;
     }
     return true;
   }
 
-  float blockTop = static_cast<float>(y + 1) + 0.001f;
+  float blockTop = collisionTopForBlock(placedType, y) + 0.001f;
   if (blockTop <= playerPos.y + 1.05f) {
     adjustedPos.y = std::max(playerPos.y, blockTop);
     if (!collidesAtWithPlacedBlock(adjustedPos, x, y, z, placedType)) {
@@ -10273,7 +12699,8 @@ App::RaycastHit App::raycast(const glm::vec3& origin,
 void App::cleanup() {
   if ((screenState == ScreenState::kPlaying ||
        screenState == ScreenState::kPaused ||
-       screenState == ScreenState::kLoadingWorld) &&
+       screenState == ScreenState::kLoadingWorld ||
+       screenState == ScreenState::kDeath) &&
       !currentWorldPath.empty()) {
     if (inventoryOpen) {
       setInventoryOpen(false);
@@ -10423,7 +12850,7 @@ void App::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
     return;
   }
 
-  if (app->inventoryOpen || app->achievementTreeOpen) {
+  if (app->inventoryOpen || app->achievementTreeOpen || app->commandInputOpen) {
     glm::vec2 fb = app->cursorToFramebuffer(xpos, ypos);
     app->cursorFbX = fb.x;
     app->cursorFbY = fb.y;

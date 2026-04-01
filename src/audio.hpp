@@ -18,6 +18,16 @@ public:
     kBlockBreakStone = 9,
     kBlockPlaceStone = 10,
     kWaterSwim = 11,
+    kPlayerHurt = 12,
+    kFootstepGrass1 = 13,
+    kFootstepGrass2 = 14,
+    kFootstepGrass3 = 15,
+    kFootstepGrass4 = 16,
+    kFootstepGrass5 = 17,
+    kFootstepGrass6 = 18,
+    kFootstepStone1 = 19,
+    kFootstepStone2 = 20,
+    kFootstepStone3 = 21,
     kCount
   };
 

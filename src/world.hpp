@@ -28,7 +28,8 @@ static_assert(kChunkHeight % kChunkSectionSize == 0,
 
 enum class WorldPreset : uint8_t {
   kMinecraftStyle = 0,
-  kClassicFlat = 1
+  kClassicFlat = 1,
+  kAprilFools = 2
 };
 
 enum class ChunkGenStatus : uint8_t {
@@ -61,10 +62,19 @@ struct WorldGenSettings {
   bool generateStructures = true;
   float caveDensity = 1.0f;
   float ravineFrequency = 1.0f;
-  uint8_t startInventoryMode = 0; // 0=Empty, 1=CreativeTest (reserved for v0.2.1+)
+  uint8_t startInventoryMode = 0; // 0=Survival, 1=Creative
+  bool cheatsEnabled = false;
   int minY = 0;
   int maxY = kChunkHeight - 1;
 };
+
+constexpr bool isAprilFoolsPreset(WorldPreset preset) {
+  return preset == WorldPreset::kAprilFools;
+}
+
+constexpr bool isAprilFoolsPreset(const WorldGenSettings& settings) {
+  return isAprilFoolsPreset(settings.preset);
+}
 
 enum BlockType : uint8_t {
   kAir = 0,
@@ -111,7 +121,20 @@ enum BlockType : uint8_t {
   kTorchNorth = 41,
   kTorchEast = 42,
   kTorchSouth = 43,
-  kTorchWest = 44
+  kTorchWest = 44,
+  kWool = 45,
+  kRawMutton = 46,
+  kCookedMutton = 47,
+  kBed = 48,
+  kBedFootNorth = 49,
+  kBedFootEast = 50,
+  kBedFootSouth = 51,
+  kBedFootWest = 52,
+  kBedHeadNorth = 53,
+  kBedHeadEast = 54,
+  kBedHeadSouth = 55,
+  kBedHeadWest = 56,
+  kSuspiciousGlass = 57
 };
 
 enum HorizontalFacing : uint8_t {
@@ -143,6 +166,24 @@ constexpr bool isTorchBlock(uint8_t type) {
          type == kTorchEast ||
          type == kTorchSouth ||
          type == kTorchWest;
+}
+
+constexpr bool isBedFootBlock(uint8_t type) {
+  return type == kBedFootNorth ||
+         type == kBedFootEast ||
+         type == kBedFootSouth ||
+         type == kBedFootWest;
+}
+
+constexpr bool isBedHeadBlock(uint8_t type) {
+  return type == kBedHeadNorth ||
+         type == kBedHeadEast ||
+         type == kBedHeadSouth ||
+         type == kBedHeadWest;
+}
+
+constexpr bool isBedBlock(uint8_t type) {
+  return isBedFootBlock(type) || isBedHeadBlock(type);
 }
 
 constexpr bool isWallTorchBlock(uint8_t type) {
@@ -178,6 +219,60 @@ constexpr uint8_t torchBlockForFacing(uint8_t facing) {
     default:
       return kTorchSouth;
   }
+}
+
+constexpr uint8_t bedFacingIndex(uint8_t type) {
+  switch (type) {
+    case kBedFootNorth:
+    case kBedHeadNorth:
+      return kFacingNorth;
+    case kBedFootEast:
+    case kBedHeadEast:
+      return kFacingEast;
+    case kBedFootWest:
+    case kBedHeadWest:
+      return kFacingWest;
+    case kBedFootSouth:
+    case kBedHeadSouth:
+    default:
+      return kFacingSouth;
+  }
+}
+
+constexpr uint8_t bedBlockForFacing(uint8_t facing, bool head) {
+  switch (facing) {
+    case kFacingNorth:
+      return head ? kBedHeadNorth : kBedFootNorth;
+    case kFacingEast:
+      return head ? kBedHeadEast : kBedFootEast;
+    case kFacingWest:
+      return head ? kBedHeadWest : kBedFootWest;
+    case kFacingSouth:
+    default:
+      return head ? kBedHeadSouth : kBedFootSouth;
+  }
+}
+
+inline glm::ivec3 bedFacingVector(uint8_t type) {
+  switch (bedFacingIndex(type)) {
+    case kFacingNorth:
+      return {0, 0, -1};
+    case kFacingEast:
+      return {1, 0, 0};
+    case kFacingWest:
+      return {-1, 0, 0};
+    case kFacingSouth:
+    default:
+      return {0, 0, 1};
+  }
+}
+
+inline glm::ivec3 bedOtherPartOffset(uint8_t type) {
+  glm::ivec3 forward = bedFacingVector(type);
+  if (isBedHeadBlock(type)) {
+    return {-forward.x, 0, -forward.z};
+  }
+  return forward;
 }
 
 inline glm::ivec3 torchFacingVector(uint8_t type) {
@@ -294,6 +389,9 @@ constexpr uint8_t itemTypeForPlacedBlock(uint8_t type) {
   if (isTorchBlock(type)) {
     return kTorch;
   }
+  if (isBedBlock(type)) {
+    return kBed;
+  }
   return type;
 }
 
@@ -339,6 +437,16 @@ constexpr bool isBlockType(uint8_t type) {
     case kTorchEast:
     case kTorchSouth:
     case kTorchWest:
+    case kBed:
+    case kBedFootNorth:
+    case kBedFootEast:
+    case kBedFootSouth:
+    case kBedFootWest:
+    case kBedHeadNorth:
+    case kBedHeadEast:
+    case kBedHeadSouth:
+    case kBedHeadWest:
+    case kSuspiciousGlass:
     case kFurnace:
     case kFurnaceNorth:
     case kFurnaceEast:
@@ -567,6 +675,7 @@ private:
     int cz = 0;
     int sectionY = 0;
     uint32_t version = 0;
+    bool aprilMode = false;
     std::array<uint8_t, kSectionSampleCount> samples{};
     std::array<float, kSectionSampleCount> skyLightSamples{};
     bool overlayActive = false;

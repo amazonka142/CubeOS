@@ -25,13 +25,16 @@ class App {
 public:
   static constexpr size_t kHotbarSlotCount = 9;
   static constexpr size_t kInventorySlotCount = 27;
-  static constexpr size_t kAchievementCount = 13;
+  static constexpr size_t kAchievementCount = 16;
   static constexpr size_t kCraftingSlotCount = 9;
   static constexpr size_t kFurnaceSlotCount = 3;
 
   void run();
 
 private:
+  struct SheepHit;
+  struct SheepEntity;
+
   struct SavedFurnace {
     glm::ivec3 pos{};
     ItemStack input{};
@@ -42,15 +45,31 @@ private:
     float smeltProgress = 0.0f;
   };
 
+  struct SavedDroppedItem {
+    uint8_t type = kAir;
+    uint16_t count = 0;
+    glm::vec3 pos{0.0f};
+    glm::vec3 vel{0.0f};
+    float age = 0.0f;
+    float pickupDelay = 0.0f;
+    float spinPhase = 0.0f;
+    bool onGround = false;
+  };
+
   struct PlayerSaveData {
     glm::vec3 pos{8.0f, 30.0f, 8.0f};
+    glm::vec3 respawnPos{8.0f, 30.0f, 8.0f};
     float yaw = -90.0f;
     float pitch = 0.0f;
     int selectedSlot = 0;
+    int health = 40;
+    bool cheatFlightEnabled = false;
+    bool flying = false;
     std::array<ItemStack, kHotbarSlotCount> hotbar{};
     std::array<ItemStack, kInventorySlotCount> inventory{};
     uint32_t achievementMask = 0;
     std::vector<SavedFurnace> furnaces{};
+    std::vector<SavedDroppedItem> droppedItems{};
   };
 
   struct UserSettings {
@@ -70,7 +89,8 @@ private:
     kCreateWorld = 3,
     kPlaying = 4,
     kPaused = 5,
-    kLoadingWorld = 6
+    kLoadingWorld = 6,
+    kDeath = 7
   };
 
   struct WorldSelectEntry {
@@ -118,12 +138,24 @@ private:
                                    uint16_t count = 1);
   void updateDroppedItems(float deltaTime);
   void syncDroppedItemMesh(bool force);
+  void populateSheepForSession();
+  void updateSheep(float deltaTime);
+  void syncSheepMesh(bool force);
   void updateFirstPersonState(float deltaTime);
   void syncFirstPersonMesh();
   void triggerFirstPersonSwing(float strength = 1.0f);
   void triggerFirstPersonUseAnimation(float strength = 1.0f);
   void updateInteractionOverlayMesh();
   void clearInteractionOverlayMesh();
+  void damagePlayer(int amount);
+  void dropPlayerInventoryOnDeath();
+  void handlePlayerDeath();
+  void respawnPlayer();
+  void executeCommand(const std::string& rawInput);
+  bool isCreativeMode() const;
+  bool isCreativeInventoryScreen() const;
+  bool worldCheatsEnabled() const;
+  bool canFly() const;
   void rebuildWorldMesh();
   void rebuildUiMesh();
   void composeMeshData();
@@ -157,8 +189,13 @@ private:
   bool collidesAt(const glm::vec3& pos) const;
   bool collidesAtWithPlacedBlock(const glm::vec3& pos, int blockX, int blockY, int blockZ, uint8_t placedType) const;
   bool droppedItemCollidesAt(const glm::vec3& pos) const;
+  bool droppedItemIntersectsWater(const glm::vec3& pos, float* outSurfaceY = nullptr) const;
+  bool sheepCollidesAt(const glm::vec3& pos) const;
+  bool sheepIntersectsWater(const glm::vec3& pos) const;
+  SheepHit raycastSheep(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const;
+  void damageSheep(size_t sheepIndex, int amount, const glm::vec3& hitDir);
   bool intersectsWaterAt(const glm::vec3& pos) const;
-  bool blockIntersectsPlayer(int x, int y, int z) const;
+  bool blockIntersectsPlayer(int x, int y, int z, uint8_t placedType) const;
   bool canPlaceBlockAt(int x, int y, int z, uint8_t placedType, glm::vec3* outAdjustedPlayerPos = nullptr) const;
   glm::vec3 cameraFront() const;
   float cameraEyeHeight() const;
@@ -166,6 +203,13 @@ private:
     bool hit = false;
     glm::ivec3 block{};
     glm::ivec3 normal{};
+  };
+
+  struct SheepHit {
+    bool hit = false;
+    size_t index = 0;
+    float distance = 0.0f;
+    glm::vec3 point{0.0f};
   };
 
   struct DroppedItemEntity {
@@ -176,6 +220,19 @@ private:
     float age = 0.0f;
     float pickupDelay = 0.0f;
     float spinPhase = 0.0f;
+    bool onGround = false;
+  };
+
+  struct SheepEntity {
+    glm::vec3 pos{0.0f};
+    glm::vec3 vel{0.0f};
+    float yaw = 0.0f;
+    float targetYaw = 0.0f;
+    float decisionTimer = 0.0f;
+    float walkSpeed = 0.0f;
+    float grazeTimer = 0.0f;
+    float animPhase = 0.0f;
+    int health = 6;
     bool onGround = false;
   };
 
@@ -252,8 +309,14 @@ private:
   bool vkReady = false;
 
   glm::vec3 playerPos{8.0f, 30.0f, 8.0f};
+  glm::vec3 respawnPos{8.0f, 30.0f, 8.0f};
   glm::vec3 playerVel{0.0f};
   bool onGround = false;
+  int playerHealth = 40;
+  bool cheatFlightEnabled = false;
+  bool flying = false;
+  float fallDistance = 0.0f;
+  float flightToggleTimer = 0.0f;
   int currentChunkX = 0;
   int currentChunkZ = 0;
   bool chunkCenterValid = false;
@@ -281,19 +344,32 @@ private:
   float achievementTreeDragLastX = 0.0f;
   float achievementTreeDragLastY = 0.0f;
   bool tabDown = false;
+  bool jumpDown = false;
   bool escDown = false;
   bool achievementToggleDown = false;
   bool dropOneDown = false;
+  bool commandBackspaceDown = false;
+  bool commandEnterDown = false;
   bool mouseLeftDown = false;
   bool mouseRightDown = false;
   bool crouching = false;
   bool sprinting = false;
+  bool commandInputOpen = false;
   bool uiDirty = true;
+  float footstepDistanceAccumulator = 0.0f;
+  int lastGrassFootstepVariant = -1;
+  int lastStoneFootstepVariant = -1;
+  uint32_t footstepRngState = 0x6D2B79F5u;
+  std::string commandInput{};
   std::unordered_map<uint64_t, VulkanContext::WorldChunkMeshUpload> pendingWorldChunkUploads{};
   std::unordered_set<uint64_t> pendingWorldChunkRemovals{};
   std::vector<DroppedItemEntity> droppedItems{};
+  std::vector<SheepEntity> sheepEntities{};
   bool droppedItemMeshUploaded = false;
   float droppedItemMeshTimer = 0.0f;
+  bool sheepMeshUploaded = false;
+  float sheepMeshTimer = 0.0f;
+  float sheepSpawnTimer = 0.0f;
   double lastWorldChunkUploadTime = 0.0;
   float waterSimAccumulator = 0.0f;
   float waterSimBoostTimer = 0.0f;
@@ -305,10 +381,12 @@ private:
   float weatherTargetIntensity = 0.0f;
   float weatherDecisionTimer = 45.0f;
   uint32_t weatherRngState = 0xA341316Cu;
+  uint32_t sheepRngState = 0x4F1BBCDCu;
   ScreenState screenState = ScreenState::kMainMenu;
   ScreenState settingsReturnState = ScreenState::kMainMenu;
   int mainMenuSelection = 0;
   int pauseMenuSelection = 0;
+  int deathMenuSelection = 0;
   int worldSelectSelection = 0;
   int worldSelectScroll = 0;
   int settingsSelection = 0;

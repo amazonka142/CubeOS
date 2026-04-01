@@ -40,7 +40,12 @@ constexpr int kTileFurnace = 33;
 constexpr int kTileFurnaceFront = 34;
 constexpr int kTileLootCache = 35;
 constexpr int kTileWoodTop = 36;
-constexpr int kUiFontTileBase = 37;
+constexpr int kTileWool = 37;
+constexpr int kTileRawMutton = 38;
+constexpr int kTileCookedMutton = 39;
+constexpr int kTileBed = 40;
+constexpr int kTileSuspiciousGlass = 41;
+constexpr int kUiFontTileBase = 42;
 
 struct Vertex {
   glm::vec3 pos;

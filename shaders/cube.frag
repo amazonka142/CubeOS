@@ -64,6 +64,7 @@ void main() {
   float weather = clamp(ubo.weatherData.x, 0.0, 1.0);
   float cloudCover = clamp(max(ubo.weatherData.y, weather), 0.0, 1.0);
   bool firstPersonPass = ubo.weatherData.w > 0.5;
+  bool aprilMode = ubo.torchMeta.y > 0.5;
 
   if (vColor.g < -0.5 && vColor.r >= 0.0) {
     // Texture-free UI primitive path (text glyphs/markers).
@@ -99,11 +100,27 @@ void main() {
     float puffs = smoothstep(threshold - 0.09, threshold + 0.09, cloud);
     float horizonFade = smoothstep(0.05, 0.22, worldDir.y);
     float cloudAlpha = puffs * horizonFade * mix(0.28, 0.78, cloudCover);
-    vec3 cloudColor = mix(vec3(0.15, 0.18, 0.28), vec3(0.95, 0.97, 1.0), daylight);
-    cloudColor = mix(cloudColor, vec3(0.46, 0.48, 0.53), weather * 0.72);
+    vec3 cloudColor = aprilMode
+      ? mix(vec3(0.30, 0.14, 0.20), vec3(0.92, 1.00, 0.76), daylight)
+      : mix(vec3(0.15, 0.18, 0.28), vec3(0.95, 0.97, 1.0), daylight);
+    cloudColor = mix(cloudColor,
+                     aprilMode ? vec3(0.62, 0.30, 0.38) : vec3(0.46, 0.48, 0.53),
+                     weather * 0.72);
 
     float cycle = fract(ubo.weatherData.z);
     float sunPhase = sin((cycle - 0.25) * 6.28318530718);
+    float sunOrbit = (cycle - 0.25) * 6.28318530718;
+    vec3 sunDir = normalize(vec3(cos(sunOrbit), sin(sunOrbit), 0.22));
+    float sunDot = max(dot(worldDir, sunDir), 0.0);
+    float sunDisc = smoothstep(0.9993, 0.99986, sunDot);
+    float sunGlow = pow(sunDot, 72.0);
+    float sunVisibility = smoothstep(-0.10, 0.20, sunDir.y);
+    sunVisibility *= (1.0 - weather * 0.68);
+    float sunAlpha = clamp(sunDisc * 0.96 + sunGlow * 0.42, 0.0, 1.0) * sunVisibility;
+    vec3 sunColor = aprilMode
+      ? mix(vec3(0.98, 0.28, 0.68), vec3(0.86, 1.00, 0.56), daylight)
+      : mix(vec3(1.00, 0.58, 0.26), vec3(1.00, 0.94, 0.76), daylight);
+
     float twilight = smoothstep(0.20, 0.95, 1.0 - abs(sunPhase));
     twilight *= (1.0 - smoothstep(0.15, 0.70, worldDir.y));
     twilight *= (1.0 - weather * 0.65);
@@ -115,12 +132,13 @@ void main() {
     stars *= (1.0 - cloudCover * 0.55) * (1.0 - weather);
     float starAlpha = stars * 0.72;
 
-    float overlayAlpha = clamp(cloudAlpha + twilightAlpha + starAlpha, 0.0, 0.96);
+    float overlayAlpha = clamp(cloudAlpha + twilightAlpha + starAlpha + sunAlpha, 0.0, 0.98);
     vec3 overlayColor = vec3(0.0);
     if (overlayAlpha > 0.0001) {
       overlayColor += cloudColor * cloudAlpha;
-      overlayColor += vec3(0.96, 0.49, 0.19) * twilightAlpha;
-      overlayColor += vec3(0.86, 0.90, 1.0) * starAlpha;
+      overlayColor += (aprilMode ? vec3(0.98, 0.24, 0.70) : vec3(0.96, 0.49, 0.19)) * twilightAlpha;
+      overlayColor += (aprilMode ? vec3(0.80, 1.00, 0.68) : vec3(0.86, 0.90, 1.0)) * starAlpha;
+      overlayColor += sunColor * sunAlpha;
       overlayColor /= overlayAlpha;
     }
 
@@ -148,15 +166,19 @@ void main() {
     texColor = texture(texSampler, uv);
 
     float shimmer = 0.5 + 0.5 * sin(t * 1.7 + vUV.x * 70.0 + vUV.y * 31.0);
-    vec3 waterTint = vColor + vec3(0.03, 0.07, 0.11) * shimmer;
+    vec3 waterTint = vColor + (aprilMode ? vec3(0.04, 0.12, 0.02) : vec3(0.03, 0.07, 0.11)) * shimmer;
     outColor = vec4(waterTint, 1.0) * texColor;
     if (ubo.cameraData.w > 0.5) {
       outColor.a = clamp(outColor.a * 0.34, 0.16, 0.34);
-      outColor.rgb = mix(outColor.rgb, vec3(0.09, 0.24, 0.44), 0.10);
+      outColor.rgb = mix(outColor.rgb,
+                         aprilMode ? vec3(0.16, 0.44, 0.18) : vec3(0.09, 0.24, 0.44),
+                         0.10);
     } else {
       // Keep water almost opaque from above to avoid ore "x-ray" effect.
       outColor.a = max(outColor.a, 0.97);
-      outColor.rgb = mix(outColor.rgb, vec3(0.10, 0.26, 0.50), 0.20);
+      outColor.rgb = mix(outColor.rgb,
+                         aprilMode ? vec3(0.12, 0.36, 0.14) : vec3(0.10, 0.26, 0.50),
+                         0.20);
     }
   } else {
     outColor = vec4(vColor, 1.0) * texColor;
@@ -205,8 +227,12 @@ void main() {
     float rainFog = (1.0 - exp(-max(0.0, distToCamera - 5.0) * 0.06)) * weather;
     float nightFog = (1.0 - exp(-max(0.0, distToCamera - 12.0) * 0.025)) * (1.0 - daylight) * 0.45;
     float fog = clamp(rainFog + nightFog, 0.0, 0.82);
-    vec3 fogColor = mix(vec3(0.06, 0.08, 0.14), vec3(0.67, 0.75, 0.85), daylight);
-    fogColor = mix(fogColor, vec3(0.39, 0.42, 0.47), weather * 0.75);
+    vec3 fogColor = mix(aprilMode ? vec3(0.10, 0.12, 0.06) : vec3(0.06, 0.08, 0.14),
+                        aprilMode ? vec3(0.78, 1.00, 0.70) : vec3(0.67, 0.75, 0.85),
+                        daylight);
+    fogColor = mix(fogColor,
+                   aprilMode ? vec3(0.58, 0.30, 0.38) : vec3(0.39, 0.42, 0.47),
+                   weather * 0.75);
     outColor.rgb = mix(outColor.rgb, fogColor, fog);
   }
 
@@ -217,8 +243,10 @@ void main() {
     float fogDensity = looksLikeWater ? 0.16 : 0.20;
     float fog = 1.0 - exp(-max(0.0, distToCamera - fogStart) * fogDensity);
     fog = clamp(fog, 0.0, looksLikeWater ? 0.42 : 0.76);
-    vec3 fogColor = vec3(0.09, 0.30, 0.50);
-    vec3 tinted = outColor.rgb * vec3(0.94, 0.98, 1.03) + vec3(0.008, 0.018, 0.028);
+    vec3 fogColor = aprilMode ? vec3(0.16, 0.42, 0.18) : vec3(0.09, 0.30, 0.50);
+    vec3 tinted = aprilMode
+      ? (outColor.rgb * vec3(1.02, 1.00, 0.92) + vec3(0.018, 0.012, 0.008))
+      : (outColor.rgb * vec3(0.94, 0.98, 1.03) + vec3(0.008, 0.018, 0.028));
     outColor.rgb = mix(tinted, fogColor, fog);
     if (!looksLikeWater) {
       outColor.a = 1.0;
@@ -226,6 +254,8 @@ void main() {
   }
 
   if (firstPersonPass && ubo.cameraData.w > 0.5 && vUiPass < 0.5) {
-    outColor.rgb = mix(outColor.rgb, vec3(0.10, 0.30, 0.50), 0.20);
+    outColor.rgb = mix(outColor.rgb,
+                       aprilMode ? vec3(0.24, 0.56, 0.30) : vec3(0.10, 0.30, 0.50),
+                       0.20);
   }
 }

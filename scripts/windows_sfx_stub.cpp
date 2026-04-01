@@ -14,8 +14,8 @@ namespace {
 constexpr std::array<char, 10> kFooterMagic{'C', 'U', 'B', 'E', 'O', 'S', 'S', 'F', 'X', '1'};
 constexpr std::size_t kFooterSize = kFooterMagic.size() + sizeof(std::uint64_t);
 constexpr wchar_t kInstallerTitle[] = L"CubeOS Snapshot Installer";
-constexpr wchar_t kReleaseTag[] = L"v0.3.0-snapshot.1";
-constexpr wchar_t kGameExecutable[] = L"CubeOS-v0.3.0-snapshot.1.exe";
+constexpr wchar_t kReleaseTag[] = L"v0.3.0-snapshot.2";
+constexpr wchar_t kGameExecutable[] = L"CubeOS-v0.3.0-snapshot.2.exe";
 
 void showError(const std::wstring& message) {
   MessageBoxW(nullptr, message.c_str(), kInstallerTitle, MB_ICONERROR | MB_OK);

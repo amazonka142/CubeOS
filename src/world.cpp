@@ -252,41 +252,76 @@ int caveLightSampleIndex(int sx, int sy, int sz) {
 }
 
 bool isSkyLightPassable(uint8_t type) {
-  return type == kAir || isWaterBlock(type) || isDecorationBlock(type);
+  return type == kAir || type == kSuspiciousGlass || isWaterBlock(type) || isDecorationBlock(type);
 }
 
 float surfaceSofteningMask(uint8_t biomeId, const BiomeClimateSample& climate) {
   float erosionSoft = smooth01((climate.erosion - 0.46f) / 0.24f);
   float weirdSoft = smooth01((0.60f - climate.weirdness) / 0.24f);
   float continentalSoft = smooth01((0.68f - climate.continentalness) / 0.20f);
-  float biomeBias = biomeId == 5 ? 0.0f : (biomeId <= 1 ? 0.14f : 0.68f);
+  float biomeBias = (biomeId == 5 || biomeId == 6) ? 0.0f : (biomeId <= 1 ? 0.14f : 0.68f);
   return erosionSoft * weirdSoft * continentalSoft * biomeBias;
 }
 
-glm::vec3 blockColorForMesh(uint8_t type) {
+glm::vec3 blockColorForMesh(uint8_t type, bool aprilMode) {
   if (isWaterBlock(type)) {
+    if (aprilMode) {
+      return {0.34f, 0.92f, 0.66f};
+    }
     return {0.22f, 0.45f, 0.88f};
   }
   if (isTorchBlock(type)) {
     return {0.98f, 0.78f, 0.26f};
   }
+  if (isBedBlock(type)) {
+    return {0.86f, 0.30f, 0.28f};
+  }
 
   switch (type) {
     case kGrass:
+      if (aprilMode) {
+        return {0.96f, 0.27f, 0.73f};
+      }
       return {0.2f, 0.8f, 0.2f};
     case kDirt:
+      if (aprilMode) {
+        return {0.69f, 0.31f, 0.52f};
+      }
       return {0.55f, 0.35f, 0.2f};
     case kSand:
+      if (aprilMode) {
+        return {0.80f, 0.97f, 0.56f};
+      }
       return {0.86f, 0.78f, 0.50f};
     case kGravel:
+      if (aprilMode) {
+        return {0.63f, 0.42f, 0.48f};
+      }
       return {0.46f, 0.44f, 0.42f};
+    case kSuspiciousGlass:
+      if (aprilMode) {
+        return {0.54f, 0.98f, 0.84f};
+      }
+      return {0.72f, 0.90f, 0.94f};
     case kWood:
+      if (aprilMode) {
+        return {0.63f, 0.34f, 0.74f};
+      }
       return {0.49f, 0.33f, 0.16f};
     case kLeaves:
+      if (aprilMode) {
+        return {0.76f, 0.98f, 0.36f};
+      }
       return {0.16f, 0.58f, 0.16f};
     case kSeagrass:
+      if (aprilMode) {
+        return {0.82f, 0.98f, 0.30f};
+      }
       return {0.14f, 0.62f, 0.34f};
     case kCoral:
+      if (aprilMode) {
+        return {0.28f, 0.92f, 0.88f};
+      }
       return {0.88f, 0.48f, 0.40f};
     case kCoalOre:
       return {0.22f, 0.22f, 0.22f};
@@ -301,8 +336,14 @@ glm::vec3 blockColorForMesh(uint8_t type) {
     case kWorkbenchEast:
     case kWorkbenchSouth:
     case kWorkbenchWest:
+      if (aprilMode) {
+        return {0.78f, 0.44f, 0.84f};
+      }
       return {0.62f, 0.42f, 0.18f};
     case kPlanks:
+      if (aprilMode) {
+        return {0.90f, 0.58f, 0.84f};
+      }
       return {0.78f, 0.58f, 0.34f};
     case kFurnace:
     case kFurnaceNorth:
@@ -313,6 +354,9 @@ glm::vec3 blockColorForMesh(uint8_t type) {
     case kLootCache:
       return {0.62f, 0.40f, 0.18f};
     case kStone:
+      if (aprilMode) {
+        return {0.56f, 0.29f, 0.24f};
+      }
       return {0.6f, 0.6f, 0.6f};
     default:
       return {1.0f, 1.0f, 1.0f};
@@ -320,6 +364,9 @@ glm::vec3 blockColorForMesh(uint8_t type) {
 }
 
 int tileForBlockFace(uint8_t type, int axis, bool positive) {
+  if (isBedBlock(type)) {
+    return kTileBed;
+  }
   if (type == kGrass) {
     if (axis == 1 && positive) {
       return kTileGrassTop;
@@ -340,6 +387,9 @@ int tileForBlockFace(uint8_t type, int axis, bool positive) {
   }
   if (type == kDirt) {
     return kTileDirt;
+  }
+  if (type == kSuspiciousGlass) {
+    return kTileSuspiciousGlass;
   }
   if (type == kWood) {
     if (axis == 1) {
@@ -518,6 +568,75 @@ void appendUnderwaterPlantDecoration(std::vector<Vertex>& vertices,
              tile);
 }
 
+void appendBedDecoration(std::vector<Vertex>& vertices,
+                         std::vector<uint32_t>& indices,
+                         float fx,
+                         float fy,
+                         float fz,
+                         uint8_t type,
+                         const glm::vec3& color,
+                         int tile) {
+  glm::ivec3 facingInt = bedFacingVector(type);
+  glm::vec3 forward(static_cast<float>(facingInt.x), 0.0f, static_cast<float>(facingInt.z));
+  glm::vec3 right(forward.z, 0.0f, -forward.x);
+  glm::vec3 center(fx + 0.5f, fy, fz + 0.5f);
+
+  auto localToWorld = [&](float lx, float ly, float lz) {
+    return center + right * lx + glm::vec3(0.0f, ly, 0.0f) + forward * lz;
+  };
+
+  auto appendBox = [&](float minX,
+                       float minY,
+                       float minZ,
+                       float maxX,
+                       float maxY,
+                       float maxZ,
+                       const glm::vec3& boxColor,
+                       int boxTile) {
+    glm::vec3 p000 = localToWorld(minX, minY, minZ);
+    glm::vec3 p001 = localToWorld(minX, minY, maxZ);
+    glm::vec3 p010 = localToWorld(minX, maxY, minZ);
+    glm::vec3 p011 = localToWorld(minX, maxY, maxZ);
+    glm::vec3 p100 = localToWorld(maxX, minY, minZ);
+    glm::vec3 p101 = localToWorld(maxX, minY, maxZ);
+    glm::vec3 p110 = localToWorld(maxX, maxY, minZ);
+    glm::vec3 p111 = localToWorld(maxX, maxY, maxZ);
+
+    appendQuad(vertices, indices, p100, p110, p111, p101, boxColor * 0.84f, boxTile);
+    appendQuad(vertices, indices, p001, p011, p010, p000, boxColor * 0.80f, boxTile);
+    appendQuad(vertices, indices, p010, p011, p111, p110, boxColor * 1.04f, boxTile);
+    appendQuad(vertices, indices, p000, p100, p101, p001, boxColor * 0.54f, boxTile);
+    appendQuad(vertices, indices, p101, p111, p011, p001, boxColor * 0.92f, boxTile);
+    appendQuad(vertices, indices, p000, p010, p110, p100, boxColor * 0.72f, boxTile);
+  };
+
+  const glm::vec3 frameColor = glm::min(color * glm::vec3(0.58f, 0.40f, 0.22f), glm::vec3(1.0f));
+  const glm::vec3 blanketColor = glm::min(color * glm::vec3(1.04f, 1.00f, 1.00f), glm::vec3(1.0f));
+  const glm::vec3 sheetColor(0.92f, 0.89f, 0.87f);
+  const float legHeight = 0.26f;
+  const float bedTop = 0.56f;
+
+  appendBox(-0.46f, 0.20f, -0.48f, 0.46f, bedTop, 0.48f, blanketColor, tile);
+  appendBox(-0.48f, 0.16f, -0.50f, 0.48f, 0.24f, 0.50f, frameColor, kTileWood);
+
+  const std::array<glm::vec2, 4> legOffsets{{
+    {-0.39f, -0.39f},
+    {0.39f, -0.39f},
+    {-0.39f, 0.39f},
+    {0.39f, 0.39f}
+  }};
+  for (const glm::vec2& leg : legOffsets) {
+    appendBox(leg.x - 0.05f, 0.0f, leg.y - 0.05f, leg.x + 0.05f, legHeight, leg.y + 0.05f, frameColor, kTileWood);
+  }
+
+  if (isBedHeadBlock(type)) {
+    appendBox(-0.42f, bedTop, 0.04f, 0.42f, 0.62f, 0.42f, sheetColor, kTileUiWhite);
+    appendBox(-0.48f, 0.22f, 0.44f, 0.48f, 0.82f, 0.50f, frameColor, kTileWood);
+  } else {
+    appendBox(-0.48f, 0.22f, -0.50f, 0.48f, 0.72f, -0.44f, frameColor, kTileWood);
+  }
+}
+
 bool isFaceVisibleForType(uint8_t current, uint8_t neighbor) {
   if (isDecorationBlock(current)) {
     return false;
@@ -673,6 +792,7 @@ void buildSectionMeshFromSamples(int cx,
                                  int sectionY,
                                  const std::array<uint8_t, kSectionSampleCount>& samples,
                                  const std::array<float, kSectionSampleCount>& skyLightSamples,
+                                 bool aprilMode,
                                  bool overlayActive,
                                  const glm::ivec3& overlayBlock,
                                  int overlayStage,
@@ -804,6 +924,17 @@ void buildSectionMeshFromSamples(int cx,
                              overlayBlock.y == y &&
                              overlayBlock.z == z;
 
+        if (isBedBlock(blockType)) {
+          int tile = tileForBlockFace(blockType, 1, true);
+          float exposure = sampleSkyLightAt(lx + 1, ly + 2, lz + 1);
+          float caveShade = 0.34f + exposure * 0.66f;
+          glm::vec3 color = blockColorForMesh(blockType, aprilMode) *
+                            (0.84f + 0.16f * heightFactor) *
+                            caveShade;
+          appendBedDecoration(outVertices, outIndices, fx, fy, fz, blockType, color, tile);
+          continue;
+        }
+
         if (isDecorationBlock(blockType)) {
           int tile = tileForBlockFace(blockType, 1, true);
           float exposure = sampleSkyLightAt(lx + 1, ly + 2, lz + 1);
@@ -811,7 +942,7 @@ void buildSectionMeshFromSamples(int cx,
           if (isTorchBlock(blockType)) {
             caveShade = std::max(caveShade, 0.58f);
           }
-          glm::vec3 color = blockColorForMesh(blockType) *
+          glm::vec3 color = blockColorForMesh(blockType, aprilMode) *
                             (0.84f + 0.16f * heightFactor) *
                             caveShade;
           if (isTorchBlock(blockType)) {
@@ -837,11 +968,14 @@ void buildSectionMeshFromSamples(int cx,
                        color,
                        tile);
           }
-          continue;
+          if (!isUnderwaterPlantBlock(blockType)) {
+            continue;
+          }
         }
 
-        if (isWaterBlock(blockType)) {
-          int tile = tileForBlockFace(blockType, 1, true);
+        if (isWaterBlock(blockType) || isUnderwaterPlantBlock(blockType)) {
+          uint8_t waterRenderType = isWaterBlock(blockType) ? blockType : kWater;
+          int tile = tileForBlockFace(waterRenderType, 1, true);
           auto currentHeights = computeWaterHeightsForCell(lx + 1, ly + 1, lz + 1);
           float hNW = currentHeights[0];
           float hSW = currentHeights[1];
@@ -862,7 +996,7 @@ void buildSectionMeshFromSamples(int cx,
                                      bool positive) {
             bool neighborPassable =
               neighborType == kAir ||
-              isWaterBlock(neighborType) ||
+              isWaterVolumeBlock(neighborType) ||
               (isDecorationBlock(neighborType) && !isUnderwaterPlantBlock(neighborType));
             if (!neighborPassable) {
               return;
@@ -870,7 +1004,7 @@ void buildSectionMeshFromSamples(int cx,
             if (upperA <= lowerA + 0.01f && upperB <= lowerB + 0.01f) {
               return;
             }
-            glm::vec3 color = blockColorForMesh(blockType) * 0.82f * heightFactor * shade;
+            glm::vec3 color = blockColorForMesh(waterRenderType, aprilMode) * 0.82f * heightFactor * shade;
             appendQuad(outVertices,
                        outIndices,
                        v0,
@@ -878,12 +1012,12 @@ void buildSectionMeshFromSamples(int cx,
                        v2,
                        v3,
                        color,
-                       tileForBlockFace(blockType, axis, positive));
+                       tileForBlockFace(waterRenderType, axis, positive));
           };
 
           if (!isWaterVolumeBlock(sampleAt(lx + 1, ly + 2, lz + 1))) {
             float caveShade = 0.22f + sampleSkyLightAt(lx + 1, ly + 2, lz + 1) * 0.78f;
-            glm::vec3 color = blockColorForMesh(blockType) * 1.02f * heightFactor * caveShade;
+            glm::vec3 color = blockColorForMesh(waterRenderType, aprilMode) * 1.02f * heightFactor * caveShade;
             appendQuad(outVertices,
                        outIndices,
                        {fx, fy + hNW, fz},
@@ -898,7 +1032,7 @@ void buildSectionMeshFromSamples(int cx,
             uint8_t eastNeighbor = sampleAt(lx + 2, ly + 1, lz + 1);
             float lowerNorth = 0.0f;
             float lowerSouth = 0.0f;
-            if (isWaterBlock(eastNeighbor)) {
+            if (isWaterVolumeBlock(eastNeighbor)) {
               auto eastHeights = computeWaterHeightsForCell(lx + 2, ly + 1, lz + 1);
               lowerNorth = eastHeights[0];
               lowerSouth = eastHeights[1];
@@ -922,7 +1056,7 @@ void buildSectionMeshFromSamples(int cx,
             uint8_t westNeighbor = sampleAt(lx, ly + 1, lz + 1);
             float lowerNorth = 0.0f;
             float lowerSouth = 0.0f;
-            if (isWaterBlock(westNeighbor)) {
+            if (isWaterVolumeBlock(westNeighbor)) {
               auto westHeights = computeWaterHeightsForCell(lx, ly + 1, lz + 1);
               lowerNorth = westHeights[3];
               lowerSouth = westHeights[2];
@@ -946,7 +1080,7 @@ void buildSectionMeshFromSamples(int cx,
             uint8_t southNeighbor = sampleAt(lx + 1, ly + 1, lz + 2);
             float lowerWest = 0.0f;
             float lowerEast = 0.0f;
-            if (isWaterBlock(southNeighbor)) {
+            if (isWaterVolumeBlock(southNeighbor)) {
               auto southHeights = computeWaterHeightsForCell(lx + 1, ly + 1, lz + 2);
               lowerWest = southHeights[0];
               lowerEast = southHeights[3];
@@ -970,7 +1104,7 @@ void buildSectionMeshFromSamples(int cx,
             uint8_t northNeighbor = sampleAt(lx + 1, ly + 1, lz);
             float lowerWest = 0.0f;
             float lowerEast = 0.0f;
-            if (isWaterBlock(northNeighbor)) {
+            if (isWaterVolumeBlock(northNeighbor)) {
               auto northHeights = computeWaterHeightsForCell(lx + 1, ly + 1, lz);
               lowerWest = northHeights[1];
               lowerEast = northHeights[2];
@@ -994,7 +1128,7 @@ void buildSectionMeshFromSamples(int cx,
           if (belowNeighbor == kAir ||
               (isDecorationBlock(belowNeighbor) && !isUnderwaterPlantBlock(belowNeighbor))) {
             float caveShade = 0.14f + sampleSkyLightAt(lx + 1, ly, lz + 1) * 0.72f;
-            glm::vec3 color = blockColorForMesh(blockType) * 0.52f * heightFactor * caveShade;
+            glm::vec3 color = blockColorForMesh(waterRenderType, aprilMode) * 0.52f * heightFactor * caveShade;
             appendQuad(outVertices,
                        outIndices,
                        {fx, fy, fz},
@@ -1002,14 +1136,14 @@ void buildSectionMeshFromSamples(int cx,
                        {fx1, fy, fz1},
                        {fx, fy, fz1},
                        color,
-                       tileForBlockFace(blockType, 1, false));
+                       tileForBlockFace(waterRenderType, 1, false));
           }
           continue;
         }
 
         if (isFaceVisibleForType(blockType, sampleAt(lx + 2, ly + 1, lz + 1))) {
           float caveShade = 0.16f + sampleSkyLightAt(lx + 2, ly + 1, lz + 1) * 0.84f;
-          glm::vec3 color = blockColorForMesh(blockType) * 0.8f * heightFactor * caveShade;
+          glm::vec3 color = blockColorForMesh(blockType, aprilMode) * 0.8f * heightFactor * caveShade;
           int tile = tileForBlockFace(blockType, 0, true);
           appendQuad(outVertices,
                      outIndices,
@@ -1034,7 +1168,7 @@ void buildSectionMeshFromSamples(int cx,
 
         if (isFaceVisibleForType(blockType, sampleAt(lx, ly + 1, lz + 1))) {
           float caveShade = 0.16f + sampleSkyLightAt(lx, ly + 1, lz + 1) * 0.84f;
-          glm::vec3 color = blockColorForMesh(blockType) * 0.8f * heightFactor * caveShade;
+          glm::vec3 color = blockColorForMesh(blockType, aprilMode) * 0.8f * heightFactor * caveShade;
           int tile = tileForBlockFace(blockType, 0, false);
           appendQuad(outVertices,
                      outIndices,
@@ -1059,7 +1193,7 @@ void buildSectionMeshFromSamples(int cx,
 
         if (isFaceVisibleForType(blockType, sampleAt(lx + 1, ly + 2, lz + 1))) {
           float caveShade = 0.18f + sampleSkyLightAt(lx + 1, ly + 2, lz + 1) * 0.82f;
-          glm::vec3 color = blockColorForMesh(blockType) * 1.0f * heightFactor * caveShade;
+          glm::vec3 color = blockColorForMesh(blockType, aprilMode) * 1.0f * heightFactor * caveShade;
           int tile = tileForBlockFace(blockType, 1, true);
           appendQuad(outVertices,
                      outIndices,
@@ -1084,7 +1218,7 @@ void buildSectionMeshFromSamples(int cx,
 
         if (isFaceVisibleForType(blockType, sampleAt(lx + 1, ly, lz + 1))) {
           float caveShade = 0.14f + sampleSkyLightAt(lx + 1, ly, lz + 1) * 0.72f;
-          glm::vec3 color = blockColorForMesh(blockType) * 0.5f * heightFactor * caveShade;
+          glm::vec3 color = blockColorForMesh(blockType, aprilMode) * 0.5f * heightFactor * caveShade;
           int tile = tileForBlockFace(blockType, 1, false);
           appendQuad(outVertices,
                      outIndices,
@@ -1109,7 +1243,7 @@ void buildSectionMeshFromSamples(int cx,
 
         if (isFaceVisibleForType(blockType, sampleAt(lx + 1, ly + 1, lz + 2))) {
           float caveShade = 0.16f + sampleSkyLightAt(lx + 1, ly + 1, lz + 2) * 0.84f;
-          glm::vec3 color = blockColorForMesh(blockType) * 0.8f * heightFactor * caveShade;
+          glm::vec3 color = blockColorForMesh(blockType, aprilMode) * 0.8f * heightFactor * caveShade;
           int tile = tileForBlockFace(blockType, 2, true);
           appendQuad(outVertices,
                      outIndices,
@@ -1134,7 +1268,7 @@ void buildSectionMeshFromSamples(int cx,
 
         if (isFaceVisibleForType(blockType, sampleAt(lx + 1, ly + 1, lz))) {
           float caveShade = 0.16f + sampleSkyLightAt(lx + 1, ly + 1, lz) * 0.84f;
-          glm::vec3 color = blockColorForMesh(blockType) * 0.8f * heightFactor * caveShade;
+          glm::vec3 color = blockColorForMesh(blockType, aprilMode) * 0.8f * heightFactor * caveShade;
           int tile = tileForBlockFace(blockType, 2, false);
           appendQuad(outVertices,
                      outIndices,
@@ -2172,7 +2306,8 @@ enum class DebugBiomeId : uint8_t {
   kPlains = 2,
   kForest = 3,
   kDesert = 4,
-  kMountains = 5
+  kMountains = 5,
+  kCrash = 6
 };
 
 bool isWaterDebugBiome(uint8_t biomeId) {
@@ -2181,7 +2316,12 @@ bool isWaterDebugBiome(uint8_t biomeId) {
 }
 
 bool isMountainDebugBiome(uint8_t biomeId) {
-  return biomeId == static_cast<uint8_t>(DebugBiomeId::kMountains);
+  return biomeId == static_cast<uint8_t>(DebugBiomeId::kMountains) ||
+         biomeId == static_cast<uint8_t>(DebugBiomeId::kCrash);
+}
+
+bool isCrashDebugBiome(uint8_t biomeId) {
+  return biomeId == static_cast<uint8_t>(DebugBiomeId::kCrash);
 }
 
 bool isLowlandDebugBiome(uint8_t biomeId) {
@@ -2217,6 +2357,7 @@ ClimateAndBiomeSample sampleClimateAndBiomeAt(int worldX,
                                               int worldZ,
                                               int seed,
                                               const WorldGenSettings& settings) {
+  bool aprilMode = isAprilFoolsPreset(settings);
   if (settings.preset == WorldPreset::kClassicFlat) {
     ClimateAndBiomeSample flat{};
     flat.biome = static_cast<uint8_t>(DebugBiomeId::kPlains);
@@ -2248,11 +2389,40 @@ ClimateAndBiomeSample sampleClimateAndBiomeAt(int worldX,
   float weirdness = 0.5f + 0.5f * static_cast<float>(seededPerlin2D(wx, wz, seed, 61u, 53u, 0.00225, 0.00225));
   float depth = 0.5f + 0.5f * static_cast<float>(seededPerlin2D(wx, wz, seed, 29u, 31u, 0.00178, 0.00178));
 
+  if (aprilMode) {
+    float prankRidge =
+      0.5f + 0.5f * static_cast<float>(seededRidge2D(wx, wz, seed, 151u, 157u, 0.0031, 0.0031));
+    float prankRelief =
+      0.5f + 0.5f * static_cast<float>(seededPerlin2D(wx, wz, seed, 181u, 191u, 0.0048, 0.0048));
+    temperature = std::clamp(temperature * 0.72f + prankRelief * 0.18f + 0.10f, 0.32f, 0.82f);
+    humidity = std::clamp(humidity + 0.08f + prankRidge * 0.08f, 0.0f, 1.0f);
+    continentalness = std::clamp(continentalness + 0.10f + prankRelief * 0.10f, 0.0f, 1.0f);
+    erosion = std::clamp(erosion * 0.74f - 0.10f + prankRidge * 0.04f, 0.0f, 1.0f);
+    weirdness = std::clamp(std::max(weirdness, prankRidge) + 0.16f, 0.0f, 1.0f);
+    depth = std::clamp(depth + (prankRelief - 0.5f) * 0.36f + 0.10f, 0.0f, 1.0f);
+  }
+
+  float crashField = 0.0f;
+  if (aprilMode) {
+    float crashRidge =
+      0.5f + 0.5f * static_cast<float>(seededRidge2D(wx, wz, seed, 211u, 223u, 0.0052, 0.0052));
+    float crashScatter =
+      0.5f + 0.5f * static_cast<float>(seededPerlin2D(wx, wz, seed, 227u, 229u, 0.0072, 0.0072));
+    crashField = crashRidge * 0.70f + crashScatter * 0.30f;
+  }
+
   DebugBiomeId biome = DebugBiomeId::kPlains;
   if (continentalness < 0.22f) {
     biome = DebugBiomeId::kOcean;
   } else if (continentalness < 0.29f) {
     biome = DebugBiomeId::kBeach;
+  } else if (aprilMode &&
+             crashField > 0.72f &&
+             continentalness > 0.46f &&
+             weirdness > 0.64f &&
+             erosion < 0.58f &&
+             depth > 0.42f) {
+    biome = DebugBiomeId::kCrash;
   } else if (temperature > 0.72f && humidity < 0.34f) {
     biome = DebugBiomeId::kDesert;
   } else if (weirdness > 0.67f && continentalness > 0.56f) {
@@ -2429,6 +2599,18 @@ TerrainRouterSample sampleTerrainRouterAt(int worldX,
   jaggedness = lerpValue(jaggedness, jaggedness * 0.74f, softTerrain * 0.58f);
   relief = lerpValue(relief, relief * 0.92f, softTerrain * 0.36f);
 
+  float crashMask = biomeId == static_cast<uint8_t>(DebugBiomeId::kCrash) ? 1.0f : 0.0f;
+  if (crashMask > 0.0f) {
+    float crashBase = static_cast<float>(kStageSeaLevel) + 10.0f +
+                      macro * 3.2f +
+                      local * (2.0f + climate.depth * 1.2f) +
+                      depthRelief * 0.22f -
+                      valleyMask * 1.8f;
+    offset = lerpValue(offset, crashBase, 0.84f);
+    relief = lerpValue(relief, 0.82f, 0.74f);
+    jaggedness = lerpValue(jaggedness, 0.18f + folded * 0.10f, 0.84f);
+  }
+
   float openTerrain = 0.62f +
                       (1.0f - climate.erosion) * 0.30f +
                       climate.continentalness * 0.16f +
@@ -2439,6 +2621,7 @@ TerrainRouterSample sampleTerrainRouterAt(int worldX,
   detailAmplitude = lerpValue(detailAmplitude, detailAmplitude * 0.82f, forestMask * 0.55f);
   detailAmplitude = lerpValue(detailAmplitude, detailAmplitude * 0.70f, desertMask * 0.70f);
   detailAmplitude = lerpValue(detailAmplitude, detailAmplitude * 1.20f, mountainMask * 0.88f);
+  detailAmplitude = lerpValue(detailAmplitude, detailAmplitude * 0.70f, crashMask * 0.82f);
   detailAmplitude = lerpValue(detailAmplitude, 0.94f + climate.depth * 0.52f, softTerrain * 0.28f);
   offset += sampleSurfaceReliefNoise(worldX, worldZ, seed) * detailAmplitude;
 
@@ -2534,21 +2717,27 @@ float sampleDryCavernMaskAt(const CaveFieldSample& caveFields,
                             const BiomeClimateSample& climate,
                             const TerrainRouterSample& router) {
   float caveScale = std::clamp(settings.caveDensity, 0.25f, 2.5f);
+  bool aprilMode = isAprilFoolsPreset(settings);
+  if (aprilMode) {
+    caveScale = std::clamp(caveScale + 0.55f, 0.25f, 2.5f);
+  }
   float caveScaleT = saturate((caveScale - 0.25f) / 2.25f);
   float belowSurface = router.finalHeight - static_cast<float>(y);
   float inlandness = smooth01((climate.continentalness - 0.30f) / 0.34f);
-  float enclosed = smooth01((belowSurface - 10.0f) / 18.0f);
-  float deepness = smooth01((static_cast<float>(kStageSeaLevel + 6 - y)) / 34.0f);
+  float enclosed = smooth01((belowSurface - (aprilMode ? 6.0f : 10.0f)) / (aprilMode ? 14.0f : 18.0f));
+  float deepness = smooth01((static_cast<float>(kStageSeaLevel + (aprilMode ? 12 : 6) - y)) /
+                            (aprilMode ? 40.0f : 34.0f));
   float vaultMask = smooth01((caveFields.vault -
                               std::clamp(0.79f - caveScaleT * 0.18f, 0.60f, 0.82f)) / 0.16f);
   float chamberMask = smooth01((caveFields.chamber -
                                 std::clamp(0.73f - caveScaleT * 0.12f, 0.55f, 0.77f)) / 0.15f);
   float galleryMask = smooth01((caveFields.gallery -
                                 std::clamp(0.84f - caveScaleT * 0.16f, 0.62f, 0.86f)) / 0.16f);
-  return std::max(vaultMask, std::max(chamberMask, galleryMask * 0.86f)) *
+  float cavernMask = std::max(vaultMask, std::max(chamberMask, galleryMask * (aprilMode ? 1.04f : 0.86f))) *
          inlandness *
          enclosed *
          deepness;
+  return aprilMode ? std::min(1.0f, cavernMask * 1.18f) : cavernMask;
 }
 
 float sampleDensityRouterWithCaveFields(int worldX,
@@ -2561,34 +2750,51 @@ float sampleDensityRouterWithCaveFields(int worldX,
                                         const TerrainRouterSample& router,
                                         int minY,
                                         const CaveFieldSample& caveFields) {
+  bool aprilMode = isAprilFoolsPreset(settings);
   float vertical = (router.finalHeight - static_cast<float>(y)) * router.factor;
   float macro3d = static_cast<float>(seededPerlin3D(worldX, y, worldZ, seed, 31u, 17u, 29u, 0.037, 0.043, 0.037));
   float micro3d = static_cast<float>(seededPerlin3D(worldX, y, worldZ, seed, 7u, 13u, 11u, 0.081, 0.094, 0.081));
   float ridge3d = static_cast<float>(seededRidge3D(worldX, y, worldZ, seed, 47u, 53u, 43u, 0.024, 0.029, 0.024));
 
   float caveScale = std::clamp(settings.caveDensity, 0.25f, 2.5f);
+  if (aprilMode) {
+    caveScale = std::clamp(caveScale + 0.55f, 0.25f, 2.5f);
+  }
   float caveScaleT = saturate((caveScale - 0.25f) / 2.25f);
   float cheese = 1.0f - std::min(1.0f, std::abs(caveFields.cavernA) * 0.76f + std::abs(caveFields.cavernB) * 0.54f);
   float cavernThreshold = std::clamp(0.64f - caveScaleT * 0.19f - router.peakMask * 0.05f, 0.38f, 0.70f);
-  float cavernCut = std::max(0.0f, cheese - cavernThreshold) * 9.4f;
+  float cavernCut = std::max(0.0f, cheese - cavernThreshold) * (aprilMode ? 11.2f : 9.4f);
   float spaghettiThreshold = std::clamp(0.77f - caveScaleT * 0.18f, 0.48f, 0.80f);
-  float spaghettiCut = std::max(0.0f, caveFields.spaghetti - spaghettiThreshold) * 5.2f;
+  float spaghettiCut = std::max(0.0f, caveFields.spaghetti - spaghettiThreshold) * (aprilMode ? 5.9f : 5.2f);
   float noodleThreshold = std::clamp(0.88f - caveScaleT * 0.14f, 0.64f, 0.90f);
   float noodleDepth = smooth01((static_cast<float>(kStageSeaLevel - 4 - y)) / 46.0f);
-  float noodleCut = std::max(0.0f, caveFields.noodles - noodleThreshold) * 3.2f * noodleDepth;
+  float noodleCut = std::max(0.0f, caveFields.noodles - noodleThreshold) *
+                    (aprilMode ? 3.8f : 3.2f) *
+                    noodleDepth;
   float chamberThreshold = std::clamp(0.72f - caveScaleT * 0.14f, 0.50f, 0.76f);
-  float chamberCut = std::max(0.0f, caveFields.chamber - chamberThreshold) * 4.3f;
+  float chamberCut = std::max(0.0f, caveFields.chamber - chamberThreshold) * (aprilMode ? 5.4f : 4.3f);
   float belowSurface = router.finalHeight - static_cast<float>(y);
-  float depthFactor = smooth01((static_cast<float>(kStageSeaLevel + 28 - y)) / 78.0f);
-  float surfaceShield = smooth01((belowSurface - 2.0f) / 10.0f);
-  float deepCavernFactor = smooth01((static_cast<float>(kStageSeaLevel + 10 - y)) / 46.0f) *
-                           smooth01((belowSurface - 6.0f) / 16.0f);
+  float depthFactor = smooth01((static_cast<float>(kStageSeaLevel + (aprilMode ? 36 : 28) - y)) /
+                               (aprilMode ? 86.0f : 78.0f));
+  float surfaceShield = smooth01((belowSurface - (aprilMode ? -1.0f : 2.0f)) /
+                                 (aprilMode ? 8.0f : 10.0f));
+  float deepCavernFactor = smooth01((static_cast<float>(kStageSeaLevel + (aprilMode ? 16 : 10) - y)) /
+                                    (aprilMode ? 52.0f : 46.0f)) *
+                           smooth01((belowSurface - (aprilMode ? 3.0f : 6.0f)) /
+                                    (aprilMode ? 14.0f : 16.0f));
   float vaultThreshold = std::clamp(0.80f - caveScaleT * 0.22f - router.valleyMask * 0.04f, 0.54f, 0.82f);
-  float vaultCut = std::max(0.0f, caveFields.vault - vaultThreshold) * 11.2f * deepCavernFactor;
+  float vaultCut = std::max(0.0f, caveFields.vault - vaultThreshold) *
+                   (aprilMode ? 13.4f : 11.2f) *
+                   deepCavernFactor;
   float galleryThreshold = std::clamp(0.84f - caveScaleT * 0.18f, 0.60f, 0.86f);
-  float galleryCut = std::max(0.0f, caveFields.gallery - galleryThreshold) * 4.8f * deepCavernFactor;
+  float galleryCut = std::max(0.0f, caveFields.gallery - galleryThreshold) *
+                     (aprilMode ? 6.0f : 4.8f) *
+                     deepCavernFactor;
   float caveCut =
     (cavernCut + spaghettiCut + noodleCut + chamberCut + vaultCut + galleryCut) * depthFactor * surfaceShield;
+  if (aprilMode) {
+    caveCut *= 1.18f;
+  }
   float pillarAnchor = std::max(cavernCut, std::max(chamberCut, vaultCut * 0.74f));
   float pillarMask = smooth01((caveFields.pillar - 0.79f) / 0.21f) *
                      smooth01((pillarAnchor - 0.70f) / 2.0f);
@@ -2757,6 +2963,7 @@ void runSurfaceStage(int cx,
   int baseZ = cz * kChunkSize;
   int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
   int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+  bool aprilMode = isAprilFoolsPreset(settings);
 
   auto getLocalBlock = [&](int lx, int y, int lz) -> uint8_t {
     if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
@@ -3256,6 +3463,45 @@ void runSurfaceStage(int cx,
             rule.fillerDepth = std::clamp(rule.fillerDepth + 1, 3, 8);
           }
           break;
+      }
+
+      if (aprilMode) {
+        float prankRoll = hashedNoise01(worldX, topY, worldZ, seed, 0xA941u);
+        float prankMix = hashedNoise01(worldX, topY + 19, worldZ, seed, 0xA942u);
+        if (rule.top == kGrass) {
+          if (prankRoll > 0.95f) {
+            rule.top = kWater;
+            rule.filler = prankMix > 0.48f ? kSand : kGravel;
+            rule.fillerDepth = 1;
+          } else if (prankRoll > 0.74f) {
+            rule.top = kSand;
+            rule.filler = prankMix > 0.58f ? kGravel : kSand;
+            rule.fillerDepth = std::max(rule.fillerDepth, 3);
+          } else if (prankRoll > 0.49f) {
+            rule.top = kStone;
+            rule.filler = prankMix > 0.44f ? kStone : kGravel;
+            rule.fillerDepth = std::clamp(rule.fillerDepth, 2, 4);
+          }
+        } else if (rule.top == kSand && prankRoll < 0.22f) {
+          rule.top = kGrass;
+          rule.filler = kDirt;
+          rule.fillerDepth = std::max(rule.fillerDepth, 3);
+        } else if (rule.top == kStone && prankMix > 0.84f) {
+          rule.top = kGrass;
+          rule.filler = kGravel;
+          rule.fillerDepth = std::max(rule.fillerDepth, 2);
+        }
+      }
+      if (aprilMode && isCrashDebugBiome(biome)) {
+        float crashGlass = hashedNoise01(worldX, topY + 9, worldZ, seed, 0xC2A5u);
+        rule.top = kGrass;
+        rule.filler = kDirt;
+        rule.fillerDepth = std::clamp(rule.fillerDepth, 2, 4);
+        if (crashGlass > 0.84f && localSlope <= 3) {
+          rule.top = kSuspiciousGlass;
+          rule.filler = kStone;
+          rule.fillerDepth = 1;
+        }
       }
 
       setLocalBlock(lx, topY, lz, rule.top);
@@ -3763,6 +4009,7 @@ void placeLakeFeatures(int cx,
         const BiomeClimateSample& climate = centerSample.climate;
         if (biome == static_cast<uint8_t>(DebugBiomeId::kOcean) ||
             biome == static_cast<uint8_t>(DebugBiomeId::kBeach) ||
+            biome == static_cast<uint8_t>(DebugBiomeId::kCrash) ||
             biome == static_cast<uint8_t>(DebugBiomeId::kDesert)) {
           continue;
         }
@@ -3924,6 +4171,149 @@ void placeLakeFeatures(int cx,
   }
 }
 
+void placeCrashIslandFeatures(int cx,
+                              int cz,
+                              int seed,
+                              const WorldGenSettings& settings,
+                              std::vector<uint8_t>& ioBlocks) {
+  if (!isAprilFoolsPreset(settings)) {
+    return;
+  }
+
+  int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
+  int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+  int baseX = cx * kChunkSize;
+  int baseZ = cz * kChunkSize;
+
+  auto getLocal = [&](int lx, int y, int lz) -> uint8_t {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return kAir;
+    }
+    return ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))];
+  };
+
+  auto setLocal = [&](int lx, int y, int lz, uint8_t type) {
+    if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
+      return;
+    }
+    ioBlocks[static_cast<size_t>(chunkLocalIndex(lx, y, lz))] = type;
+  };
+
+  constexpr int kCrashIslandRegionSizeChunks = 4;
+  int minRegionX = floorDiv(cx - 2, kCrashIslandRegionSizeChunks);
+  int maxRegionX = floorDiv(cx + 2, kCrashIslandRegionSizeChunks);
+  int minRegionZ = floorDiv(cz - 2, kCrashIslandRegionSizeChunks);
+  int maxRegionZ = floorDiv(cz + 2, kCrashIslandRegionSizeChunks);
+
+  for (int rz = minRegionZ; rz <= maxRegionZ; ++rz) {
+    for (int rx = minRegionX; rx <= maxRegionX; ++rx) {
+      uint32_t state = static_cast<uint32_t>(hashChunkSeed(seed, rx, rz, 0xC2A5u));
+      int islandCount = rand01(state) < 0.58f ? 2 : 1;
+      int regionWorldMinX = rx * kCrashIslandRegionSizeChunks * kChunkSize;
+      int regionWorldMinZ = rz * kCrashIslandRegionSizeChunks * kChunkSize;
+      int regionWorldSpan = kCrashIslandRegionSizeChunks * kChunkSize;
+
+      for (int island = 0; island < islandCount; ++island) {
+        int centerX = regionWorldMinX + randIntInclusive(state, 10, regionWorldSpan - 10);
+        int centerZ = regionWorldMinZ + randIntInclusive(state, 10, regionWorldSpan - 10);
+        ClimateAndBiomeSample centerSample = sampleClimateAndBiomeAt(centerX, centerZ, seed, settings);
+        if (!isCrashDebugBiome(centerSample.biome)) {
+          continue;
+        }
+
+        float spawnChance = std::clamp(0.42f + centerSample.climate.weirdness * 0.40f, 0.0f, 0.86f);
+        if (rand01(state) > spawnChance) {
+          continue;
+        }
+
+        int centerY = kStageSeaLevel + 34 +
+                      randIntInclusive(state, -4, 10) +
+                      static_cast<int>(std::round((centerSample.climate.depth - 0.5f) * 14.0f +
+                                                  (centerSample.climate.weirdness - 0.5f) * 18.0f));
+        centerY = std::clamp(centerY, minY + 18, maxY - 10);
+        int radiusX = randIntInclusive(state, 7, 13);
+        int radiusZ = randIntInclusive(state, 7, 13);
+        int capHeight = randIntInclusive(state, 2, 4);
+        int bellyDepth = randIntInclusive(state, 6, 10);
+
+        int islandMinX = centerX - radiusX - 2;
+        int islandMaxX = centerX + radiusX + 2;
+        int islandMinZ = centerZ - radiusZ - 2;
+        int islandMaxZ = centerZ + radiusZ + 2;
+        if (islandMaxX < baseX || islandMinX > baseX + kChunkSize - 1 ||
+            islandMaxZ < baseZ || islandMinZ > baseZ + kChunkSize - 1) {
+          continue;
+        }
+
+        for (int wz = std::max(baseZ, islandMinZ); wz <= std::min(baseZ + kChunkSize - 1, islandMaxZ); ++wz) {
+          for (int wx = std::max(baseX, islandMinX); wx <= std::min(baseX + kChunkSize - 1, islandMaxX); ++wx) {
+            int lx = wx - baseX;
+            int lz = wz - baseZ;
+            float nx = static_cast<float>(wx - centerX) / static_cast<float>(std::max(1, radiusX));
+            float nz = static_cast<float>(wz - centerZ) / static_cast<float>(std::max(1, radiusZ));
+            float edgeNoise =
+              static_cast<float>(seededPerlin2D(wx, wz, seed, 239u, 241u, 0.085, 0.085)) * 0.11f;
+            float dist = nx * nx + nz * nz + edgeNoise;
+            if (dist > 1.04f) {
+              continue;
+            }
+
+            float fullness = std::clamp(1.0f - dist / 1.04f, 0.0f, 1.0f);
+            int topY = centerY + static_cast<int>(std::round(std::pow(fullness, 1.4f) * capHeight));
+            int bottomY = centerY - 1 - static_cast<int>(std::round(std::pow(fullness, 0.58f) * bellyDepth));
+            int dirtDepth = fullness > 0.45f ? 2 : 1;
+            float glassPatch = hashedNoise01(wx, centerY, wz, seed, 0xC2A6u);
+
+            for (int y = bottomY; y <= topY; ++y) {
+              if (y < minY || y > maxY) {
+                continue;
+              }
+
+              uint8_t type = kStone;
+              if (y == topY && fullness > 0.18f) {
+                type = glassPatch > 0.86f ? kSuspiciousGlass : kGrass;
+              } else if (y >= topY - dirtDepth && fullness > 0.18f) {
+                type = kDirt;
+              } else if (y >= topY - dirtDepth - 1 && glassPatch > 0.93f) {
+                type = kSuspiciousGlass;
+              }
+
+              uint8_t current = getLocal(lx, y, lz);
+              if (current == kAir || isWaterBlock(current) ||
+                  current == kLeaves || current == kWood ||
+                  current == kStone || current == kDirt ||
+                  current == kGrass || current == kSuspiciousGlass) {
+                setLocal(lx, y, lz, type);
+              }
+            }
+
+            float spikeRoll = hashedNoise01(wx, centerY + 23, wz, seed, 0xC2A7u);
+            if (fullness > 0.18f && fullness < 0.72f && spikeRoll > 0.78f) {
+              int spikeLen =
+                2 + static_cast<int>(std::floor(spikeRoll * 4.0f)) +
+                static_cast<int>(std::round((1.0f - fullness) * 3.0f));
+              for (int s = 1; s <= spikeLen; ++s) {
+                int y = bottomY - s;
+                if (y < minY) {
+                  break;
+                }
+                float taperNoise = hashedNoise01(wx, y, wz, seed, 0xC2A8u);
+                if (taperNoise + fullness * 0.55f < 0.42f) {
+                  break;
+                }
+                uint8_t current = getLocal(lx, y, lz);
+                if (current == kAir || isWaterBlock(current)) {
+                  setLocal(lx, y, lz, kStone);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 void placeTreeFeatures(int cx,
                        int cz,
                        int seed,
@@ -3935,6 +4325,7 @@ void placeTreeFeatures(int cx,
   int baseZ = cz * kChunkSize;
   int minY = std::clamp(settings.minY, 0, kChunkHeight - 1);
   int maxY = std::clamp(settings.maxY, minY, kChunkHeight - 1);
+  bool aprilMode = isAprilFoolsPreset(settings);
 
   auto getLocal = [&](int lx, int y, int lz) -> uint8_t {
     if (lx < 0 || lx >= kChunkSize || lz < 0 || lz >= kChunkSize || y < 0 || y >= kChunkHeight) {
@@ -3954,7 +4345,31 @@ void placeTreeFeatures(int cx,
     return type == kAir || isWaterBlock(type) || type == kLeaves;
   };
 
-  auto tryPlaceDryTree = [&](int lx, int topY, int lz, uint32_t& rngState) -> bool {
+  auto isStoneTreeAt = [&](int worldX, int topY, int worldZ) -> bool {
+    if (!aprilMode) {
+      return false;
+    }
+    return hashedNoise01(worldX, topY, worldZ, seed, 0xA611u) < 0.20f;
+  };
+
+  auto treeFoliageBlockAt = [&](int worldX, int topY, int worldZ, bool stoneTree) -> uint8_t {
+    if (!aprilMode) {
+      return kLeaves;
+    }
+    if (stoneTree) {
+      return kLeaves;
+    }
+    float prank = hashedNoise01(worldX, topY + 17, worldZ, seed, 0xA91Fu);
+    if (prank > 0.84f) {
+      return kSuspiciousGlass;
+    }
+    if (prank > 0.58f) {
+      return kWood;
+    }
+    return kLeaves;
+  };
+
+  auto tryPlaceDryTree = [&](int lx, int topY, int lz, uint32_t& rngState, bool stoneTree) -> bool {
     static constexpr std::array<glm::ivec2, 4> kCardinalDirs = {{
       {1, 0},
       {-1, 0},
@@ -4022,7 +4437,7 @@ void placeTreeFeatures(int cx,
     }
 
     for (const glm::ivec3& block : woodBlocks) {
-      setLocal(block.x, block.y, block.z, kWood);
+      setLocal(block.x, block.y, block.z, stoneTree ? kStone : kWood);
     }
     return true;
   };
@@ -4076,6 +4491,8 @@ void placeTreeFeatures(int cx,
       chance = 0.0f;
     } else if (biome == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
       chance = 0.05f;
+    } else if (isCrashDebugBiome(biome)) {
+      chance = 0.18f;
     }
     if (dryTreeCandidate) {
       chance = 0.014f;
@@ -4094,8 +4511,12 @@ void placeTreeFeatures(int cx,
       continue;
     }
 
+    int worldX = baseX + lx;
+    int worldZ = baseZ + lz;
+    bool stoneTree = isStoneTreeAt(worldX, topY, worldZ);
+
     if (dryTreeCandidate) {
-      (void)tryPlaceDryTree(lx, topY, lz, state);
+      (void)tryPlaceDryTree(lx, topY, lz, state, stoneTree);
       continue;
     }
 
@@ -4118,8 +4539,11 @@ void placeTreeFeatures(int cx,
       continue;
     }
 
+    uint8_t trunkType = stoneTree ? kStone : kWood;
+    uint8_t foliageType = treeFoliageBlockAt(worldX, topY, worldZ, stoneTree);
+
     for (int y = topY + 1; y <= topY + trunkHeight; ++y) {
-      setLocal(lx, y, lz, kWood);
+      setLocal(lx, y, lz, trunkType);
     }
 
     int crownY = topY + trunkHeight;
@@ -4144,16 +4568,14 @@ void placeTreeFeatures(int cx,
           }
           uint8_t current = getLocal(tx, y, tz);
           if (current == kAir || isWaterBlock(current)) {
-            setLocal(tx, y, tz, kLeaves);
+            setLocal(tx, y, tz, foliageType);
           }
         }
       }
     }
 
-    int worldX = baseX + lx;
-    int worldZ = baseZ + lz;
     if (hashedNoise01(worldX, topY, worldZ, seed, 0x4C41u) > 0.82f && topY + trunkHeight + 1 <= maxY) {
-      setLocal(lx, topY + trunkHeight + 1, lz, kLeaves);
+      setLocal(lx, topY + trunkHeight + 1, lz, foliageType);
     }
   }
 }
@@ -4337,6 +4759,9 @@ void placeRockOutcropFeatures(int cx,
     }
 
     uint8_t biome = biomeMap[idx];
+    if (isCrashDebugBiome(biome)) {
+      continue;
+    }
     const BiomeClimateSample& climate = climateMap[idx];
     float chance = 0.04f;
     if (biome == static_cast<uint8_t>(DebugBiomeId::kMountains)) {
@@ -4554,7 +4979,8 @@ void placeRegionalStructureFeatures(int cx,
                                            &centerBiome,
                                            &centerClimate,
                                            &centerRouter);
-    if (centerBiome == static_cast<uint8_t>(DebugBiomeId::kOcean)) {
+    if (centerBiome == static_cast<uint8_t>(DebugBiomeId::kOcean) ||
+        centerBiome == static_cast<uint8_t>(DebugBiomeId::kCrash)) {
       return false;
     }
 
@@ -5085,6 +5511,7 @@ void runFeatureStage(int cx,
   if (settings.generateStructures) {
     placeRegionalStructureFeatures(cx, cz, seed, settings, ioBlocks);
   }
+  placeCrashIslandFeatures(cx, cz, seed, settings, ioBlocks);
   placeTreeFeatures(cx, cz, seed, settings, biomeMap, climateMap, ioBlocks);
   placeUnderwaterPlantFeatures(cx, cz, seed, settings, biomeMap, ioBlocks);
   placeShorelineDriftFeatures(cx, cz, seed, settings, biomeMap, ioBlocks);
@@ -5329,6 +5756,7 @@ void World::startMeshWorkers() {
                                     task.sectionY,
                                     task.samples,
                                     task.skyLightSamples,
+                                    task.aprilMode,
                                     task.overlayActive,
                                     task.overlayBlock,
                                     task.overlayStage,
@@ -5677,6 +6105,7 @@ bool World::queueSectionRebuildTask(Chunk& chunk, int sectionY) {
   task.cz = chunk.cz;
   task.sectionY = sectionY;
   task.version = section.version;
+  task.aprilMode = isAprilFoolsPreset(genSettings);
   task.overlayActive = breakOverlay.active && breakOverlay.stage > 0;
   task.overlayBlock = breakOverlay.block;
   task.overlayStage = breakOverlay.stage;
@@ -6106,7 +6535,7 @@ void World::setBlock(int x, int y, int z, uint8_t type) {
 }
 
 glm::vec3 World::blockColor(uint8_t type) const {
-  return blockColorForMesh(type);
+  return blockColorForMesh(type, isAprilFoolsPreset(genSettings));
 }
 
 void World::generate() {
@@ -6805,6 +7234,7 @@ bool World::buildChunkSectionMeshNow(Chunk& chunk, int sectionY) {
                               sectionY,
                               samples,
                               skyLightSamples,
+                              isAprilFoolsPreset(genSettings),
                               breakOverlay.active && breakOverlay.stage > 0,
                               breakOverlay.block,
                               breakOverlay.stage,
@@ -7016,7 +7446,7 @@ bool World::save(const std::string& path) const {
   };
 
   const char magic[4] = {'C', 'U', 'B', '2'};
-  uint32_t version = 9;
+  uint32_t version = 10;
   uint32_t cs = static_cast<uint32_t>(kChunkSize);
   uint32_t ch = static_cast<uint32_t>(kChunkHeight);
   uint32_t seedValue = static_cast<uint32_t>(seed);
@@ -7025,6 +7455,7 @@ bool World::save(const std::string& path) const {
   float caveDensityValue = genSettings.caveDensity;
   float ravineFrequencyValue = genSettings.ravineFrequency;
   uint8_t startInventoryModeValue = genSettings.startInventoryMode;
+  uint8_t cheatsEnabledValue = genSettings.cheatsEnabled ? 1u : 0u;
   int32_t minYValue = genSettings.minY;
   int32_t maxYValue = genSettings.maxY;
 
@@ -7046,6 +7477,7 @@ bool World::save(const std::string& path) const {
       !writeBytes(&caveDensityValue, sizeof(caveDensityValue)) ||
       !writeBytes(&ravineFrequencyValue, sizeof(ravineFrequencyValue)) ||
       !writeBytes(&startInventoryModeValue, sizeof(startInventoryModeValue)) ||
+      !writeBytes(&cheatsEnabledValue, sizeof(cheatsEnabledValue)) ||
       !writeBytes(&minYValue, sizeof(minYValue)) ||
       !writeBytes(&maxYValue, sizeof(maxYValue)) ||
       !writeBytes(&storedCount, sizeof(storedCount))) {
@@ -7101,6 +7533,7 @@ bool World::load(const std::string& path) {
   float caveDensityValue = 1.0f;
   float ravineFrequencyValue = 1.0f;
   uint8_t startInventoryModeValue = 0;
+  uint8_t cheatsEnabledValue = 0;
   int32_t minYValue = 0;
   int32_t maxYValue = kChunkHeight - 1;
   uint32_t storedCount = 0;
@@ -7113,7 +7546,8 @@ bool World::load(const std::string& path) {
     return false;
   }
 
-  if (std::strncmp(magic, "CUB2", 4) != 0 || (version != 7 && version != 8 && version != 9) ||
+  if (std::strncmp(magic, "CUB2", 4) != 0 ||
+      (version != 7 && version != 8 && version != 9 && version != 10) ||
       cs != static_cast<uint32_t>(kChunkSize) ||
       ch != static_cast<uint32_t>(kChunkHeight)) {
     return false;
@@ -7127,6 +7561,11 @@ bool World::load(const std::string& path) {
         !readBytes(&startInventoryModeValue, sizeof(startInventoryModeValue))) {
       return false;
     }
+    if (version >= 10) {
+      if (!readBytes(&cheatsEnabledValue, sizeof(cheatsEnabledValue))) {
+        return false;
+      }
+    }
     if (version >= 9) {
       if (!readBytes(&minYValue, sizeof(minYValue)) ||
           !readBytes(&maxYValue, sizeof(maxYValue))) {
@@ -7139,7 +7578,7 @@ bool World::load(const std::string& path) {
   }
 
   seed = static_cast<int>(seedValue);
-  if (presetValue > static_cast<uint8_t>(WorldPreset::kClassicFlat)) {
+  if (presetValue > static_cast<uint8_t>(WorldPreset::kAprilFools)) {
     presetValue = static_cast<uint8_t>(WorldPreset::kMinecraftStyle);
   }
   WorldGenSettings loadedSettings{};
@@ -7148,6 +7587,7 @@ bool World::load(const std::string& path) {
   loadedSettings.caveDensity = caveDensityValue;
   loadedSettings.ravineFrequency = ravineFrequencyValue;
   loadedSettings.startInventoryMode = startInventoryModeValue;
+  loadedSettings.cheatsEnabled = cheatsEnabledValue != 0;
   loadedSettings.minY = static_cast<int>(minYValue);
   loadedSettings.maxY = static_cast<int>(maxYValue);
   setGenerationSettings(loadedSettings);
